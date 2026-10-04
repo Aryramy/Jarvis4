@@ -1,8 +1,8 @@
 Project: JARVIS4
-Current Brick: 1
+Current Brick: 2
 Status: VERIFIED
-Last Verified Brick: BRICK-001
-Current Feature: Minimal text request/response core
+Last Verified Brick: BRICK-002
+Current Feature: Minimal local web interface
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
@@ -13,7 +13,8 @@ Next Feature: NOT AUTHORIZED
 - Automated native test runner suite (`node:test`, `node:assert`)
 - Comprehensive verification suite (`scripts/verify.mjs` / `npm run verify`)
 - Deterministic text request/response core (`handleText`) with input validation and whitespace normalization
-- Minimal CLI entry point (`npm run jarvis -- "<text>"`)
+- Terminal CLI (`npm run jarvis -- "<text>"`)
+- Local web interface (`npm run web` at `http://127.0.0.1:8080`)
 
 ## External integrations
 
@@ -33,5 +34,6 @@ Checks:
 - Environment Example Sanity Check: PASS
 - Config & Logger Module Sanity Check: PASS
 - Text Core Module Sanity Check: PASS
+- Web Server Module Sanity Check: PASS
 - JavaScript Syntax Validation (node --check): PASS
-- Automated Test Suite (26 tests across 5 suites): PASS
+- Automated Test Suite (36 tests across 6 suites): PASS

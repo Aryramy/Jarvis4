@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Verification Script for JARVIS4 (Brick 0 Foundation & Brick 1 Text Core)
+ * Verification Script for JARVIS4 (Brick 0 Foundation, Brick 1 Text Core, Brick 2 Local Web Interface)
  *
  * Verifies:
  * 1. Project structure & required foundation & brick files
@@ -37,6 +37,8 @@ const REQUIRED_FILES = [
   'src/core/index.js',
   'src/core/textCore.js',
   'src/cli/jarvis.js',
+  'src/web/server.js',
+  'src/web/index.html',
   'src/config/index.js',
   'src/utils/logger.js',
   'scripts/verify.mjs',
@@ -44,13 +46,15 @@ const REQUIRED_FILES = [
   'tests/unit/config.test.js',
   'tests/unit/textCore.test.js',
   'tests/smoke/foundation.test.js',
-  'tests/regression/brick1Regression.test.js'
+  'tests/regression/brick1Regression.test.js',
+  'tests/integration/webServer.test.js'
 ];
 
 const REQUIRED_DIRS = [
   'docs',
   'src/core',
   'src/cli',
+  'src/web',
   'src/config',
   'src/utils',
   'tests/unit',
@@ -125,6 +129,7 @@ check('Package.json Sanity Check', () => {
   if (pkg.type !== 'module') throw new Error('package.json must specify "type": "module"');
   if (!pkg.scripts?.test) throw new Error('package.json missing "test" script');
   if (!pkg.scripts?.jarvis) throw new Error('package.json missing "jarvis" script');
+  if (!pkg.scripts?.web) throw new Error('package.json missing "web" script');
   if (!pkg.scripts?.verify) throw new Error('package.json missing "verify" script');
 });
 
@@ -154,6 +159,13 @@ check('Text Core Module Sanity Check', async () => {
   const result = handleText('Sanity Check');
   if (!result.success || result.response !== 'JARVIS received: Sanity Check') {
     throw new Error('Text core sanity check failed');
+  }
+});
+
+check('Web Server Module Sanity Check', async () => {
+  const { createServer, createRequestListener } = await import('../src/web/server.js');
+  if (typeof createServer !== 'function' || typeof createRequestListener !== 'function') {
+    throw new Error('Web server module failed to export factory functions');
   }
 });
 

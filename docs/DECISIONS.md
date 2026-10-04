@@ -36,3 +36,10 @@
 - **Decision**: Encapsulate deterministic input validation, normalization, and response generation in `src/core/textCore.js` (`handleText`), keeping `src/cli/jarvis.js` as an agnostic command-line adapter that consumes the core's structured result.
 - **Consequences**: Text processing remains purely functional and decoupled from CLI presentation and process exit lifecycles.
 
+## ADR-0007: Minimal Local Web Interface using Built-in HTTP
+- **Status**: Accepted
+- **Context**: A local web interface is needed to interact with the text pipeline from a browser without introducing third-party framework dependencies.
+- **Decision**: Implement a lightweight local HTTP server using Node.js built-in `node:http` serving vanilla HTML/CSS/JS and exposing `POST /api/text`, which directly invokes `handleText`.
+- **Consequences**: Zero runtime dependencies, isolated web adapter layer, easily testable on ephemeral ports.
+
+

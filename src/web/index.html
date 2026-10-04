@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JARVIS4</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 32px;
+      width: 100%;
+      max-width: 480px;
+      text-align: center;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+    }
+    h1 {
+      font-size: 1.75rem;
+      letter-spacing: 0.1em;
+      margin-bottom: 24px;
+      color: #38bdf8;
+      border-bottom: 1px solid #334155;
+      padding-bottom: 12px;
+    }
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 12px 16px;
+      border-radius: 8px;
+      border: 1px solid #475569;
+      background: #0f172a;
+      color: #f8fafc;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input[type="text"]:focus {
+      border-color: #38bdf8;
+    }
+    button {
+      padding: 12px 24px;
+      background: #0284c7;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    button:hover {
+      background: #0369a1;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .response-area {
+      min-height: 48px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-family: monospace;
+      font-size: 0.95rem;
+      text-align: left;
+      word-break: break-word;
+      white-space: pre-wrap;
+      color: #a5f3fc;
+      margin-bottom: 20px;
+    }
+    .response-area.error {
+      color: #f87171;
+      border-color: #991b1b;
+    }
+    .status-indicator {
+      font-size: 0.85rem;
+      color: #94a3b8;
+      border-top: 1px solid #334155;
+      padding-top: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>JARVIS4</h1>
+    <form id="text-form" class="input-group">
+      <input type="text" id="text-input" placeholder="Enter text for JARVIS..." autocomplete="off" />
+      <button type="submit" id="send-btn">Send</button>
+    </form>
+    <div id="response-area" class="response-area">Ready for input</div>
+    <div id="status-indicator" class="status-indicator">Status: Ready</div>
+  </div>
+
+  <script>
+    const form = document.getElementById('text-form');
+    const input = document.getElementById('text-input');
+    const sendBtn = document.getElementById('send-btn');
+    const responseArea = document.getElementById('response-area');
+    const statusIndicator = document.getElementById('status-indicator');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const rawText = input.value;
+
+      statusIndicator.textContent = 'Status: Processing...';
+      sendBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input: rawText })
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          responseArea.textContent = data.response;
+          responseArea.classList.remove('error');
+          statusIndicator.textContent = 'Status: Ready';
+        } else {
+          responseArea.textContent = 'Error: ' + (data.error || 'Failed to process request');
+          responseArea.classList.add('error');
+          statusIndicator.textContent = 'Status: Ready';
+        }
+      } catch (err) {
+        responseArea.textContent = 'Error: ' + err.message;
+        responseArea.classList.add('error');
+        statusIndicator.textContent = 'Status: Ready';
+      } finally {
+        sendBtn.disabled = false;
+        input.focus();
+      }
+    });
+  </script>
+</body>
+</html>
