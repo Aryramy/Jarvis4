@@ -1,0 +1,21 @@
+{
+  "name": "jarvis4",
+  "version": "0.1.0",
+  "description": "JARVIS4 - Next-generation modular AI assistant built brick-by-brick",
+  "type": "module",
+  "main": "src/core/index.js",
+  "scripts": {
+    "test": "node --test tests/**/*.test.js",
+    "verify": "node scripts/verify.mjs"
+  },
+  "keywords": [
+    "jarvis",
+    "assistant",
+    "foundation"
+  ],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
