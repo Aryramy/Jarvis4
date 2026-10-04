@@ -1,8 +1,36 @@
-import { test, describe } from 'node:test';
+import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadConfig } from '../../src/config/index.js';
 
 describe('Configuration Utility', () => {
+  const AI_ENV_VARS = [
+    'CHEAPER_INFERENCE_API_KEY',
+    'CHEAPER_INFERENCE_BASE_URL',
+    'CHEAPER_INFERENCE_MODEL',
+    'CHEAPER_INFERENCE_TIMEOUT_MS'
+  ];
+
+  let originalEnv = {};
+
+  beforeEach(() => {
+    originalEnv = {};
+    for (const key of AI_ENV_VARS) {
+      if (key in process.env) {
+        originalEnv[key] = process.env[key];
+        delete process.env[key];
+      }
+    }
+  });
+
+  afterEach(() => {
+    for (const key of AI_ENV_VARS) {
+      delete process.env[key];
+    }
+    for (const [key, value] of Object.entries(originalEnv)) {
+      process.env[key] = value;
+    }
+  });
+
   test('should load default configuration when no environment is set', () => {
     const cfg = loadConfig({ NODE_ENV: 'development', LOG_LEVEL: 'info' });
     assert.equal(cfg.nodeEnv, 'development');
@@ -39,5 +67,41 @@ describe('Configuration Utility', () => {
       () => loadConfig({ LOG_LEVEL: 'verbose_invalid' }),
       /Invalid LOG_LEVEL/
     );
+  });
+
+  test('should load cheaperInference config defaults when environment is empty', () => {
+    const defaultCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
+    assert.equal(defaultCfg.cheaperInference.apiKey, '');
+    assert.equal(defaultCfg.cheaperInference.baseUrl, 'https://api.cheaperinference.com/v1');
+    assert.equal(defaultCfg.cheaperInference.model, '');
+    assert.equal(defaultCfg.cheaperInference.timeoutMs, 30000);
+  });
+
+  test('should load cheaperInference config overrides passed directly', () => {
+    const customCfg = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'info',
+      CHEAPER_INFERENCE_API_KEY: 'test-api-key',
+      CHEAPER_INFERENCE_BASE_URL: 'https://custom.provider.com/v1/',
+      CHEAPER_INFERENCE_MODEL: 'test-custom-model',
+      CHEAPER_INFERENCE_TIMEOUT_MS: '45000'
+    });
+    assert.equal(customCfg.cheaperInference.apiKey, 'test-api-key');
+    assert.equal(customCfg.cheaperInference.baseUrl, 'https://custom.provider.com/v1');
+    assert.equal(customCfg.cheaperInference.model, 'test-custom-model');
+    assert.equal(customCfg.cheaperInference.timeoutMs, 45000);
+  });
+
+  test('should load cheaperInference config from environment variables when overrides not provided', () => {
+    process.env.CHEAPER_INFERENCE_API_KEY = 'test-env-key';
+    process.env.CHEAPER_INFERENCE_BASE_URL = 'https://env.provider.com/v1/';
+    process.env.CHEAPER_INFERENCE_MODEL = 'test-env-model';
+    process.env.CHEAPER_INFERENCE_TIMEOUT_MS = '15000';
+
+    const envCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
+    assert.equal(envCfg.cheaperInference.apiKey, 'test-env-key');
+    assert.equal(envCfg.cheaperInference.baseUrl, 'https://env.provider.com/v1');
+    assert.equal(envCfg.cheaperInference.model, 'test-env-model');
+    assert.equal(envCfg.cheaperInference.timeoutMs, 15000);
   });
 });

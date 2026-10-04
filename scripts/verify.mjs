@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 /**
- * Verification Script for JARVIS4 (Brick 0 Foundation, Brick 1 Text Core, Brick 2 Local Web Interface)
+ * Verification Script for JARVIS4 (Bricks 0, 1, 2, and 3)
  *
  * Verifies:
  * 1. Project structure & required foundation & brick files
  * 2. Configuration & project sanity (package.json, environment, modules)
  * 3. JavaScript syntax validation across all source, script, and test files
- * 4. Automated test suite execution across all test suites
+ * 4. Automated test suite execution across all test suites (using offline mocks for external APIs)
  *
  * Exit code:
  * 0 = PASS
@@ -37,14 +37,18 @@ const REQUIRED_FILES = [
   'src/core/index.js',
   'src/core/textCore.js',
   'src/cli/jarvis.js',
+  'src/cli/ai.js',
   'src/web/server.js',
   'src/web/index.html',
+  'src/providers/base.js',
+  'src/providers/cheaperInference.js',
   'src/config/index.js',
   'src/utils/logger.js',
   'scripts/verify.mjs',
   'tests/unit/logger.test.js',
   'tests/unit/config.test.js',
   'tests/unit/textCore.test.js',
+  'tests/unit/cheaperInference.test.js',
   'tests/smoke/foundation.test.js',
   'tests/regression/brick1Regression.test.js',
   'tests/integration/webServer.test.js'
@@ -55,6 +59,7 @@ const REQUIRED_DIRS = [
   'src/core',
   'src/cli',
   'src/web',
+  'src/providers',
   'src/config',
   'src/utils',
   'tests/unit',
@@ -130,15 +135,24 @@ check('Package.json Sanity Check', () => {
   if (!pkg.scripts?.test) throw new Error('package.json missing "test" script');
   if (!pkg.scripts?.jarvis) throw new Error('package.json missing "jarvis" script');
   if (!pkg.scripts?.web) throw new Error('package.json missing "web" script');
+  if (!pkg.scripts?.ai) throw new Error('package.json missing "ai" script');
   if (!pkg.scripts?.verify) throw new Error('package.json missing "verify" script');
 });
 
 check('Environment Example Sanity Check', () => {
   const envContent = readFileSync(resolve(ROOT_DIR, '.env.example'), 'utf8');
-  const forbiddenKeys = ['OPENAI', 'GEMINI', 'ANTHROPIC', 'SECRET', 'API_KEY'];
-  for (const forbidden of forbiddenKeys) {
-    if (envContent.toUpperCase().includes(forbidden)) {
-      throw new Error(`Found sensitive/forbidden key token in .env.example: ${forbidden}`);
+  const lines = envContent.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const parts = trimmed.split('=');
+    const key = parts[0].trim();
+    const val = parts.slice(1).join('=').trim();
+    // Ensure API keys are placeholders and no real secret is committed
+    if (key.includes('KEY') || key.includes('SECRET')) {
+      if (val !== '' && !val.startsWith('your_') && !val.startsWith('<')) {
+        throw new Error(`Real or non-empty secret detected in .env.example for key: ${key}`);
+      }
     }
   }
 });
@@ -147,6 +161,7 @@ check('Config & Logger Module Sanity Check', async () => {
   const { loadConfig } = await import('../src/config/index.js');
   const testConfig = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
   if (testConfig.nodeEnv !== 'test') throw new Error('Config failed to parse nodeEnv');
+  if (!testConfig.cheaperInference) throw new Error('Config missing cheaperInference settings');
 
   const { Logger, LogLevel } = await import('../src/utils/logger.js');
   const testLogger = new Logger({ level: LogLevel.ERROR, destination: { error: () => {} } });
@@ -166,6 +181,21 @@ check('Web Server Module Sanity Check', async () => {
   const { createServer, createRequestListener } = await import('../src/web/server.js');
   if (typeof createServer !== 'function' || typeof createRequestListener !== 'function') {
     throw new Error('Web server module failed to export factory functions');
+  }
+});
+
+check('AI Provider Module Sanity Check', async () => {
+  const { AIProvider } = await import('../src/providers/base.js');
+  const { CheaperInferenceProvider } = await import('../src/providers/cheaperInference.js');
+  const provider = new CheaperInferenceProvider({
+    apiKey: 'mock-key',
+    model: 'mock-model'
+  });
+  if (!(provider instanceof AIProvider)) {
+    throw new Error('CheaperInferenceProvider must inherit from AIProvider');
+  }
+  if (typeof provider.generate !== 'function') {
+    throw new Error('Provider must implement generate() method');
   }
 });
 

@@ -42,4 +42,11 @@
 - **Decision**: Implement a lightweight local HTTP server using Node.js built-in `node:http` serving vanilla HTML/CSS/JS and exposing `POST /api/text`, which directly invokes `handleText`.
 - **Consequences**: Zero runtime dependencies, isolated web adapter layer, easily testable on ephemeral ports.
 
+## ADR-0008: Isolated AI Provider Contract and Cheaper Inference Adapter
+- **Status**: Accepted
+- **Context**: Need to connect to an external hosted AI provider (Cheaper Inference / OmniRoute) without polluting existing deterministic text core or introducing third-party SDK dependencies.
+- **Decision**: Define a reusable `AIProvider` base contract and implement `CheaperInferenceProvider` utilizing Node.js native `fetch` against OpenAI-compatible endpoints. Expose a dedicated `npm run ai` CLI command while keeping existing `jarvis` and `web` pipelines untouched.
+- **Consequences**: Provider-specific networking and formatting logic is isolated inside `src/providers/`. Automated regression verification runs offline with mock harnesses, while real connectivity is validated through live commands.
+
+
 
