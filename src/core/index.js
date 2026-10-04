@@ -7,6 +7,7 @@
 
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
+import { handleText } from './textCore.js';
 
 export const FOUNDATION_INFO = Object.freeze({
   name: 'JARVIS4',
@@ -27,11 +28,13 @@ export function getSystemStatus() {
   };
 }
 
-export { config, logger };
+export { config, logger, handleText };
 
 export default {
   FOUNDATION_INFO,
   getSystemStatus,
   config,
-  logger
+  logger,
+  handleText
 };
+

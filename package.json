@@ -6,6 +6,7 @@
   "main": "src/core/index.js",
   "scripts": {
     "test": "node --test tests/**/*.test.js",
+    "jarvis": "node src/cli/jarvis.js",
     "verify": "node scripts/verify.mjs"
   },
   "keywords": [

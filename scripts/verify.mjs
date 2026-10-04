@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 /**
- * Verification Script for JARVIS4 (Brick 0 Foundation)
+ * Verification Script for JARVIS4 (Brick 0 Foundation & Brick 1 Text Core)
  *
  * Verifies:
- * 1. Project structure & required foundation files
- * 2. Configuration & project sanity
- * 3. JavaScript syntax validation across all source and test files
- * 4. Automated test suite execution
+ * 1. Project structure & required foundation & brick files
+ * 2. Configuration & project sanity (package.json, environment, modules)
+ * 3. JavaScript syntax validation across all source, script, and test files
+ * 4. Automated test suite execution across all test suites
  *
  * Exit code:
  * 0 = PASS
@@ -35,17 +35,22 @@ const REQUIRED_FILES = [
   'docs/DECISIONS.md',
   'docs/KNOWN_ISSUES.md',
   'src/core/index.js',
+  'src/core/textCore.js',
+  'src/cli/jarvis.js',
   'src/config/index.js',
   'src/utils/logger.js',
   'scripts/verify.mjs',
   'tests/unit/logger.test.js',
   'tests/unit/config.test.js',
-  'tests/smoke/foundation.test.js'
+  'tests/unit/textCore.test.js',
+  'tests/smoke/foundation.test.js',
+  'tests/regression/brick1Regression.test.js'
 ];
 
 const REQUIRED_DIRS = [
   'docs',
   'src/core',
+  'src/cli',
   'src/config',
   'src/utils',
   'tests/unit',
@@ -91,7 +96,7 @@ function collectFiles(dir, extensions = ['.js', '.mjs']) {
   return results;
 }
 
-printHeader('JARVIS4 — Brick 0 Verification');
+printHeader('JARVIS4 — Verification');
 
 // 1. Structure Verification
 check('Directory Structure Verification', () => {
@@ -119,6 +124,7 @@ check('Package.json Sanity Check', () => {
   if (pkg.name !== 'jarvis4') throw new Error('package.json name must be "jarvis4"');
   if (pkg.type !== 'module') throw new Error('package.json must specify "type": "module"');
   if (!pkg.scripts?.test) throw new Error('package.json missing "test" script');
+  if (!pkg.scripts?.jarvis) throw new Error('package.json missing "jarvis" script');
   if (!pkg.scripts?.verify) throw new Error('package.json missing "verify" script');
 });
 
@@ -141,6 +147,14 @@ check('Config & Logger Module Sanity Check', async () => {
   const testLogger = new Logger({ level: LogLevel.ERROR, destination: { error: () => {} } });
   const logged = testLogger.error('Verification sanity log');
   if (!logged) throw new Error('Logger sanity check failed');
+});
+
+check('Text Core Module Sanity Check', async () => {
+  const { handleText } = await import('../src/core/textCore.js');
+  const result = handleText('Sanity Check');
+  if (!result.success || result.response !== 'JARVIS received: Sanity Check') {
+    throw new Error('Text core sanity check failed');
+  }
 });
 
 // 3. Syntax Validation across all JS/MJS files
@@ -169,11 +183,11 @@ check('JavaScript Syntax Validation (node --check)', () => {
 // 4. Automated Tests
 printHeader('Running Automated Test Suite');
 
+const testFiles = collectFiles(resolve(ROOT_DIR, 'tests'), ['.test.js']).sort();
+
 const testRun = spawnSync(process.execPath, [
   '--test',
-  'tests/unit/logger.test.js',
-  'tests/unit/config.test.js',
-  'tests/smoke/foundation.test.js'
+  ...testFiles
 ], {
   cwd: ROOT_DIR,
   stdio: 'inherit'

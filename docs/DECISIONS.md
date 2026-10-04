@@ -29,3 +29,10 @@
 - **Context**: Testing must be organized by scope to scale cleanly across future bricks.
 - **Decision**: Partition `tests/` into `unit/`, `integration/`, `contract/`, `regression/`, and `smoke/`.
 - **Consequences**: Predictable test organization as future features are added.
+
+## ADR-0006: Separation of Text Processing Core and CLI Interface
+- **Status**: Accepted
+- **Context**: The text processing pipeline must serve terminal CLI now and future UI, voice, and orchestrator modules later without duplication.
+- **Decision**: Encapsulate deterministic input validation, normalization, and response generation in `src/core/textCore.js` (`handleText`), keeping `src/cli/jarvis.js` as an agnostic command-line adapter that consumes the core's structured result.
+- **Consequences**: Text processing remains purely functional and decoupled from CLI presentation and process exit lifecycles.
+
