@@ -64,6 +64,7 @@ describe('Web Server - Brick 2 & Brick 4', () => {
     assert.match(body, /id="text-input"/);
     assert.match(body, /id="send-btn"/);
     assert.match(body, /id="ask-ai-btn"/);
+    assert.match(body, /id="ask-ai-stream-btn"/);
     assert.match(body, /id="response-area"/);
     assert.match(body, /id="status-indicator"/);
   });
@@ -512,6 +513,342 @@ describe('Web Server - Brick 2 & Brick 4', () => {
 
     try {
       const res = await fetch(`${aiBaseUrl}/api/ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Hello' })
+      });
+
+      assert.equal(res.status, 500);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.match(data.error, /Configuration error/);
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  // =========================================================================
+  // Brick 5 — Streaming AI Endpoint (/api/ai/stream) Tests
+  // =========================================================================
+
+  test('POST /api/ai/stream accepts valid text, streams NDJSON deltas progressively, and terminates with done event', async () => {
+    let capturedPrompt = null;
+    const mockProvider = {
+      apiKey: 'test-secret-key-12345',
+      validateConfig() { return { valid: true }; },
+      async *stream(prompt) {
+        capturedPrompt = prompt;
+        yield 'Streaming ';
+        yield 'AI ';
+        yield 'response.';
+      }
+    };
+
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      const res = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Stream this prompt' })
+      });
+
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get('content-type') || '', /application\/x-ndjson/);
+
+      const rawBody = await res.text();
+      const lines = rawBody.trim().split('\n').map(l => JSON.parse(l));
+
+      assert.deepEqual(lines, [
+        { type: 'delta', text: 'Streaming ' },
+        { type: 'delta', text: 'AI ' },
+        { type: 'delta', text: 'response.' },
+        { type: 'done' }
+      ]);
+      assert.equal(capturedPrompt, 'Stream this prompt');
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('POST /api/ai/stream delivers deltas progressively before stream completion', async () => {
+    let releaseSecondDelta;
+    const secondDeltaPromise = new Promise((resolve) => {
+      releaseSecondDelta = resolve;
+    });
+
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async *stream() {
+        yield 'First delta ';
+        await secondDeltaPromise;
+        yield 'Second delta';
+      }
+    };
+
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      const res = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Test streaming progression' })
+      });
+
+      assert.equal(res.status, 200);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      // Read first chunk from network — must arrive before second delta is yielded
+      const firstRead = await reader.read();
+      assert.equal(firstRead.done, false);
+      const firstText = decoder.decode(firstRead.value);
+      const firstLines = firstText.trim().split('\n').map(l => JSON.parse(l));
+      assert.equal(firstLines.length, 1);
+      assert.equal(firstLines[0].type, 'delta');
+      assert.equal(firstLines[0].text, 'First delta ');
+
+      // Now release second delta
+      releaseSecondDelta();
+
+      // Read remainder of stream
+      let remainingText = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        remainingText += decoder.decode(value);
+      }
+
+      const remainingLines = remainingText.trim().split('\n').map(l => JSON.parse(l));
+      assert.deepEqual(remainingLines, [
+        { type: 'delta', text: 'Second delta' },
+        { type: 'done' }
+      ]);
+    } finally {
+      releaseSecondDelta();
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('POST /api/ai/stream normalizes surrounding whitespace before streaming', async () => {
+    let capturedPrompt = null;
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async *stream(prompt) {
+        capturedPrompt = prompt;
+        yield 'OK';
+      }
+    };
+
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      const res = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: '   Trimmed prompt   ' })
+      });
+
+      assert.equal(res.status, 200);
+      const rawBody = await res.text();
+      assert.equal(capturedPrompt, 'Trimmed prompt');
+      assert.match(rawBody, /"type":"delta"/);
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('POST /api/ai/stream rejects empty and whitespace-only input safely', async () => {
+    let streamCalled = false;
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async *stream() { streamCalled = true; yield 'ok'; }
+    };
+
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      // Empty string
+      const resEmpty = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: '' })
+      });
+      assert.equal(resEmpty.status, 400);
+      const dataEmpty = await resEmpty.json();
+      assert.equal(dataEmpty.success, false);
+      assert.equal(dataEmpty.error, 'Input cannot be empty');
+
+      // Whitespace-only string
+      const resWhitespace = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: '   \n\t  ' })
+      });
+      assert.equal(resWhitespace.status, 400);
+      const dataWhitespace = await resWhitespace.json();
+      assert.equal(dataWhitespace.success, false);
+      assert.equal(dataWhitespace.error, 'Input cannot be empty');
+
+      assert.equal(streamCalled, false);
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('POST /api/ai/stream rejects non-string input safely', async () => {
+    let streamCalled = false;
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async *stream() { streamCalled = true; yield 'ok'; }
+    };
+
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      const invalidInputs = [12345, true, null, {}, []];
+      for (const input of invalidInputs) {
+        const res = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input })
+        });
+        assert.equal(res.status, 400);
+        const data = await res.json();
+        assert.equal(data.success, false);
+        assert.equal(data.error, 'Input must be a string');
+      }
+
+      assert.equal(streamCalled, false);
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('POST /api/ai/stream handles invalid JSON body safely without crashing', async () => {
+    const aiServer = await startServer(0, '127.0.0.1');
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      const res = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: 'invalid-json-text{'
+      });
+
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.equal(data.error, 'Invalid JSON body');
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('GET /api/ai/stream rejects wrong method with 405 Method Not Allowed', async () => {
+    const aiServer = await startServer(0, '127.0.0.1');
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      const res = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'GET'
+      });
+
+      assert.equal(res.status, 405);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.equal(data.error, 'Method Not Allowed');
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('POST /api/ai/stream handles provider stream error as controlled error event', async () => {
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async *stream() {
+        yield 'Start delta';
+        throw new Error('Provider stream disrupted mid-flight');
+      }
+    };
+
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      const res = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Test error' })
+      });
+
+      assert.equal(res.status, 200);
+      const rawBody = await res.text();
+      const lines = rawBody.trim().split('\n').map(l => JSON.parse(l));
+
+      assert.deepEqual(lines, [
+        { type: 'delta', text: 'Start delta' },
+        { type: 'error', message: 'Provider stream disrupted mid-flight' }
+      ]);
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('POST /api/ai/stream redacts API key from error events', async () => {
+    const secretKey = 'stream-secret-key-8888';
+    const mockProvider = {
+      apiKey: secretKey,
+      validateConfig() { return { valid: true }; },
+      async *stream() {
+        throw new Error(`Provider HTTP 403: Forbidden for key ${secretKey}`);
+      }
+    };
+
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      const res = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Test secret redaction' })
+      });
+
+      assert.equal(res.status, 200);
+      const rawBody = await res.text();
+      const lines = rawBody.trim().split('\n').map(l => JSON.parse(l));
+
+      assert.equal(lines.length, 1);
+      assert.equal(lines[0].type, 'error');
+      assert.match(lines[0].message, /\[REDACTED\]/);
+      assert.equal(lines[0].message.includes(secretKey), false);
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('POST /api/ai/stream handles missing configuration safely with controlled error', async () => {
+    const unconfiguredProvider = new CheaperInferenceProvider({
+      apiKey: '',
+      model: ''
+    });
+
+    const aiServer = await startServer(0, '127.0.0.1', { provider: unconfiguredProvider });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      const res = await fetch(`${aiBaseUrl}/api/ai/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input: 'Hello' })

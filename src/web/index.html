@@ -60,16 +60,16 @@
     }
     .button-group {
       display: flex;
-      gap: 12px;
+      gap: 8px;
     }
     button {
       flex: 1;
-      padding: 12px 16px;
+      padding: 10px 12px;
       background: #0284c7;
       color: white;
       border: none;
       border-radius: 8px;
-      font-size: 0.95rem;
+      font-size: 0.9rem;
       font-weight: 600;
       cursor: pointer;
       transition: background-color 0.2s;
@@ -121,6 +121,7 @@
       <div class="button-group">
         <button type="submit" id="send-btn" class="secondary">Deterministic Test</button>
         <button type="button" id="ask-ai-btn">Ask AI</button>
+        <button type="button" id="ask-ai-stream-btn">Ask AI — Stream</button>
       </div>
     </form>
     <div id="response-area" class="response-area">Ready for input</div>
@@ -132,12 +133,14 @@
     const input = document.getElementById('text-input');
     const sendBtn = document.getElementById('send-btn');
     const askAiBtn = document.getElementById('ask-ai-btn');
+    const askAiStreamBtn = document.getElementById('ask-ai-stream-btn');
     const responseArea = document.getElementById('response-area');
     const statusIndicator = document.getElementById('status-indicator');
 
     function setBusy(busy, statusText) {
       sendBtn.disabled = busy;
       askAiBtn.disabled = busy;
+      askAiStreamBtn.disabled = busy;
       if (statusText) {
         statusIndicator.textContent = statusText;
       }
@@ -178,7 +181,7 @@
       }
     });
 
-    // Real AI Brick 4 handler
+    // Real AI Brick 4 handler (non-streaming)
     askAiBtn.addEventListener('click', async () => {
       const rawText = input.value;
 
@@ -208,6 +211,76 @@
         statusIndicator.textContent = 'Status: Error';
       } finally {
         setBusy(false);
+        input.focus();
+      }
+    });
+
+    // Real AI Brick 5 handler (streaming)
+    askAiStreamBtn.addEventListener('click', async () => {
+      const rawText = input.value;
+
+      setBusy(true, 'Status: Thinking...');
+      responseArea.textContent = 'AI:\n';
+      responseArea.classList.remove('error');
+
+      try {
+        const res = await fetch('/api/ai/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input: rawText })
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          responseArea.textContent = 'Error: ' + (data.error || 'Failed to start AI stream');
+          responseArea.classList.add('error');
+          statusIndicator.textContent = 'Status: Error';
+          return;
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+
+            try {
+              const msg = JSON.parse(trimmed);
+              if (msg.type === 'delta') {
+                responseArea.textContent += msg.text;
+              } else if (msg.type === 'error') {
+                responseArea.textContent = 'Error: ' + msg.message;
+                responseArea.classList.add('error');
+                statusIndicator.textContent = 'Status: Error';
+              } else if (msg.type === 'done') {
+                if (!responseArea.classList.contains('error')) {
+                  statusIndicator.textContent = 'Status: Ready';
+                }
+              }
+            } catch {
+              // Ignore unparseable line
+            }
+          }
+        }
+      } catch (err) {
+        responseArea.textContent = 'Error: ' + err.message;
+        responseArea.classList.add('error');
+        statusIndicator.textContent = 'Status: Error';
+      } finally {
+        setBusy(false);
+        if (statusIndicator.textContent === 'Status: Thinking...') {
+          statusIndicator.textContent = 'Status: Ready';
+        }
         input.focus();
       }
     });

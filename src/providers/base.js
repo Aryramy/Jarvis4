@@ -21,6 +21,17 @@ export class AIProvider {
   async generate(prompt, options = {}) {
     throw new Error(`generate() must be implemented by subclass ${this.constructor.name}`);
   }
+
+  /**
+   * Streams a text response for the given prompt as an async generator of text deltas.
+   *
+   * @param {string} prompt - Text prompt
+   * @param {Object} [options] - Additional provider options
+   * @returns {AsyncGenerator<string, void, unknown>}
+   */
+  async *stream(prompt, options = {}) {
+    throw new Error(`stream() must be implemented by subclass ${this.constructor.name}`);
+  }
 }
 
 export default AIProvider;

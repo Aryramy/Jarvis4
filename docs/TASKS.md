@@ -12,3 +12,7 @@ Status: COMPLETED
 
 BRICK-004 — Real AI Response in Existing Web UI Only
 Status: COMPLETED
+
+BRICK-005 — Streaming AI Text Response Only
+Status: COMPLETED
+

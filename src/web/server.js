@@ -92,6 +92,105 @@ export function createRequestListener(options = {}) {
       return;
     }
 
+    // Route: /api/ai/stream (Brick 5 streaming AI endpoint)
+    if (url.pathname === '/api/ai/stream') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      let isTooLarge = false;
+
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 1e6) {
+          isTooLarge = true;
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Payload Too Large' }));
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        if (isTooLarge) return;
+
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid JSON body' }));
+          return;
+        }
+
+        const input = parsedBody.input;
+        if (typeof input !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Input must be a string' }));
+          return;
+        }
+
+        const trimmedInput = input.trim();
+        if (trimmedInput.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Input cannot be empty' }));
+          return;
+        }
+
+        const provider = options.provider || new CheaperInferenceProvider();
+
+        const configCheck = provider.validateConfig ? provider.validateConfig() : { valid: true };
+        if (!configCheck.valid) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: `Configuration error: ${configCheck.error}`
+          }));
+          return;
+        }
+
+        res.writeHead(200, {
+          'Content-Type': 'application/x-ndjson; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          'Transfer-Encoding': 'chunked'
+        });
+
+        let clientDisconnected = false;
+        res.on('close', () => {
+          if (!res.writableEnded) {
+            clientDisconnected = true;
+          }
+        });
+
+        try {
+          for await (const delta of provider.stream(trimmedInput)) {
+            if (clientDisconnected || res.destroyed || res.writableEnded) {
+              break;
+            }
+            res.write(JSON.stringify({ type: 'delta', text: delta }) + '\n');
+          }
+          if (!res.writableEnded && !clientDisconnected) {
+            res.write(JSON.stringify({ type: 'done' }) + '\n');
+            res.end();
+          }
+        } catch (err) {
+          if (!res.writableEnded && !clientDisconnected) {
+            let safeError = err.message || 'Stream request failed';
+            const apiKeyToRedact = provider.apiKey || process.env.CHEAPER_INFERENCE_API_KEY;
+            if (apiKeyToRedact) {
+              safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
+            }
+            res.write(JSON.stringify({ type: 'error', message: safeError }) + '\n');
+            res.end();
+          }
+        }
+      });
+
+      return;
+    }
+
     // Route: /api/ai (Brick 4 real AI endpoint)
     if (url.pathname === '/api/ai') {
       if (req.method !== 'POST') {

@@ -284,4 +284,222 @@ describe('Cheaper Inference Provider Adapter - Brick 3', () => {
     assert.equal(result.success, false);
     assert.match(result.error, /Request timed out after 20ms/);
   });
+
+  // =========================================================================
+  // Brick 5 — Streaming Tests
+  // =========================================================================
+
+  test('provider.stream accepts valid prompt and yields text deltas in order', async () => {
+    let capturedUrl = null;
+    let capturedOptions = null;
+
+    const mockFetch = async (url, options) => {
+      capturedUrl = url;
+      capturedOptions = options;
+      return {
+        ok: true,
+        status: 200,
+        body: (async function* () {
+          yield 'data: {"id":"1","choices":[{"delta":{"content":"Power"}}]}\n\n';
+          yield 'data: {"id":"2","choices":[{"delta":{"content":" BI"}}]}\n\n';
+          yield 'data: {"id":"3","choices":[{"delta":{"content":" is useful."}}]}\n\n';
+          yield 'data: [DONE]\n\n';
+        })()
+      };
+    };
+
+    const provider = new CheaperInferenceProvider({
+      ...validConfig,
+      fetchFn: mockFetch
+    });
+
+    const deltas = [];
+    for await (const delta of provider.stream('Explain Power BI')) {
+      deltas.push(delta);
+    }
+
+    assert.deepEqual(deltas, ['Power', ' BI', ' is useful.']);
+    assert.equal(capturedUrl, 'https://api.cheaperinference.com/v1/chat/completions');
+    assert.equal(capturedOptions.method, 'POST');
+    const parsedBody = JSON.parse(capturedOptions.body);
+    assert.equal(parsedBody.stream, true);
+    assert.equal(parsedBody.model, 'mock-hosted-model-v1');
+    assert.deepEqual(parsedBody.messages, [{ role: 'user', content: 'Explain Power BI' }]);
+  });
+
+  test('empty prompt rejected cleanly without network call in stream', async () => {
+    let called = false;
+    const provider = new CheaperInferenceProvider({
+      ...validConfig,
+      fetchFn: async () => { called = true; }
+    });
+
+    await assert.rejects(
+      async () => {
+        for await (const _ of provider.stream('')) {}
+      },
+      { message: 'Prompt cannot be empty' }
+    );
+
+    await assert.rejects(
+      async () => {
+        for await (const _ of provider.stream('   \n\t  ')) {}
+      },
+      { message: 'Prompt cannot be empty' }
+    );
+
+    assert.equal(called, false);
+  });
+
+  test('non-string prompt rejected cleanly without network call in stream', async () => {
+    let called = false;
+    const provider = new CheaperInferenceProvider({
+      ...validConfig,
+      fetchFn: async () => { called = true; }
+    });
+
+    const invalidInputs = [null, undefined, 123, true, {}, []];
+    for (const input of invalidInputs) {
+      await assert.rejects(
+        async () => {
+          for await (const _ of provider.stream(input)) {}
+        },
+        { message: 'Prompt must be a string' }
+      );
+    }
+
+    assert.equal(called, false);
+  });
+
+  test('stream handles malformed events and comments safely without crashing', async () => {
+    const mockFetch = async () => ({
+      ok: true,
+      status: 200,
+      body: (async function* () {
+        yield ': keep-alive\n\n';
+        yield 'data: not-valid-json\n\n';
+        yield 'data: {"choices":[{"delta":{"content":"Valid"}}]}\n\n';
+        yield 'data: {"choices":[]}\n\n';
+        yield 'data: {"choices":[{"delta":{}}]}\n\n';
+        yield 'data: {"choices":[{"delta":{"content":" text"}}]}\n\n';
+        yield 'data: [DONE]\n\n';
+      })()
+    });
+
+    const provider = new CheaperInferenceProvider({
+      ...validConfig,
+      fetchFn: mockFetch
+    });
+
+    const deltas = [];
+    for await (const delta of provider.stream('Hello')) {
+      deltas.push(delta);
+    }
+
+    assert.deepEqual(deltas, ['Valid', ' text']);
+  });
+
+  test('stream handles provider HTTP error cleanly with redacted secrets', async () => {
+    const mockFetch = async () => ({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: async () => ({
+        error: { message: `Unauthorized for key ${validConfig.apiKey}` }
+      })
+    });
+
+    const provider = new CheaperInferenceProvider({
+      ...validConfig,
+      fetchFn: mockFetch
+    });
+
+    await assert.rejects(
+      async () => {
+        for await (const _ of provider.stream('Hello')) {}
+      },
+      (err) => {
+        assert.match(err.message, /Provider HTTP 401: Unauthorized for key \[REDACTED\]/);
+        assert.equal(err.message.includes(validConfig.apiKey), false);
+        return true;
+      }
+    );
+  });
+
+  test('stream handles network failure cleanly', async () => {
+    const mockFetch = async () => {
+      throw new Error('connect ECONNREFUSED 127.0.0.1:443');
+    };
+
+    const provider = new CheaperInferenceProvider({
+      ...validConfig,
+      fetchFn: mockFetch
+    });
+
+    await assert.rejects(
+      async () => {
+        for await (const _ of provider.stream('Hello')) {}
+      },
+      { message: 'Network error: connect ECONNREFUSED 127.0.0.1:443' }
+    );
+  });
+
+  test('stream handles timeout cleanly using AbortController', async () => {
+    const mockFetch = async (url, options) => {
+      return new Promise((resolvePromise, rejectPromise) => {
+        options.signal.addEventListener('abort', () => {
+          const abortError = new Error('The operation was aborted');
+          abortError.name = 'AbortError';
+          rejectPromise(abortError);
+        });
+      });
+    };
+
+    const provider = new CheaperInferenceProvider({
+      ...validConfig,
+      timeoutMs: 20,
+      fetchFn: mockFetch
+    });
+
+    await assert.rejects(
+      async () => {
+        for await (const _ of provider.stream('Hello')) {}
+      },
+      /Request timed out after 20ms/
+    );
+  });
+
+  test('stream cleans up and aborts request if caller breaks early', async () => {
+    let aborted = false;
+
+    const mockFetch = async (url, options) => {
+      options.signal.addEventListener('abort', () => {
+        aborted = true;
+      });
+      return {
+        ok: true,
+        status: 200,
+        body: (async function* () {
+          yield 'data: {"choices":[{"delta":{"content":"Delta 1"}}]}\n\n';
+          yield 'data: {"choices":[{"delta":{"content":"Delta 2"}}]}\n\n';
+          yield 'data: {"choices":[{"delta":{"content":"Delta 3"}}]}\n\n';
+        })()
+      };
+    };
+
+    const provider = new CheaperInferenceProvider({
+      ...validConfig,
+      fetchFn: mockFetch
+    });
+
+    const collected = [];
+    for await (const delta of provider.stream('Hello')) {
+      collected.push(delta);
+      break;
+    }
+
+    assert.equal(collected.length, 1);
+    assert.equal(collected[0], 'Delta 1');
+    assert.equal(aborted, true);
+  });
 });
