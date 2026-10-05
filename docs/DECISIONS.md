@@ -48,5 +48,11 @@
 - **Decision**: Define a reusable `AIProvider` base contract and implement `CheaperInferenceProvider` utilizing Node.js native `fetch` against OpenAI-compatible endpoints. Expose a dedicated `npm run ai` CLI command while keeping existing `jarvis` and `web` pipelines untouched.
 - **Consequences**: Provider-specific networking and formatting logic is isolated inside `src/providers/`. Automated regression verification runs offline with mock harnesses, while real connectivity is validated through live commands.
 
+## ADR-0009: Real AI Provider Integration into Local Web Interface
+- **Status**: Accepted
+- **Context**: Need to connect the Cheaper Inference provider adapter (Brick 3) to the local browser UI (Brick 2) without duplicating provider networking logic, breaking deterministic Brick 2 endpoints, or introducing external client/server frameworks.
+- **Decision**: Expose a dedicated `POST /api/ai` endpoint in `src/web/server.js` that directly calls `CheaperInferenceProvider.generate()`, redacts API keys from error responses, and supports optional provider dependency injection for offline integration testing. Update `src/web/index.html` with an "Ask AI" button and a visible "Thinking..." loading state while preserving the deterministic test button.
+- **Consequences**: The web interface supports both deterministic Brick 1 test requests (`/api/text`) and real AI generation requests (`/api/ai`). Automated verification remains strictly offline, deterministic, and isolated from ambient credentials.
+
 
 

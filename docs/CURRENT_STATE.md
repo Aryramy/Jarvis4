@@ -1,8 +1,8 @@
 Project: JARVIS4
-Current Brick: 3
+Current Brick: 4
 Status: VERIFIED
-Last Verified Brick: BRICK-003
-Current Feature: Single Cheaper Inference AI provider connection
+Last Verified Brick: BRICK-004
+Current Feature: Real AI response in local web interface
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
@@ -17,6 +17,8 @@ Next Feature: NOT AUTHORIZED
 - Local web interface (`npm run web` at `http://127.0.0.1:8080`)
 - Cheaper Inference / OmniRoute AI Provider Adapter (`CheaperInferenceProvider` in `src/providers/cheaperInference.js`)
 - Live AI CLI command (`npm run ai -- "<prompt>"`) verified against live hosted provider (`deepseek-v4-flash-0731`)
+- Real AI web endpoint (`POST /api/ai`) routing to CheaperInferenceProvider with input validation and credential protection
+- Web interface Ask AI button and visible thinking loading state (`Status: Thinking...`)
 
 ## External integrations
 
@@ -29,5 +31,6 @@ Next Feature: NOT AUTHORIZED
 ## Last verification
 
 Status: PASS (Exit Code: 0)
-- Automated test & sanity verification: 49 tests across 7 suites passed offline.
-- Real live provider verification: `npm run ai -- "Reply with exactly: JARVIS4 AI CONNECTED"` successfully executed against live Cheaper Inference endpoint (`deepseek-v4-flash-0731`) and returned `JARVIS4 AI CONNECTED` (Exit code: 0).
+- Automated test & sanity verification: 62 tests across 7 suites passed offline.
+- Real live provider verification (Brick 3): `npm run ai -- "Reply with exactly: JARVIS4 AI CONNECTED"` successfully executed against live Cheaper Inference endpoint (`deepseek-v4-flash-0731`) and returned `JARVIS4 AI CONNECTED`.
+- Brick 4 browser live test: VERIFIED — Human operator confirmed end-to-end browser execution through `POST /api/ai` to hosted model (`deepseek-v4-flash-0731`) with real AI response rendered in browser.

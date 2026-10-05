@@ -58,19 +58,30 @@
     input[type="text"]:focus {
       border-color: #38bdf8;
     }
+    .button-group {
+      display: flex;
+      gap: 12px;
+    }
     button {
-      padding: 12px 24px;
+      flex: 1;
+      padding: 12px 16px;
       background: #0284c7;
       color: white;
       border: none;
       border-radius: 8px;
-      font-size: 1rem;
+      font-size: 0.95rem;
       font-weight: 600;
       cursor: pointer;
       transition: background-color 0.2s;
     }
     button:hover {
       background: #0369a1;
+    }
+    button.secondary {
+      background: #334155;
+    }
+    button.secondary:hover {
+      background: #475569;
     }
     button:disabled {
       opacity: 0.6;
@@ -107,7 +118,10 @@
     <h1>JARVIS4</h1>
     <form id="text-form" class="input-group">
       <input type="text" id="text-input" placeholder="Enter text for JARVIS..." autocomplete="off" />
-      <button type="submit" id="send-btn">Send</button>
+      <div class="button-group">
+        <button type="submit" id="send-btn" class="secondary">Deterministic Test</button>
+        <button type="button" id="ask-ai-btn">Ask AI</button>
+      </div>
     </form>
     <div id="response-area" class="response-area">Ready for input</div>
     <div id="status-indicator" class="status-indicator">Status: Ready</div>
@@ -117,15 +131,24 @@
     const form = document.getElementById('text-form');
     const input = document.getElementById('text-input');
     const sendBtn = document.getElementById('send-btn');
+    const askAiBtn = document.getElementById('ask-ai-btn');
     const responseArea = document.getElementById('response-area');
     const statusIndicator = document.getElementById('status-indicator');
 
+    function setBusy(busy, statusText) {
+      sendBtn.disabled = busy;
+      askAiBtn.disabled = busy;
+      if (statusText) {
+        statusIndicator.textContent = statusText;
+      }
+    }
+
+    // Deterministic Brick 1 handler
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const rawText = input.value;
 
-      statusIndicator.textContent = 'Status: Processing...';
-      sendBtn.disabled = true;
+      setBusy(true, 'Status: Processing...');
 
       try {
         const res = await fetch('/api/text', {
@@ -143,14 +166,48 @@
         } else {
           responseArea.textContent = 'Error: ' + (data.error || 'Failed to process request');
           responseArea.classList.add('error');
-          statusIndicator.textContent = 'Status: Ready';
+          statusIndicator.textContent = 'Status: Error';
         }
       } catch (err) {
         responseArea.textContent = 'Error: ' + err.message;
         responseArea.classList.add('error');
-        statusIndicator.textContent = 'Status: Ready';
+        statusIndicator.textContent = 'Status: Error';
       } finally {
-        sendBtn.disabled = false;
+        setBusy(false);
+        input.focus();
+      }
+    });
+
+    // Real AI Brick 4 handler
+    askAiBtn.addEventListener('click', async () => {
+      const rawText = input.value;
+
+      setBusy(true, 'Status: Thinking...');
+
+      try {
+        const res = await fetch('/api/ai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input: rawText })
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          responseArea.textContent = 'AI:\n' + data.response;
+          responseArea.classList.remove('error');
+          statusIndicator.textContent = 'Status: Ready';
+        } else {
+          responseArea.textContent = 'Error: ' + (data.error || 'Failed to process AI request');
+          responseArea.classList.add('error');
+          statusIndicator.textContent = 'Status: Error';
+        }
+      } catch (err) {
+        responseArea.textContent = 'Error: ' + err.message;
+        responseArea.classList.add('error');
+        statusIndicator.textContent = 'Status: Error';
+      } finally {
+        setBusy(false);
         input.focus();
       }
     });
