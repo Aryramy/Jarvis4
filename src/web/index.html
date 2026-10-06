@@ -60,6 +60,7 @@
     }
     .button-group {
       display: flex;
+      flex-wrap: wrap;
       gap: 8px;
     }
     button {
@@ -122,6 +123,7 @@
         <button type="submit" id="send-btn" class="secondary">Deterministic Test</button>
         <button type="button" id="ask-ai-btn">Ask AI</button>
         <button type="button" id="ask-ai-stream-btn">Ask AI — Stream</button>
+        <button type="button" id="clear-conv-btn" class="secondary">Clear Conversation</button>
       </div>
     </form>
     <div id="response-area" class="response-area">Ready for input</div>
@@ -134,6 +136,7 @@
     const sendBtn = document.getElementById('send-btn');
     const askAiBtn = document.getElementById('ask-ai-btn');
     const askAiStreamBtn = document.getElementById('ask-ai-stream-btn');
+    const clearConvBtn = document.getElementById('clear-conv-btn');
     const responseArea = document.getElementById('response-area');
     const statusIndicator = document.getElementById('status-indicator');
 
@@ -141,6 +144,7 @@
       sendBtn.disabled = busy;
       askAiBtn.disabled = busy;
       askAiStreamBtn.disabled = busy;
+      clearConvBtn.disabled = busy;
       if (statusText) {
         statusIndicator.textContent = statusText;
       }
@@ -281,6 +285,36 @@
         if (statusIndicator.textContent === 'Status: Thinking...') {
           statusIndicator.textContent = 'Status: Ready';
         }
+        input.focus();
+      }
+    });
+
+    // Clear conversation handler (Brick 6)
+    clearConvBtn.addEventListener('click', async () => {
+      setBusy(true, 'Status: Clearing conversation...');
+
+      try {
+        const res = await fetch('/api/conversation/clear', {
+          method: 'POST'
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.success) {
+          responseArea.textContent = 'Conversation cleared.';
+          responseArea.classList.remove('error');
+          statusIndicator.textContent = 'Status: Ready';
+        } else {
+          responseArea.textContent = 'Error: ' + (data.error || 'Failed to clear conversation');
+          responseArea.classList.add('error');
+          statusIndicator.textContent = 'Status: Error';
+        }
+      } catch (err) {
+        responseArea.textContent = 'Error: ' + err.message;
+        responseArea.classList.add('error');
+        statusIndicator.textContent = 'Status: Error';
+      } finally {
+        setBusy(false);
         input.focus();
       }
     });

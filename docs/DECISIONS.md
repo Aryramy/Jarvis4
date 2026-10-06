@@ -60,6 +60,19 @@
 - **Decision**: Add an async generator `stream(prompt)` to `CheaperInferenceProvider` parsing OpenAI-compatible Server-Sent Events (SSE). Expose `POST /api/ai/stream` on the local web server using newline-delimited JSON (NDJSON) streaming (`{"type":"delta","text":"..."}\n`, `{"type":"done"}\n`, `{"type":"error","message":"..."}\n`). Add an "Ask AI — Stream" button in the web UI that immediately streams incoming deltas to the interface without intermediate buffering.
 - **Consequences**: Progressively streams model responses end-to-end with low latency while preserving all existing deterministic and non-streaming AI routes.
 
+## ADR-0011: Temporary Short-Term Conversation Context and In-Memory Session Management
+- **Status**: Accepted
+- **Context**: Conversational continuity requires the assistant to remember preceding turns in the running session. However, persistent memory, database storage, disk serialization, vector databases, or embedding frameworks are strictly out of scope for this foundation stage.
+- **Decision**:
+  1. Implement `ConversationSession` (`src/core/conversationSession.js`) as a pure in-memory message history container holding ordered `{ role, content }` objects, strictly constrained by a configurable maximum message count (default 20) with FIFO message eviction.
+  2. Extend `AIProvider` and `CheaperInferenceProvider` with `generateMessages(messages)` accepting ordered conversation turns, while retaining backward compatibility for stateless `generate(prompt)` and `stream(prompt)`.
+  3. Integrate session context into the non-streaming `POST /api/ai` route. On provider failure or exception, deterministically roll back the user turn to preserve uncorrupted history.
+  4. Expose `POST /api/conversation/clear` to allow the user or client to clear session history in memory.
+  5. Add a "Clear Conversation" button in `src/web/index.html` updating UI state and clearing in-memory context.
+  6. Streaming (`POST /api/ai/stream`) deliberately remains stateless in Brick 6 to maintain narrow scope.
+- **Consequences**: Temporary conversational context operates cleanly during an active process run and is completely erased upon server restart or explicit clear. Zero external storage or database dependencies.
+
+
 
 
 

@@ -23,6 +23,17 @@ export class AIProvider {
   }
 
   /**
+   * Generates a text response for the given conversation messages.
+   *
+   * @param {Array<{ role: string, content: string }>} messages - Message history
+   * @param {Object} [options] - Additional provider options
+   * @returns {Promise<{ success: boolean, text?: string, model?: string, error?: string, usage?: object }>}
+   */
+  async generateMessages(messages, options = {}) {
+    throw new Error(`generateMessages() must be implemented by subclass ${this.constructor.name}`);
+  }
+
+  /**
    * Streams a text response for the given prompt as an async generator of text deltas.
    *
    * @param {string} prompt - Text prompt

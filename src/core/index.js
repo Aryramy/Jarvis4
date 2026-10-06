@@ -28,13 +28,16 @@ export function getSystemStatus() {
   };
 }
 
-export { config, logger, handleText };
+import { ConversationSession } from './conversationSession.js';
+
+export { config, logger, handleText, ConversationSession };
 
 export default {
   FOUNDATION_INFO,
   getSystemStatus,
   config,
   logger,
-  handleText
+  handleText,
+  ConversationSession
 };
 

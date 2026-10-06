@@ -9,6 +9,7 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { handleText } from '../core/textCore.js';
 import { CheaperInferenceProvider } from '../providers/cheaperInference.js';
+import { ConversationSession } from '../core/conversationSession.js';
 
 const __dirname = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const HTML_FILE_PATH = join(__dirname, 'index.html');
@@ -20,6 +21,7 @@ const DEFAULT_PORT = 8080;
  * Creates the HTTP request listener.
  * @param {Object} [options]
  * @param {import('../providers/cheaperInference.js').CheaperInferenceProvider} [options.provider]
+ * @param {import('../core/conversationSession.js').ConversationSession} [options.session]
  * @returns {import('node:http').RequestListener}
  */
 export function createRequestListener(options = {}) {
@@ -27,6 +29,8 @@ export function createRequestListener(options = {}) {
   if (existsSync(HTML_FILE_PATH)) {
     htmlContent = readFileSync(HTML_FILE_PATH, 'utf8');
   }
+
+  const session = options.session || new ConversationSession();
 
   return (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -191,7 +195,25 @@ export function createRequestListener(options = {}) {
       return;
     }
 
-    // Route: /api/ai (Brick 4 real AI endpoint)
+    // Route: /api/conversation/clear (Brick 6 clear conversation endpoint)
+    if (url.pathname === '/api/conversation/clear') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      req.on('data', () => {});
+      req.on('end', () => {
+        session.clear();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      });
+
+      return;
+    }
+
+    // Route: /api/ai (Brick 4 real AI endpoint & Brick 6 conversation context)
     if (url.pathname === '/api/ai') {
       if (req.method !== 'POST') {
         res.writeHead(405, { 'Content-Type': 'application/json' });
@@ -238,6 +260,8 @@ export function createRequestListener(options = {}) {
           return;
         }
 
+        let userTurnAdded = false;
+
         try {
           const provider = options.provider || new CheaperInferenceProvider();
 
@@ -251,15 +275,31 @@ export function createRequestListener(options = {}) {
             return;
           }
 
-          const result = await provider.generate(trimmedInput);
+          // Add user message to session context
+          session.addUserMessage(trimmedInput);
+          userTurnAdded = true;
+
+          const messages = session.getMessages();
+
+          const result = typeof provider.generateMessages === 'function'
+            ? await provider.generateMessages(messages)
+            : await provider.generate(trimmedInput);
 
           if (result.success) {
+            // Store assistant response in session context
+            session.addAssistantMessage(result.text);
+
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
               success: true,
               response: result.text
             }));
           } else {
+            // Provider failed: roll back user turn so context remains clean and uncorrupted
+            if (userTurnAdded) {
+              session.pop();
+            }
+
             let safeError = result.error || 'Provider request failed';
             const apiKeyToRedact = provider.apiKey || process.env.CHEAPER_INFERENCE_API_KEY;
             if (apiKeyToRedact) {
@@ -272,6 +312,11 @@ export function createRequestListener(options = {}) {
             }));
           }
         } catch (err) {
+          // Exception occurred: roll back user turn so context remains clean and uncorrupted
+          if (userTurnAdded) {
+            session.pop();
+          }
+
           let safeError = err.message || 'Internal server error';
           const apiKeyToRedact = (options.provider && options.provider.apiKey) || process.env.CHEAPER_INFERENCE_API_KEY;
           if (apiKeyToRedact) {

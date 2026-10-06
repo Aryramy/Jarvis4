@@ -2,8 +2,9 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { startServer } from '../../src/web/server.js';
 import { CheaperInferenceProvider } from '../../src/providers/cheaperInference.js';
+import { ConversationSession } from '../../src/core/conversationSession.js';
 
-describe('Web Server - Brick 2 & Brick 4', () => {
+describe('Web Server - Brick 2, Brick 4, Brick 5 & Brick 6', () => {
   const AI_ENV_VARS = [
     'CHEAPER_INFERENCE_API_KEY',
     'CHEAPER_INFERENCE_BASE_URL',
@@ -65,6 +66,7 @@ describe('Web Server - Brick 2 & Brick 4', () => {
     assert.match(body, /id="send-btn"/);
     assert.match(body, /id="ask-ai-btn"/);
     assert.match(body, /id="ask-ai-stream-btn"/);
+    assert.match(body, /id="clear-conv-btn"/);
     assert.match(body, /id="response-area"/);
     assert.match(body, /id="status-indicator"/);
   });
@@ -858,6 +860,225 @@ describe('Web Server - Brick 2 & Brick 4', () => {
       const data = await res.json();
       assert.equal(data.success, false);
       assert.match(data.error, /Configuration error/);
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  // =========================================================================
+  // Brick 6 — Conversation Context & Clear Conversation Tests
+  // =========================================================================
+
+  test('first /api/ai request works with no previous context', async () => {
+    let capturedMessages = null;
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async generateMessages(messages) {
+        capturedMessages = messages;
+        return { success: true, text: 'Nice to meet you, Ary.' };
+      }
+    };
+
+    const session = new ConversationSession();
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider, session });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      const res = await fetch(`${aiBaseUrl}/api/ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'My name is Ary.' })
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.response, 'Nice to meet you, Ary.');
+
+      // In the first request, exactly 1 message was sent to provider (user turn)
+      assert.deepEqual(capturedMessages, [
+        { role: 'user', content: 'My name is Ary.' }
+      ]);
+
+      // Assistant response was stored in session after success
+      assert.deepEqual(session.getMessages(), [
+        { role: 'user', content: 'My name is Ary.' },
+        { role: 'assistant', content: 'Nice to meet you, Ary.' }
+      ]);
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('second /api/ai request includes previous user + assistant turns and stores new assistant response', async () => {
+    const messageHistoryLog = [];
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async generateMessages(messages) {
+        messageHistoryLog.push(messages.map(m => ({ ...m })));
+        if (messages.length === 1) {
+          return { success: true, text: 'Nice to meet you, Ary.' };
+        }
+        return { success: true, text: 'Your name is Ary.' };
+      }
+    };
+
+    const session = new ConversationSession();
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider, session });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      // First turn
+      const res1 = await fetch(`${aiBaseUrl}/api/ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'My name is Ary.' })
+      });
+      assert.equal(res1.status, 200);
+
+      // Second turn
+      const res2 = await fetch(`${aiBaseUrl}/api/ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'What is my name?' })
+      });
+      assert.equal(res2.status, 200);
+      const data2 = await res2.json();
+      assert.equal(data2.success, true);
+      assert.equal(data2.response, 'Your name is Ary.');
+
+      // Second provider call must have received previous user + assistant turns plus new user prompt
+      assert.equal(messageHistoryLog.length, 2);
+      assert.deepEqual(messageHistoryLog[1], [
+        { role: 'user', content: 'My name is Ary.' },
+        { role: 'assistant', content: 'Nice to meet you, Ary.' },
+        { role: 'user', content: 'What is my name?' }
+      ]);
+
+      // Session context now stores all 4 messages
+      assert.deepEqual(session.getMessages(), [
+        { role: 'user', content: 'My name is Ary.' },
+        { role: 'assistant', content: 'Nice to meet you, Ary.' },
+        { role: 'user', content: 'What is my name?' },
+        { role: 'assistant', content: 'Your name is Ary.' }
+      ]);
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('provider failure does not add fake assistant response and preserves prior valid state', async () => {
+    let callCount = 0;
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async generateMessages(messages) {
+        callCount++;
+        if (callCount === 1) {
+          return { success: true, text: 'First reply' };
+        }
+        return { success: false, error: 'Provider network outage' };
+      }
+    };
+
+    const session = new ConversationSession();
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider, session });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      // First turn succeeds
+      const res1 = await fetch(`${aiBaseUrl}/api/ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Turn 1' })
+      });
+      assert.equal(res1.status, 200);
+      assert.equal(session.size, 2);
+
+      // Second turn fails
+      const res2 = await fetch(`${aiBaseUrl}/api/ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Turn 2 failing' })
+      });
+      assert.equal(res2.status, 500);
+
+      // Session must NOT contain fake assistant response, and failed user turn is rolled back
+      assert.equal(session.size, 2);
+      assert.deepEqual(session.getMessages(), [
+        { role: 'user', content: 'Turn 1' },
+        { role: 'assistant', content: 'First reply' }
+      ]);
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('POST /api/conversation/clear clears session and next request starts with no previous context', async () => {
+    const receivedCalls = [];
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async generateMessages(messages) {
+        receivedCalls.push(messages.map(m => ({ ...m })));
+        return { success: true, text: 'Answer' };
+      }
+    };
+
+    const session = new ConversationSession();
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider, session });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      // 1. Send first prompt
+      await fetch(`${aiBaseUrl}/api/ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'My favorite color is sky blue.' })
+      });
+      assert.equal(session.size, 2);
+
+      // 2. Call clear conversation endpoint
+      const clearRes = await fetch(`${aiBaseUrl}/api/conversation/clear`, {
+        method: 'POST'
+      });
+      assert.equal(clearRes.status, 200);
+      const clearData = await clearRes.json();
+      assert.equal(clearData.success, true);
+      assert.equal(session.size, 0);
+
+      // 3. Send next prompt after clear
+      await fetch(`${aiBaseUrl}/api/ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'What is my favorite color?' })
+      });
+
+      // Provider should have received ONLY the new prompt with NO prior context
+      assert.equal(receivedCalls.length, 2);
+      assert.deepEqual(receivedCalls[1], [
+        { role: 'user', content: 'What is my favorite color?' }
+      ]);
+      assert.equal(session.size, 2);
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('GET /api/conversation/clear rejects wrong method with 405 Method Not Allowed', async () => {
+    const aiServer = await startServer(0, '127.0.0.1');
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      const res = await fetch(`${aiBaseUrl}/api/conversation/clear`, {
+        method: 'GET'
+      });
+      assert.equal(res.status, 405);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.equal(data.error, 'Method Not Allowed');
     } finally {
       await new Promise(r => aiServer.close(r));
     }

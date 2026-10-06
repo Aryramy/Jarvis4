@@ -57,22 +57,32 @@ export class CheaperInferenceProvider extends AIProvider {
   }
 
   /**
-   * Generates a text response from the hosted Cheaper Inference provider.
+   * Generates a text response for the given conversation messages from the hosted Cheaper Inference provider.
    *
-   * @param {string} prompt - Prompt to generate response for
+   * @param {Array<{ role: string, content: string }>} messages - Conversation message history
    * @param {Object} [options]
    * @param {number} [options.timeoutMs] - Override timeout in milliseconds
    * @returns {Promise<{ success: boolean, text?: string, model?: string, error?: string, usage?: object }>}
    */
-  async generate(prompt, options = {}) {
-    // 1. Validate prompt
-    if (typeof prompt !== 'string') {
-      return { success: false, error: 'Prompt must be a string' };
+  async generateMessages(messages, options = {}) {
+    // 1. Validate messages
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return { success: false, error: 'Messages must be a non-empty array' };
     }
 
-    const trimmedPrompt = prompt.trim();
-    if (trimmedPrompt.length === 0) {
-      return { success: false, error: 'Prompt cannot be empty' };
+    const formattedMessages = [];
+    for (const msg of messages) {
+      if (!msg || typeof msg !== 'object' || typeof msg.role !== 'string' || typeof msg.content !== 'string') {
+        return { success: false, error: 'Each message must have a valid role and content string' };
+      }
+      const trimmedContent = msg.content.trim();
+      if (trimmedContent.length === 0) {
+        return { success: false, error: 'Message content cannot be empty' };
+      }
+      formattedMessages.push({
+        role: msg.role.trim().toLowerCase(),
+        content: trimmedContent
+      });
     }
 
     // 2. Validate configuration
@@ -102,9 +112,7 @@ export class CheaperInferenceProvider extends AIProvider {
         },
         body: JSON.stringify({
           model: this.model,
-          messages: [
-            { role: 'user', content: trimmedPrompt }
-          ]
+          messages: formattedMessages
         }),
         signal: controller.signal
       });
@@ -178,6 +186,28 @@ export class CheaperInferenceProvider extends AIProvider {
         clearTimeout(timeoutId);
       }
     }
+  }
+
+  /**
+   * Generates a text response from the hosted Cheaper Inference provider.
+   *
+   * @param {string} prompt - Prompt to generate response for
+   * @param {Object} [options]
+   * @param {number} [options.timeoutMs] - Override timeout in milliseconds
+   * @returns {Promise<{ success: boolean, text?: string, model?: string, error?: string, usage?: object }>}
+   */
+  async generate(prompt, options = {}) {
+    // 1. Validate prompt
+    if (typeof prompt !== 'string') {
+      return { success: false, error: 'Prompt must be a string' };
+    }
+
+    const trimmedPrompt = prompt.trim();
+    if (trimmedPrompt.length === 0) {
+      return { success: false, error: 'Prompt cannot be empty' };
+    }
+
+    return this.generateMessages([{ role: 'user', content: trimmedPrompt }], options);
   }
 
   /**

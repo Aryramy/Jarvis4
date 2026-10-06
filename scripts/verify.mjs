@@ -36,6 +36,7 @@ const REQUIRED_FILES = [
   'docs/KNOWN_ISSUES.md',
   'src/core/index.js',
   'src/core/textCore.js',
+  'src/core/conversationSession.js',
   'src/cli/jarvis.js',
   'src/cli/ai.js',
   'src/web/server.js',
@@ -49,6 +50,7 @@ const REQUIRED_FILES = [
   'tests/unit/config.test.js',
   'tests/unit/textCore.test.js',
   'tests/unit/cheaperInference.test.js',
+  'tests/unit/conversationSession.test.js',
   'tests/smoke/foundation.test.js',
   'tests/regression/brick1Regression.test.js',
   'tests/integration/webServer.test.js'
@@ -196,6 +198,24 @@ check('AI Provider Module Sanity Check', async () => {
   }
   if (typeof provider.generate !== 'function') {
     throw new Error('Provider must implement generate() method');
+  }
+  if (typeof provider.generateMessages !== 'function') {
+    throw new Error('Provider must implement generateMessages() method');
+  }
+});
+
+check('Conversation Session Sanity Check', async () => {
+  const { ConversationSession } = await import('../src/core/conversationSession.js');
+  const session = new ConversationSession({ maxMessages: 5 });
+  session.addUserMessage('Sanity user');
+  session.addAssistantMessage('Sanity assistant');
+  const msgs = session.getMessages();
+  if (msgs.length !== 2 || msgs[0].content !== 'Sanity user' || msgs[1].content !== 'Sanity assistant') {
+    throw new Error('Conversation session sanity check failed');
+  }
+  session.clear();
+  if (session.getMessages().length !== 0) {
+    throw new Error('Conversation session clear failed');
   }
 });
 

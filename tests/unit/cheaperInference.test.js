@@ -502,4 +502,94 @@ describe('Cheaper Inference Provider Adapter - Brick 3', () => {
     assert.equal(collected[0], 'Delta 1');
     assert.equal(aborted, true);
   });
+
+  // =========================================================================
+  // Brick 6 — Message-based request support (generateMessages)
+  // =========================================================================
+
+  test('generateMessages preserves role and content order in provider request', async () => {
+    let capturedOptions = null;
+
+    const mockFetch = async (url, options) => {
+      capturedOptions = options;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: 'Your name is Ary.'
+              }
+            }
+          ]
+        })
+      };
+    };
+
+    const provider = new CheaperInferenceProvider({
+      ...validConfig,
+      fetchFn: mockFetch
+    });
+
+    const messages = [
+      { role: 'user', content: 'My name is Ary.' },
+      { role: 'assistant', content: 'Nice to meet you, Ary.' },
+      { role: 'user', content: 'What is my name?' }
+    ];
+
+    const result = await provider.generateMessages(messages);
+
+    assert.equal(result.success, true);
+    assert.equal(result.text, 'Your name is Ary.');
+
+    const parsedBody = JSON.parse(capturedOptions.body);
+    assert.deepEqual(parsedBody.messages, [
+      { role: 'user', content: 'My name is Ary.' },
+      { role: 'assistant', content: 'Nice to meet you, Ary.' },
+      { role: 'user', content: 'What is my name?' }
+    ]);
+  });
+
+  test('generateMessages rejects non-array or empty messages without network call', async () => {
+    let called = false;
+    const provider = new CheaperInferenceProvider({
+      ...validConfig,
+      fetchFn: async () => { called = true; }
+    });
+
+    const invalidInputs = [null, undefined, 'string', 123, {}, []];
+    for (const input of invalidInputs) {
+      const result = await provider.generateMessages(input);
+      assert.equal(result.success, false);
+      assert.match(result.error, /Messages must be a non-empty array/);
+    }
+
+    assert.equal(called, false);
+  });
+
+  test('generateMessages rejects malformed message items without network call', async () => {
+    let called = false;
+    const provider = new CheaperInferenceProvider({
+      ...validConfig,
+      fetchFn: async () => { called = true; }
+    });
+
+    const testCases = [
+      [{ role: 'user' }], // missing content
+      [{ content: 'hello' }], // missing role
+      [{ role: 123, content: 'hello' }], // non-string role
+      [{ role: 'user', content: 123 }], // non-string content
+      [{ role: 'user', content: '' }], // empty content
+      [{ role: 'user', content: '   ' }] // whitespace-only content
+    ];
+
+    for (const messages of testCases) {
+      const result = await provider.generateMessages(messages);
+      assert.equal(result.success, false);
+    }
+
+    assert.equal(called, false);
+  });
 });

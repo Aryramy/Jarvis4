@@ -16,3 +16,6 @@ Status: COMPLETED
 BRICK-005 — Streaming AI Text Response Only
 Status: COMPLETED
 
+BRICK-006 — Short-Term Conversation Context Only
+Status: COMPLETED
+
