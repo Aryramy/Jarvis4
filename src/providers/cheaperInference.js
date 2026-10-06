@@ -211,22 +211,32 @@ export class CheaperInferenceProvider extends AIProvider {
   }
 
   /**
-   * Streams a text response from the hosted Cheaper Inference provider as an async generator of text deltas.
+   * Streams a text response for the given conversation messages from the hosted Cheaper Inference provider.
    *
-   * @param {string} prompt - Prompt to stream response for
+   * @param {Array<{ role: string, content: string }>} messages - Conversation message history
    * @param {Object} [options]
    * @param {number} [options.timeoutMs] - Override timeout in milliseconds
    * @returns {AsyncGenerator<string, void, unknown>}
    */
-  async *stream(prompt, options = {}) {
-    // 1. Validate prompt
-    if (typeof prompt !== 'string') {
-      throw new Error('Prompt must be a string');
+  async *streamMessages(messages, options = {}) {
+    // 1. Validate messages
+    if (!Array.isArray(messages) || messages.length === 0) {
+      throw new Error('Messages must be a non-empty array');
     }
 
-    const trimmedPrompt = prompt.trim();
-    if (trimmedPrompt.length === 0) {
-      throw new Error('Prompt cannot be empty');
+    const formattedMessages = [];
+    for (const msg of messages) {
+      if (!msg || typeof msg !== 'object' || typeof msg.role !== 'string' || typeof msg.content !== 'string') {
+        throw new Error('Each message must have a valid role and content string');
+      }
+      const trimmedContent = msg.content.trim();
+      if (trimmedContent.length === 0) {
+        throw new Error('Message content cannot be empty');
+      }
+      formattedMessages.push({
+        role: msg.role.trim().toLowerCase(),
+        content: trimmedContent
+      });
     }
 
     // 2. Validate configuration
@@ -258,9 +268,7 @@ export class CheaperInferenceProvider extends AIProvider {
         },
         body: JSON.stringify({
           model: this.model,
-          messages: [
-            { role: 'user', content: trimmedPrompt }
-          ],
+          messages: formattedMessages,
           stream: true
         }),
         signal: controller.signal
@@ -381,6 +389,28 @@ export class CheaperInferenceProvider extends AIProvider {
         controller.abort();
       }
     }
+  }
+
+  /**
+   * Streams a text response from the hosted Cheaper Inference provider as an async generator of text deltas.
+   *
+   * @param {string} prompt - Prompt to stream response for
+   * @param {Object} [options]
+   * @param {number} [options.timeoutMs] - Override timeout in milliseconds
+   * @returns {AsyncGenerator<string, void, unknown>}
+   */
+  async *stream(prompt, options = {}) {
+    // 1. Validate prompt
+    if (typeof prompt !== 'string') {
+      throw new Error('Prompt must be a string');
+    }
+
+    const trimmedPrompt = prompt.trim();
+    if (trimmedPrompt.length === 0) {
+      throw new Error('Prompt cannot be empty');
+    }
+
+    yield* this.streamMessages([{ role: 'user', content: trimmedPrompt }], options);
   }
 }
 

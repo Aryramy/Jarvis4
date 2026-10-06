@@ -1083,5 +1083,428 @@ describe('Web Server - Brick 2, Brick 4, Brick 5 & Brick 6', () => {
       await new Promise(r => aiServer.close(r));
     }
   });
+
+  // =========================================================================
+  // Brick 7 — Streaming AI + Conversation Context Tests
+  // =========================================================================
+
+  test('streaming first turn is stored after successful completion and second streaming request receives context', async () => {
+    const capturedHistory = [];
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async *streamMessages(messages) {
+        capturedHistory.push(messages.map(m => ({ ...m })));
+        if (messages.length === 1) {
+          yield 'Test code ';
+          yield 'recorded.';
+        } else {
+          yield 'Your test code ';
+          yield 'is ORANGE-741.';
+        }
+      }
+    };
+
+    const session = new ConversationSession();
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider, session });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      // First streaming request
+      const res1 = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'My test code is ORANGE-741.' })
+      });
+      assert.equal(res1.status, 200);
+      const raw1 = await res1.text();
+      const events1 = raw1.trim().split('\n').map(l => JSON.parse(l));
+      assert.deepEqual(events1, [
+        { type: 'delta', text: 'Test code ' },
+        { type: 'delta', text: 'recorded.' },
+        { type: 'done' }
+      ]);
+
+      // Session context has stored first user turn and completed assistant response
+      assert.equal(session.size, 2);
+      assert.deepEqual(session.getMessages(), [
+        { role: 'user', content: 'My test code is ORANGE-741.' },
+        { role: 'assistant', content: 'Test code recorded.' }
+      ]);
+
+      // Second streaming request
+      const res2 = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'What is my test code?' })
+      });
+      assert.equal(res2.status, 200);
+      const raw2 = await res2.text();
+      const events2 = raw2.trim().split('\n').map(l => JSON.parse(l));
+      assert.deepEqual(events2, [
+        { type: 'delta', text: 'Your test code ' },
+        { type: 'delta', text: 'is ORANGE-741.' },
+        { type: 'done' }
+      ]);
+
+      // Provider received the full previous conversation context
+      assert.equal(capturedHistory.length, 2);
+      assert.deepEqual(capturedHistory[1], [
+        { role: 'user', content: 'My test code is ORANGE-741.' },
+        { role: 'assistant', content: 'Test code recorded.' },
+        { role: 'user', content: 'What is my test code?' }
+      ]);
+
+      // Completed assistant response is stored in session
+      assert.equal(session.size, 4);
+      assert.deepEqual(session.getMessages(), [
+        { role: 'user', content: 'My test code is ORANGE-741.' },
+        { role: 'assistant', content: 'Test code recorded.' },
+        { role: 'user', content: 'What is my test code?' },
+        { role: 'assistant', content: 'Your test code is ORANGE-741.' }
+      ]);
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('normal Ask AI → streaming Ask AI shares context seamlessly', async () => {
+    let streamingReceived = null;
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async generateMessages(messages) {
+        return { success: true, text: 'Noted favorite color.' };
+      },
+      async *streamMessages(messages) {
+        streamingReceived = messages.map(m => ({ ...m }));
+        yield 'Your favorite color is sky blue.';
+      }
+    };
+
+    const session = new ConversationSession();
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider, session });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      // 1. Normal Ask AI request
+      const res1 = await fetch(`${aiBaseUrl}/api/ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'My favorite color is sky blue.' })
+      });
+      assert.equal(res1.status, 200);
+      assert.equal(session.size, 2);
+
+      // 2. Streaming Ask AI request
+      const res2 = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'What is my favorite color?' })
+      });
+      assert.equal(res2.status, 200);
+      await res2.text();
+
+      // Streaming provider must have received the context from normal turn
+      assert.deepEqual(streamingReceived, [
+        { role: 'user', content: 'My favorite color is sky blue.' },
+        { role: 'assistant', content: 'Noted favorite color.' },
+        { role: 'user', content: 'What is my favorite color?' }
+      ]);
+
+      assert.equal(session.size, 4);
+      assert.equal(session.getMessages()[3].content, 'Your favorite color is sky blue.');
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('streaming Ask AI → normal Ask AI shares context seamlessly', async () => {
+    let normalReceived = null;
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async *streamMessages(messages) {
+        yield 'Noted test planet.';
+      },
+      async generateMessages(messages) {
+        normalReceived = messages.map(m => ({ ...m }));
+        return { success: true, text: 'Your planet is VELORA-92.' };
+      }
+    };
+
+    const session = new ConversationSession();
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider, session });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      // 1. Streaming Ask AI request
+      const res1 = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'My test planet is VELORA-92.' })
+      });
+      assert.equal(res1.status, 200);
+      await res1.text();
+      assert.equal(session.size, 2);
+
+      // 2. Normal Ask AI request
+      const res2 = await fetch(`${aiBaseUrl}/api/ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'What is my test planet?' })
+      });
+      assert.equal(res2.status, 200);
+      await res2.json();
+
+      // Normal provider call must have received context from streaming turn
+      assert.deepEqual(normalReceived, [
+        { role: 'user', content: 'My test planet is VELORA-92.' },
+        { role: 'assistant', content: 'Noted test planet.' },
+        { role: 'user', content: 'What is my test planet?' }
+      ]);
+
+      assert.equal(session.size, 4);
+      assert.equal(session.getMessages()[3].content, 'Your planet is VELORA-92.');
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('completed streaming assistant message is stored exactly once', async () => {
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async *streamMessages() {
+        yield 'Part 1 ';
+        yield 'Part 2 ';
+        yield 'Part 3';
+      }
+    };
+
+    const session = new ConversationSession();
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider, session });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      const res = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Count to three' })
+      });
+      assert.equal(res.status, 200);
+      await res.text();
+
+      const messages = session.getMessages();
+      assert.equal(messages.length, 2);
+      assert.equal(messages[0].role, 'user');
+      assert.equal(messages[1].role, 'assistant');
+      assert.equal(messages[1].content, 'Part 1 Part 2 Part 3');
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('provider stream failure does not save fake assistant response and preserves prior valid state', async () => {
+    let callIndex = 0;
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async *streamMessages() {
+        callIndex++;
+        if (callIndex === 1) {
+          yield 'Valid first completion';
+        } else {
+          yield 'Incomplete delta ';
+          throw new Error('Mid-stream connection broken');
+        }
+      }
+    };
+
+    const session = new ConversationSession();
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider, session });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      // Turn 1 succeeds
+      const res1 = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Turn 1' })
+      });
+      assert.equal(res1.status, 200);
+      await res1.text();
+      assert.equal(session.size, 2);
+
+      // Turn 2 fails mid-stream
+      const res2 = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Turn 2 failing' })
+      });
+      assert.equal(res2.status, 200);
+      const raw2 = await res2.text();
+      const events2 = raw2.trim().split('\n').map(l => JSON.parse(l));
+      assert.equal(events2.some(e => e.type === 'error'), true);
+
+      // Session context must NOT contain partial or fake assistant message, and Turn 2 user message is rolled back
+      assert.equal(session.size, 2);
+      assert.deepEqual(session.getMessages(), [
+        { role: 'user', content: 'Turn 1' },
+        { role: 'assistant', content: 'Valid first completion' }
+      ]);
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('client abort does not save incomplete assistant response and rolls back user turn', async () => {
+    let releaseStream;
+    const releasePromise = new Promise(r => { releaseStream = r; });
+
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async *streamMessages() {
+        yield 'Initial chunk';
+        await releasePromise;
+        yield 'Final chunk';
+      }
+    };
+
+    const session = new ConversationSession();
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider, session });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      const controller = new AbortController();
+      const res = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Stream to abort' }),
+        signal: controller.signal
+      });
+
+      const reader = res.body.getReader();
+      // Read first chunk
+      const { value } = await reader.read();
+      assert.ok(value);
+
+      // Client cancels/aborts connection mid-stream
+      controller.abort();
+      reader.cancel().catch(() => {});
+
+      // Allow event loop to propagate socket close to server before releasing provider loop
+      await new Promise(r => setTimeout(r, 60));
+
+      // Release backend provider loop
+      releaseStream();
+
+      // Wait a moment for server on('close') event to settle
+      await new Promise(r => setTimeout(r, 60));
+
+      // Incomplete assistant response was not stored, and user turn was rolled back
+      assert.equal(session.size, 0);
+      assert.deepEqual(session.getMessages(), []);
+    } finally {
+      releaseStream();
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('Clear Conversation clears context used by streaming and next streaming request starts clean', async () => {
+    const receivedHistory = [];
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async *streamMessages(messages) {
+        receivedHistory.push(messages.map(m => ({ ...m })));
+        yield 'Response';
+      }
+    };
+
+    const session = new ConversationSession();
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider, session });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      // 1. Send first streaming request
+      const res1 = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'My secret is TOP-SECRET-123' })
+      });
+      await res1.text();
+      assert.equal(session.size, 2);
+
+      // 2. Clear conversation
+      const clearRes = await fetch(`${aiBaseUrl}/api/conversation/clear`, {
+        method: 'POST'
+      });
+      assert.equal(clearRes.status, 200);
+      assert.equal(session.size, 0);
+
+      // 3. Send second streaming request
+      const res2 = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'What is my secret?' })
+      });
+      await res2.text();
+
+      // Second streaming request received only the new turn with no prior context
+      assert.equal(receivedHistory.length, 2);
+      assert.deepEqual(receivedHistory[1], [
+        { role: 'user', content: 'What is my secret?' }
+      ]);
+      assert.equal(session.size, 2);
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
+
+  test('streaming requests enforce session maximum history limit', async () => {
+    const mockProvider = {
+      apiKey: 'test-key',
+      validateConfig() { return { valid: true }; },
+      async *streamMessages() {
+        yield 'Reply';
+      }
+    };
+
+    // Configure session with maximum 3 messages
+    const session = new ConversationSession({ maxMessages: 3 });
+    const aiServer = await startServer(0, '127.0.0.1', { provider: mockProvider, session });
+    const aiBaseUrl = `http://127.0.0.1:${aiServer.address().port}`;
+
+    try {
+      // Turn 1
+      const res1 = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Prompt 1' })
+      });
+      await res1.text();
+      assert.equal(session.size, 2);
+
+      // Turn 2
+      const res2 = await fetch(`${aiBaseUrl}/api/ai/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: 'Prompt 2' })
+      });
+      await res2.text();
+
+      // With maxMessages: 3, adding 4th message evicted oldest
+      assert.equal(session.size, 3);
+      assert.deepEqual(session.getMessages(), [
+        { role: 'assistant', content: 'Reply' },
+        { role: 'user', content: 'Prompt 2' },
+        { role: 'assistant', content: 'Reply' }
+      ]);
+    } finally {
+      await new Promise(r => aiServer.close(r));
+    }
+  });
 });
 

@@ -43,6 +43,17 @@ export class AIProvider {
   async *stream(prompt, options = {}) {
     throw new Error(`stream() must be implemented by subclass ${this.constructor.name}`);
   }
+
+  /**
+   * Streams a text response for the given conversation messages as an async generator of text deltas.
+   *
+   * @param {Array<{ role: string, content: string }>} messages - Message history
+   * @param {Object} [options] - Additional provider options
+   * @returns {AsyncGenerator<string, void, unknown>}
+   */
+  async *streamMessages(messages, options = {}) {
+    throw new Error(`streamMessages() must be implemented by subclass ${this.constructor.name}`);
+  }
 }
 
 export default AIProvider;

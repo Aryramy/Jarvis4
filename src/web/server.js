@@ -96,7 +96,7 @@ export function createRequestListener(options = {}) {
       return;
     }
 
-    // Route: /api/ai/stream (Brick 5 streaming AI endpoint)
+    // Route: /api/ai/stream (Brick 5 streaming AI endpoint & Brick 7 streaming conversation context)
     if (url.pathname === '/api/ai/stream') {
       if (req.method !== 'POST') {
         res.writeHead(405, { 'Content-Type': 'application/json' });
@@ -155,31 +155,66 @@ export function createRequestListener(options = {}) {
           return;
         }
 
+        let userTurnAdded = false;
+        let streamCompletedCleanly = false;
+        let accumulatedText = '';
+        let clientDisconnected = false;
+
+        const rollbackUserTurn = () => {
+          if (userTurnAdded && !streamCompletedCleanly) {
+            session.pop();
+            userTurnAdded = false;
+          }
+        };
+
         res.writeHead(200, {
           'Content-Type': 'application/x-ndjson; charset=utf-8',
           'Cache-Control': 'no-cache, no-transform',
           'Transfer-Encoding': 'chunked'
         });
 
-        let clientDisconnected = false;
         res.on('close', () => {
           if (!res.writableEnded) {
             clientDisconnected = true;
+            rollbackUserTurn();
           }
         });
 
         try {
-          for await (const delta of provider.stream(trimmedInput)) {
+          // Add user message to session context
+          session.addUserMessage(trimmedInput);
+          userTurnAdded = true;
+
+          const messages = session.getMessages();
+
+          const streamSource = typeof provider.streamMessages === 'function'
+            ? provider.streamMessages(messages)
+            : provider.stream(trimmedInput);
+
+          for await (const delta of streamSource) {
             if (clientDisconnected || res.destroyed || res.writableEnded) {
               break;
             }
+            accumulatedText += delta;
             res.write(JSON.stringify({ type: 'delta', text: delta }) + '\n');
           }
+
           if (!res.writableEnded && !clientDisconnected) {
+            streamCompletedCleanly = true;
+            // Store accumulated assistant response only after clean completion
+            session.addAssistantMessage(accumulatedText);
             res.write(JSON.stringify({ type: 'done' }) + '\n');
             res.end();
+          } else {
+            rollbackUserTurn();
+            if (!res.writableEnded) {
+              res.end();
+            }
           }
         } catch (err) {
+          // Stream error occurred: roll back user turn to keep conversation state uncorrupted
+          rollbackUserTurn();
+
           if (!res.writableEnded && !clientDisconnected) {
             let safeError = err.message || 'Stream request failed';
             const apiKeyToRedact = provider.apiKey || process.env.CHEAPER_INFERENCE_API_KEY;

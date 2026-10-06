@@ -202,6 +202,9 @@ check('AI Provider Module Sanity Check', async () => {
   if (typeof provider.generateMessages !== 'function') {
     throw new Error('Provider must implement generateMessages() method');
   }
+  if (typeof provider.streamMessages !== 'function') {
+    throw new Error('Provider must implement streamMessages() method');
+  }
 });
 
 check('Conversation Session Sanity Check', async () => {

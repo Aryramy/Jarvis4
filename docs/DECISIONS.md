@@ -72,6 +72,18 @@
   6. Streaming (`POST /api/ai/stream`) deliberately remains stateless in Brick 6 to maintain narrow scope.
 - **Consequences**: Temporary conversational context operates cleanly during an active process run and is completely erased upon server restart or explicit clear. Zero external storage or database dependencies.
 
+## ADR-0012: Streaming AI with Shared Temporary Short-Term Conversation Context
+- **Status**: Accepted
+- **Context**: In Brick 6, temporary conversational context was integrated into non-streaming `POST /api/ai`, while `POST /api/ai/stream` remained stateless. Brick 7 requires progressive streaming AI to share the exact same temporary `ConversationSession` bidirectionally with non-streaming AI without introducing separate memory stores, persistent databases, or disk files.
+- **Decision**:
+  1. Extend `AIProvider` base contract and `CheaperInferenceProvider` with `streamMessages(messages, options)` yielding text deltas from ordered `[{ role, content }]` messages. Refactor stateless `stream(prompt)` to delegate to `streamMessages([{ role: 'user', content: trimmedPrompt }])`.
+  2. Connect `POST /api/ai/stream` in `src/web/server.js` to the single shared `ConversationSession` instance already utilized by `POST /api/ai`.
+  3. Flow: Append user turn to session -> retrieve ordered history -> invoke `provider.streamMessages(messages)` -> stream deltas to client progressively via NDJSON -> accumulate completed assistant response server-side -> append assistant turn to session only upon clean stream completion.
+  4. Error and Abort Safety: If provider streaming throws an error or the client prematurely disconnects (`res.on('close')` before `writableEnded`), roll back the user message turn via `session.pop()`, do not record partial/fake assistant messages, and safely preserve prior valid conversation state.
+  5. Shared Clear: `POST /api/conversation/clear` empties the single shared session, resetting context for both streaming and non-streaming modes.
+- **Consequences**: Both streaming and non-streaming AI operate over identical in-memory session history. Full backward compatibility is preserved for existing stateless CLI and provider calls. Temporary state remains strictly in RAM, vanishing on clear or process restart.
+
+
 
 
 

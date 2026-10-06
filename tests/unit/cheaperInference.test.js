@@ -592,4 +592,99 @@ describe('Cheaper Inference Provider Adapter - Brick 3', () => {
 
     assert.equal(called, false);
   });
+
+  // =========================================================================
+  // Brick 7 — Message-based streaming support (streamMessages)
+  // =========================================================================
+
+  test('streamMessages accepts ordered conversation messages, preserves role/content order, and yields deltas progressively', async () => {
+    let capturedOptions = null;
+
+    const mockFetch = async (url, options) => {
+      capturedOptions = options;
+      return {
+        ok: true,
+        status: 200,
+        body: (async function* () {
+          yield 'data: {"choices":[{"delta":{"content":"Your "}}]}\n\n';
+          yield 'data: {"choices":[{"delta":{"content":"code "}}]}\n\n';
+          yield 'data: {"choices":[{"delta":{"content":"is ORANGE-741"}}]}\n\n';
+          yield 'data: [DONE]\n\n';
+        })()
+      };
+    };
+
+    const provider = new CheaperInferenceProvider({
+      ...validConfig,
+      fetchFn: mockFetch
+    });
+
+    const messages = [
+      { role: 'user', content: 'My code is ORANGE-741' },
+      { role: 'assistant', content: 'Got it.' },
+      { role: 'user', content: 'What is my code?' }
+    ];
+
+    const deltas = [];
+    for await (const delta of provider.streamMessages(messages)) {
+      deltas.push(delta);
+    }
+
+    assert.deepEqual(deltas, ['Your ', 'code ', 'is ORANGE-741']);
+
+    const parsedBody = JSON.parse(capturedOptions.body);
+    assert.equal(parsedBody.stream, true);
+    assert.deepEqual(parsedBody.messages, [
+      { role: 'user', content: 'My code is ORANGE-741' },
+      { role: 'assistant', content: 'Got it.' },
+      { role: 'user', content: 'What is my code?' }
+    ]);
+  });
+
+  test('streamMessages rejects non-array or empty messages without network call', async () => {
+    let called = false;
+    const provider = new CheaperInferenceProvider({
+      ...validConfig,
+      fetchFn: async () => { called = true; }
+    });
+
+    const invalidInputs = [null, undefined, 'string', 123, {}, []];
+    for (const input of invalidInputs) {
+      await assert.rejects(
+        async () => {
+          for await (const _ of provider.streamMessages(input)) {}
+        },
+        /Messages must be a non-empty array/
+      );
+    }
+
+    assert.equal(called, false);
+  });
+
+  test('streamMessages rejects malformed message items without network call', async () => {
+    let called = false;
+    const provider = new CheaperInferenceProvider({
+      ...validConfig,
+      fetchFn: async () => { called = true; }
+    });
+
+    const testCases = [
+      [{ role: 'user' }], // missing content
+      [{ content: 'hello' }], // missing role
+      [{ role: 123, content: 'hello' }], // non-string role
+      [{ role: 'user', content: 123 }], // non-string content
+      [{ role: 'user', content: '' }], // empty content
+      [{ role: 'user', content: '   ' }] // whitespace-only content
+    ];
+
+    for (const messages of testCases) {
+      await assert.rejects(
+        async () => {
+          for await (const _ of provider.streamMessages(messages)) {}
+        }
+      );
+    }
+
+    assert.equal(called, false);
+  });
 });
