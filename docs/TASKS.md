@@ -21,3 +21,6 @@ Status: COMPLETED
 
 BRICK-007 — Streaming AI + Short-Term Conversation Context Only
 Status: COMPLETED
+
+BRICK-008 — Minimal Persistent Conversation State Across Restart Only
+Status: COMPLETED

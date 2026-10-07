@@ -168,4 +168,43 @@ describe('ConversationSession - Brick 6', () => {
     const invalidSession = new ConversationSession({ maxMessages: -5 });
     assert.equal(invalidSession.maxMessages, 20);
   });
+
+  test('load populates messages and replaces prior content', () => {
+    const session = new ConversationSession();
+    session.addUserMessage('Old message');
+    assert.equal(session.size, 1);
+
+    const count = session.load([
+      { role: 'user', content: 'Restored user' },
+      { role: 'assistant', content: 'Restored reply' }
+    ]);
+
+    assert.equal(count, 2);
+    assert.equal(session.size, 2);
+    assert.deepEqual(session.getMessages(), [
+      { role: 'user', content: 'Restored user' },
+      { role: 'assistant', content: 'Restored reply' }
+    ]);
+  });
+
+  test('load enforces maxMessages FIFO bounds on restore', () => {
+    const session = new ConversationSession({ maxMessages: 2 });
+    session.load([
+      { role: 'user', content: 'M1' },
+      { role: 'assistant', content: 'M2' },
+      { role: 'user', content: 'M3' }
+    ]);
+
+    assert.equal(session.size, 2);
+    assert.deepEqual(session.getMessages(), [
+      { role: 'assistant', content: 'M2' },
+      { role: 'user', content: 'M3' }
+    ]);
+  });
+
+  test('load rejects non-array input', () => {
+    const session = new ConversationSession();
+    assert.throws(() => session.load('invalid'), /Messages must be an array/);
+    assert.throws(() => session.load(null), /Messages must be an array/);
+  });
 });

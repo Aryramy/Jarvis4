@@ -29,8 +29,9 @@ export function getSystemStatus() {
 }
 
 import { ConversationSession } from './conversationSession.js';
+import { ConversationStore } from './conversationStore.js';
 
-export { config, logger, handleText, ConversationSession };
+export { config, logger, handleText, ConversationSession, ConversationStore };
 
 export default {
   FOUNDATION_INFO,
@@ -38,6 +39,7 @@ export default {
   config,
   logger,
   handleText,
-  ConversationSession
+  ConversationSession,
+  ConversationStore
 };
 

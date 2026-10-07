@@ -1,5 +1,8 @@
-import { test, describe, before, after } from 'node:test';
+import { test, describe, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { existsSync, unlinkSync } from 'node:fs';
 import { startServer } from '../../src/web/server.js';
 import { CheaperInferenceProvider } from '../../src/providers/cheaperInference.js';
 import { ConversationSession } from '../../src/core/conversationSession.js';
@@ -15,6 +18,18 @@ describe('Web Server - Brick 2, Brick 4, Brick 5 & Brick 6', () => {
   let originalEnv = {};
   let server;
   let baseUrl;
+  let currentTestStoreFile;
+
+  beforeEach(() => {
+    currentTestStoreFile = join(tmpdir(), `test-ws-store-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    process.env.CONVERSATION_STORE_PATH = currentTestStoreFile;
+  });
+
+  afterEach(() => {
+    if (currentTestStoreFile && existsSync(currentTestStoreFile)) {
+      try { unlinkSync(currentTestStoreFile); } catch {}
+    }
+  });
 
   before(async () => {
     // Environment isolation: save and isolate ambient AI variables during test run
@@ -33,6 +48,7 @@ describe('Web Server - Brick 2, Brick 4, Brick 5 & Brick 6', () => {
   });
 
   after((done) => {
+    delete process.env.CONVERSATION_STORE_PATH;
     // Restore ambient environment state
     for (const key of AI_ENV_VARS) {
       delete process.env[key];

@@ -1,8 +1,8 @@
 Project: JARVIS4
-Current Brick: 7
+Current Brick: 8
 Status: VERIFIED
-Last Verified Brick: BRICK-007
-Current Feature: Streaming AI with temporary conversation context
+Last Verified Brick: BRICK-008
+Current Feature: Minimal persistent conversation state
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
@@ -22,11 +22,12 @@ Next Feature: NOT AUTHORIZED
 - Cheaper Inference streaming adapter (`stream(prompt)` and `streamMessages(messages)`) parsing OpenAI-compatible Server-Sent Events (SSE)
 - Streaming AI web endpoint (`POST /api/ai/stream`) serving newline-delimited JSON deltas with connection abort tracking and conversation context integration
 - Web interface Ask AI — Stream button progressively rendering text deltas in real time without buffering
-- In-memory conversation session component (`ConversationSession` in `src/core/conversationSession.js`) managing short-term temporary message history (FIFO bound by default 20 turns)
+- In-memory conversation session component (`ConversationSession` in `src/core/conversationSession.js`) managing temporary message history (FIFO bound by default 20 turns)
+- Minimal local conversation store component (`ConversationStore` in `src/core/conversationStore.js`) managing atomic JSON persistence (`runtime/conversation.json`) across server restarts
 - Message-based provider support (`generateMessages(messages)` and `streamMessages(messages)`) in `AIProvider` and `CheaperInferenceProvider` preserving turn order
-- Single shared temporary short-term conversation context shared seamlessly between normal Ask AI (`POST /api/ai`) and streaming Ask AI (`POST /api/ai/stream`)
-- Deterministic rollback on provider failure or client abort preventing corruption of conversation history
-- Clear conversation endpoint (`POST /api/conversation/clear`) resetting in-memory session history for both streaming and non-streaming modes
+- Single shared conversation context preserved seamlessly across server restarts for both normal Ask AI (`POST /api/ai`) and streaming Ask AI (`POST /api/ai/stream`)
+- Deterministic rollback on provider failure or client abort preventing corruption of persisted and in-memory conversation history
+- Clear conversation endpoint (`POST /api/conversation/clear`) resetting in-memory session history and removing persisted storage file
 - Web interface Clear Conversation button (`#clear-conv-btn`) and status feedback (`Conversation cleared.`)
 
 ## External integrations
@@ -40,9 +41,10 @@ Next Feature: NOT AUTHORIZED
 ## Last verification
 
 Status: PASS (Exit Code: 0)
-- Automated test & sanity verification: 110 tests across 8 suites passed offline.
+- Automated test & sanity verification: 133 tests across 10 suites passed offline.
 - Real live provider verification (Brick 3): `npm run ai -- "Reply with exactly: JARVIS4 AI CONNECTED"` successfully executed against live Cheaper Inference endpoint (`deepseek-v4-flash-0731`) and returned `JARVIS4 AI CONNECTED`.
 - Brick 4 browser live test: VERIFIED — Human operator confirmed end-to-end browser execution through `POST /api/ai` to hosted model (`deepseek-v4-flash-0731`) with real AI response rendered in browser.
 - Brick 5 browser live streaming test: VERIFIED — Human operator confirmed live streaming behavior: progressive text delta display before full response completion, continuous delta arrival, normal completion, return to Ready status, non-streaming and deterministic paths functioning, and zero Node/libuv crashes.
 - Brick 6 live browser & session test: VERIFIED — Human operator confirmed same-session recall with Ask AI, confirmed Clear Conversation removes temporary context, confirmed server restart removes temporary context without persistent memory leakage, and streaming remained intentionally stateless in Brick 6.
 - Brick 7 browser live streaming & session test: VERIFIED — Human operator confirmed end-to-end live verification: Stream -> Stream context recall, Normal Ask AI -> Ask AI — Stream shared context, Ask AI — Stream -> Normal Ask AI shared context, Clear Conversation removes shared context cleanly, server restart removes temporary context without persistence leakage, streaming remained progressive, and zero crashes occurred.
+- Brick 8 live browser restart persistence test: VERIFIED — Human operator confirmed end-to-end persistence across restarts: Normal Ask AI -> server restart -> Normal Ask AI restored context, Ask AI — Stream -> server restart -> Normal Ask AI restored context, Normal Ask AI -> server restart -> Ask AI — Stream restored context with progressive streaming, Clear Conversation cleared disk and memory state, server restart after Clear did not restore old context, and zero process crashes occurred.

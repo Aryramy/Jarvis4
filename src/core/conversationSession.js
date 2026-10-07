@@ -100,6 +100,28 @@ export class ConversationSession {
   }
 
   /**
+   * Loads and restores messages into this session.
+   * Enforces role validation, content sanitization, and maximum history bound (FIFO).
+   *
+   * @param {Array<{ role: string, content: string }>} messages
+   * @returns {number} The resulting message count
+   */
+  load(messages) {
+    if (!Array.isArray(messages)) {
+      throw new Error('Messages must be an array');
+    }
+
+    this.clear();
+    for (const msg of messages) {
+      if (msg && typeof msg === 'object') {
+        this.addMessage(msg.role, msg.content);
+      }
+    }
+
+    return this.messages.length;
+  }
+
+  /**
    * Returns current count of messages.
    * @returns {number}
    */

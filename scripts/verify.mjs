@@ -222,6 +222,29 @@ check('Conversation Session Sanity Check', async () => {
   }
 });
 
+check('Conversation Store Sanity Check', async () => {
+  const { ConversationStore } = await import('../src/core/conversationStore.js');
+  const tempPath = resolve(ROOT_DIR, 'runtime', `.sanity-store-${Date.now()}.json`);
+  const store = new ConversationStore({ filePath: tempPath });
+  try {
+    const initial = store.load();
+    if (!Array.isArray(initial) || initial.length !== 0) {
+      throw new Error('Conversation store initial load failed');
+    }
+    store.save([{ role: 'user', content: 'Sanity store' }]);
+    const loaded = store.load();
+    if (loaded.length !== 1 || loaded[0].content !== 'Sanity store') {
+      throw new Error('Conversation store save/load failed');
+    }
+    store.clear();
+    if (store.load().length !== 0) {
+      throw new Error('Conversation store clear failed');
+    }
+  } finally {
+    store.clear();
+  }
+});
+
 // 3. Syntax Validation across all JS/MJS files
 check('JavaScript Syntax Validation (node --check)', () => {
   const searchDirs = ['src', 'tests', 'scripts'];

@@ -11,6 +11,10 @@ logs/
 *.log
 npm-debug.log*
 
+# Runtime persistence
+runtime/
+*.tmp.*
+
 # Coverage
 coverage/
 .nyc_output/

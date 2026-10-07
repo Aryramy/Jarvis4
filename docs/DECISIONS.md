@@ -83,6 +83,19 @@
   5. Shared Clear: `POST /api/conversation/clear` empties the single shared session, resetting context for both streaming and non-streaming modes.
 - **Consequences**: Both streaming and non-streaming AI operate over identical in-memory session history. Full backward compatibility is preserved for existing stateless CLI and provider calls. Temporary state remains strictly in RAM, vanishing on clear or process restart.
 
+## ADR-0013: Minimal Persistent Conversation State Across Server Restart
+- **Status**: Accepted
+- **Context**: Prior to Brick 8, conversation history was purely in-memory and lost upon process termination. Brick 8 requires conversation state to survive server restarts using a minimal local file persistence mechanism without introducing external databases, ORMs, vector embeddings, summarization, or semantic memory systems.
+- **Decision**:
+  1. Implement `ConversationStore` (`src/core/conversationStore.js`) managing a local versioned JSON file (`runtime/conversation.json`, configurable via options or `CONVERSATION_STORE_PATH`).
+  2. Implement safe atomic write operations via temporary files and rename/replace to prevent corruption during unexpected shutdowns.
+  3. Safe corruption and missing file handling: missing file returns `[]`; malformed/corrupted file logs a controlled warning and starts cleanly with an empty session without crashing the server.
+  4. Integrate persistence into `src/web/server.js`: on startup, restore valid saved turns into `ConversationSession` (respecting FIFO `maxMessages` bounds); on successful completion of normal or streaming AI turns, persist the updated state atomically; on stream failure or client abort, preserve prior valid state without recording partial turns.
+  5. Clear synchronization: `POST /api/conversation/clear` empties both the in-memory `ConversationSession` and the persisted disk file (`store.clear()`).
+  6. Git and security protection: ignore `runtime/` and temp files in `.gitignore`; strictly prohibit storing secrets, API keys, or authorization tokens.
+- **Consequences**: Restarts restore previous conversation turns across both normal and streaming AI modes. Zero external database dependencies. Automated tests use isolated temporary files and do not touch developer runtime files.
+
+
 
 
 

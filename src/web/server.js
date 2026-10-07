@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { handleText } from '../core/textCore.js';
 import { CheaperInferenceProvider } from '../providers/cheaperInference.js';
 import { ConversationSession } from '../core/conversationSession.js';
+import { ConversationStore } from '../core/conversationStore.js';
 
 const __dirname = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const HTML_FILE_PATH = join(__dirname, 'index.html');
@@ -30,7 +31,22 @@ export function createRequestListener(options = {}) {
     htmlContent = readFileSync(HTML_FILE_PATH, 'utf8');
   }
 
+  const store = options.store !== undefined
+    ? options.store
+    : (options.session ? null : new ConversationStore());
   const session = options.session || new ConversationSession();
+
+  // Restore persisted messages on startup if session is not already populated
+  if (store && session.size === 0) {
+    try {
+      const persisted = store.load();
+      if (Array.isArray(persisted) && persisted.length > 0) {
+        session.load(persisted);
+      }
+    } catch {
+      // Safe fallback
+    }
+  }
 
   return (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -203,6 +219,15 @@ export function createRequestListener(options = {}) {
             streamCompletedCleanly = true;
             // Store accumulated assistant response only after clean completion
             session.addAssistantMessage(accumulatedText);
+
+            if (store) {
+              try {
+                store.save(session.getMessages());
+              } catch {
+                // Safe fallback
+              }
+            }
+
             res.write(JSON.stringify({ type: 'done' }) + '\n');
             res.end();
           } else {
@@ -241,6 +266,13 @@ export function createRequestListener(options = {}) {
       req.on('data', () => {});
       req.on('end', () => {
         session.clear();
+        if (store) {
+          try {
+            store.clear();
+          } catch {
+            // Safe fallback
+          }
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
       });
@@ -323,6 +355,14 @@ export function createRequestListener(options = {}) {
           if (result.success) {
             // Store assistant response in session context
             session.addAssistantMessage(result.text);
+
+            if (store) {
+              try {
+                store.save(session.getMessages());
+              } catch {
+                // Safe fallback
+              }
+            }
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
