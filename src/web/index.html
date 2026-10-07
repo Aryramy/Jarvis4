@@ -112,6 +112,40 @@
       border-top: 1px solid #334155;
       padding-top: 12px;
     }
+    .mic-section {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid #334155;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .mic-status {
+      font-size: 0.85rem;
+      color: #94a3b8;
+    }
+    .mic-status.recording {
+      color: #f87171;
+      font-weight: 600;
+    }
+    .mic-status.captured {
+      color: #38bdf8;
+      font-weight: 600;
+    }
+    .mic-status.error {
+      color: #f87171;
+    }
+    .mic-meta {
+      font-size: 0.8rem;
+      font-family: monospace;
+      color: #cbd5e1;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 8px 12px;
+      text-align: left;
+      word-break: break-all;
+    }
   </style>
 </head>
 <body>
@@ -128,9 +162,21 @@
     </form>
     <div id="response-area" class="response-area">Ready for input</div>
     <div id="status-indicator" class="status-indicator">Status: Ready</div>
+
+    <!-- Brick 9 Microphone Capture Section -->
+    <div id="mic-section" class="mic-section">
+      <div class="button-group">
+        <button type="button" id="start-mic-btn" class="secondary">Start Microphone</button>
+        <button type="button" id="stop-mic-btn" class="secondary" disabled>Stop Microphone</button>
+      </div>
+      <div id="mic-status" class="mic-status">Microphone: Idle</div>
+      <div id="mic-meta" class="mic-meta" style="display: none;"></div>
+      <audio id="audio-playback" controls style="display: none; width: 100%; margin-top: 4px;"></audio>
+    </div>
   </div>
 
-  <script>
+  <script type="module">
+    import { MicrophoneRecorder } from '/microphone.js';
     const form = document.getElementById('text-form');
     const input = document.getElementById('text-input');
     const sendBtn = document.getElementById('send-btn');
@@ -316,6 +362,69 @@
       } finally {
         setBusy(false);
         input.focus();
+      }
+    });
+
+    // Microphone capture handlers (Brick 9)
+    const startMicBtn = document.getElementById('start-mic-btn');
+    const stopMicBtn = document.getElementById('stop-mic-btn');
+    const micStatus = document.getElementById('mic-status');
+    const micMeta = document.getElementById('mic-meta');
+    const audioPlayback = document.getElementById('audio-playback');
+
+    const micRecorder = new MicrophoneRecorder();
+
+    startMicBtn.addEventListener('click', async () => {
+      micMeta.style.display = 'none';
+      audioPlayback.style.display = 'none';
+      audioPlayback.src = '';
+
+      micStatus.textContent = 'Microphone: Requesting permission...';
+      micStatus.className = 'mic-status';
+      startMicBtn.disabled = true;
+
+      try {
+        await micRecorder.start();
+        micStatus.textContent = 'Microphone: Recording';
+        micStatus.className = 'mic-status recording';
+        stopMicBtn.disabled = false;
+      } catch (err) {
+        micStatus.textContent = 'Microphone: Error: ' + err.message;
+        micStatus.className = 'mic-status error';
+        startMicBtn.disabled = false;
+        stopMicBtn.disabled = true;
+      }
+    });
+
+    stopMicBtn.addEventListener('click', async () => {
+      stopMicBtn.disabled = true;
+      micStatus.textContent = 'Microphone: Stopping...';
+      micStatus.className = 'mic-status';
+
+      try {
+        const captured = await micRecorder.stop();
+        if (captured && captured.size > 0) {
+          micStatus.textContent = 'Microphone: Captured';
+          micStatus.className = 'mic-status captured';
+
+          const sizeKb = (captured.size / 1024).toFixed(1);
+          micMeta.textContent = `Captured: ${captured.durationSec}s | Size: ${sizeKb} KB | Type: ${captured.type}`;
+          micMeta.style.display = 'block';
+
+          if (captured.url) {
+            audioPlayback.src = captured.url;
+            audioPlayback.style.display = 'block';
+          }
+        } else {
+          micStatus.textContent = 'Microphone: Error: Captured audio is empty';
+          micStatus.className = 'mic-status error';
+        }
+      } catch (err) {
+        micStatus.textContent = 'Microphone: Error: ' + err.message;
+        micStatus.className = 'mic-status error';
+      } finally {
+        startMicBtn.disabled = false;
+        stopMicBtn.disabled = true;
       }
     });
   </script>

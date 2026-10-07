@@ -24,3 +24,8 @@ Status: COMPLETED
 
 BRICK-008 — Minimal Persistent Conversation State Across Restart Only
 Status: COMPLETED
+
+BRICK-009 — Microphone Capture Foundation Only
+Status: COMPLETED
+
+

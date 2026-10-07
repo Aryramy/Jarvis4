@@ -95,6 +95,20 @@
   6. Git and security protection: ignore `runtime/` and temp files in `.gitignore`; strictly prohibit storing secrets, API keys, or authorization tokens.
 - **Consequences**: Restarts restore previous conversation turns across both normal and streaming AI modes. Zero external database dependencies. Automated tests use isolated temporary files and do not touch developer runtime files.
 
+## ADR-0014: Browser Microphone Capture Foundation
+- **Status**: Accepted
+- **Context**: Future voice interaction requires real microphone capture as an input foundation. However, Brick 9 is capture foundation only and must not implement speech recognition (STT), speech synthesis (TTS), language selection, wake word detection, or server audio upload endpoints. In accordance with ADR-0003, the capture layer must remain completely language-agnostic so that future multilingual processing operates over one unified pipeline.
+- **Decision**:
+  1. Implement `MicrophoneRecorder` (`src/web/microphone.js`) as an ESM module encapsulating browser `navigator.mediaDevices.getUserMedia({ audio: true })` and `MediaRecorder`.
+  2. Implement safe capability and MIME type negotiation (`audio/webm;codecs=opus`, `audio/webm`, `audio/ogg;codecs=opus`, `audio/ogg`, `audio/mp4`, `audio/aac`).
+  3. Validate completed recordings: verify audio Blob exists, verify Blob size > 0 (rejecting zero-byte captures), calculate capture duration, and generate capture metadata (`blob`, `size`, `type`, `durationMs`, `durationSec`, `url`).
+  4. Implement robust hardware resource cleanup: stop all `MediaStream` audio tracks upon recording stop or cleanup to release microphone hardware and prevent resource leaks across repeated recording cycles.
+  5. Minimal UI integration in `src/web/index.html`: add "Start Microphone" and "Stop Microphone" controls, microphone status indicator (`Idle`, `Requesting permission...`, `Recording`, `Captured`, `Error`), capture metadata display, and optional browser-native `<audio controls>` playback to allow humans to verify their recorded voice.
+  6. Serve `microphone.js` directly via `GET /microphone.js` from the existing lightweight HTTP server. Audio remains in the browser without server upload endpoints in this brick.
+  7. Automated verification is completely offline and deterministic using injected/mocked MediaDevices and MediaRecorder abstractions, ensuring no real hardware dependencies during automated tests.
+- **Consequences**: Provides reliable browser microphone capture and metadata extraction ready for future unified multilingual STT integration in subsequent bricks, without premature framework dependencies or language silos.
+
+
 
 
 

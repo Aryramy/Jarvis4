@@ -14,6 +14,7 @@ import { ConversationStore } from '../core/conversationStore.js';
 
 const __dirname = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const HTML_FILE_PATH = join(__dirname, 'index.html');
+const MICROPHONE_JS_PATH = join(__dirname, 'microphone.js');
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 8080;
@@ -29,6 +30,11 @@ export function createRequestListener(options = {}) {
   let htmlContent = '';
   if (existsSync(HTML_FILE_PATH)) {
     htmlContent = readFileSync(HTML_FILE_PATH, 'utf8');
+  }
+
+  let microphoneJsContent = '';
+  if (existsSync(MICROPHONE_JS_PATH)) {
+    microphoneJsContent = readFileSync(MICROPHONE_JS_PATH, 'utf8');
   }
 
   const store = options.store !== undefined
@@ -64,6 +70,22 @@ export function createRequestListener(options = {}) {
         'Cache-Control': 'no-cache'
       });
       res.end(htmlContent);
+      return;
+    }
+
+    // Route: GET /microphone.js (Brick 9 microphone module)
+    if (url.pathname === '/microphone.js') {
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      res.writeHead(200, {
+        'Content-Type': 'application/javascript; charset=utf-8',
+        'Cache-Control': 'no-cache'
+      });
+      res.end(microphoneJsContent);
       return;
     }
 

@@ -1,8 +1,8 @@
 Project: JARVIS4
-Current Brick: 8
+Current Brick: 9
 Status: VERIFIED
-Last Verified Brick: BRICK-008
-Current Feature: Minimal persistent conversation state
+Last Verified Brick: BRICK-009
+Current Feature: Browser microphone capture foundation
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
@@ -29,6 +29,10 @@ Next Feature: NOT AUTHORIZED
 - Deterministic rollback on provider failure or client abort preventing corruption of persisted and in-memory conversation history
 - Clear conversation endpoint (`POST /api/conversation/clear`) resetting in-memory session history and removing persisted storage file
 - Web interface Clear Conversation button (`#clear-conv-btn`) and status feedback (`Conversation cleared.`)
+- Language-agnostic browser microphone capture module (`MicrophoneRecorder` in `src/web/microphone.js`) with capability and MIME type detection (`audio/webm`, `audio/ogg`, etc.)
+- Clean audio hardware release: stops all MediaStream audio tracks on recording stop and cleanup to prevent resource leaks
+- Web interface microphone capture controls (`#start-mic-btn`, `#stop-mic-btn`), status display (`#mic-status`), capture metadata display (`#mic-meta`), and browser-native audio playback (`#audio-playback`)
+- Dedicated `/microphone.js` static module route served by minimal HTTP server
 
 ## External integrations
 
@@ -41,10 +45,13 @@ Next Feature: NOT AUTHORIZED
 ## Last verification
 
 Status: PASS (Exit Code: 0)
-- Automated test & sanity verification: 133 tests across 10 suites passed offline.
+- Automated test & sanity verification: 159 tests across 11 suites passed offline (Exit Code: 0).
 - Real live provider verification (Brick 3): `npm run ai -- "Reply with exactly: JARVIS4 AI CONNECTED"` successfully executed against live Cheaper Inference endpoint (`deepseek-v4-flash-0731`) and returned `JARVIS4 AI CONNECTED`.
 - Brick 4 browser live test: VERIFIED — Human operator confirmed end-to-end browser execution through `POST /api/ai` to hosted model (`deepseek-v4-flash-0731`) with real AI response rendered in browser.
 - Brick 5 browser live streaming test: VERIFIED — Human operator confirmed live streaming behavior: progressive text delta display before full response completion, continuous delta arrival, normal completion, return to Ready status, non-streaming and deterministic paths functioning, and zero Node/libuv crashes.
 - Brick 6 live browser & session test: VERIFIED — Human operator confirmed same-session recall with Ask AI, confirmed Clear Conversation removes temporary context, confirmed server restart removes temporary context without persistent memory leakage, and streaming remained intentionally stateless in Brick 6.
 - Brick 7 browser live streaming & session test: VERIFIED — Human operator confirmed end-to-end live verification: Stream -> Stream context recall, Normal Ask AI -> Ask AI — Stream shared context, Ask AI — Stream -> Normal Ask AI shared context, Clear Conversation removes shared context cleanly, server restart removes temporary context without persistence leakage, streaming remained progressive, and zero crashes occurred.
 - Brick 8 live browser restart persistence test: VERIFIED — Human operator confirmed end-to-end persistence across restarts: Normal Ask AI -> server restart -> Normal Ask AI restored context, Ask AI — Stream -> server restart -> Normal Ask AI restored context, Normal Ask AI -> server restart -> Ask AI — Stream restored context with progressive streaming, Clear Conversation cleared disk and memory state, server restart after Clear did not restore old context, and zero process crashes occurred.
+- Brick 9 browser live microphone capture test: VERIFIED — Human operator confirmed end-to-end live browser microphone capture: browser permission request succeeded, Start Microphone captured real speech, Stop Microphone completed non-zero recording with accurate duration and MIME type, native audio playback reproduced clear spoken audio, second recording worked cleanly without page refresh, microphone tracks were released cleanly between recordings, and all existing features (Deterministic Test, Ask AI, Ask AI — Stream, Clear Conversation, persistent conversation state) remained fully functional.
+
+

@@ -41,6 +41,7 @@ const REQUIRED_FILES = [
   'src/cli/ai.js',
   'src/web/server.js',
   'src/web/index.html',
+  'src/web/microphone.js',
   'src/providers/base.js',
   'src/providers/cheaperInference.js',
   'src/config/index.js',
@@ -51,6 +52,7 @@ const REQUIRED_FILES = [
   'tests/unit/textCore.test.js',
   'tests/unit/cheaperInference.test.js',
   'tests/unit/conversationSession.test.js',
+  'tests/unit/microphone.test.js',
   'tests/smoke/foundation.test.js',
   'tests/regression/brick1Regression.test.js',
   'tests/integration/webServer.test.js'
@@ -242,6 +244,20 @@ check('Conversation Store Sanity Check', async () => {
     }
   } finally {
     store.clear();
+  }
+});
+
+check('Microphone Capture Module Sanity Check', async () => {
+  const { MicrophoneRecorder } = await import('../src/web/microphone.js');
+  const recorder = new MicrophoneRecorder();
+  if (recorder.state !== 'idle') {
+    throw new Error('MicrophoneRecorder initial state must be idle');
+  }
+  if (typeof recorder.start !== 'function' || typeof recorder.stop !== 'function') {
+    throw new Error('MicrophoneRecorder must implement start and stop methods');
+  }
+  if (typeof recorder.cleanup !== 'function' || typeof recorder.isSupported !== 'function') {
+    throw new Error('MicrophoneRecorder must implement cleanup and isSupported methods');
   }
 });
 

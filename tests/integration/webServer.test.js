@@ -1522,5 +1522,59 @@ describe('Web Server - Brick 2, Brick 4, Brick 5 & Brick 6', () => {
       await new Promise(r => aiServer.close(r));
     }
   });
+
+  // =========================================================================
+  // Brick 9 — Microphone Capture UI & Module Route Tests
+  // =========================================================================
+
+  test('GET / serves HTML containing Brick 9 microphone UI controls and displays', async () => {
+    const res = await fetch(`${baseUrl}/`);
+    assert.equal(res.status, 200);
+
+    const html = await res.text();
+    // Microphone buttons and status displays
+    assert.match(html, /id="start-mic-btn"/);
+    assert.match(html, /id="stop-mic-btn"/);
+    assert.match(html, /id="mic-status"/);
+    assert.match(html, /id="mic-meta"/);
+    assert.match(html, /id="audio-playback"/);
+
+    // Initial label check
+    assert.match(html, /Start Microphone/);
+    assert.match(html, /Stop Microphone/);
+    assert.match(html, /Microphone:\s*Idle/);
+
+    // Script import check
+    assert.match(html, /from '\/microphone\.js'/);
+
+    // Ensure all prior controls remain present
+    assert.match(html, /id="text-input"/);
+    assert.match(html, /id="send-btn"/);
+    assert.match(html, /id="ask-ai-btn"/);
+    assert.match(html, /id="ask-ai-stream-btn"/);
+    assert.match(html, /id="clear-conv-btn"/);
+  });
+
+  test('GET /microphone.js serves the microphone module with 200 and application/javascript', async () => {
+    const res = await fetch(`${baseUrl}/microphone.js`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type') || '', /application\/javascript/);
+
+    const body = await res.text();
+    assert.match(body, /export class MicrophoneRecorder/);
+    assert.match(body, /getBestMimeType/);
+    assert.match(body, /async start\(/);
+    assert.match(body, /async stop\(/);
+    assert.match(body, /cleanup\(/);
+  });
+
+  test('POST /microphone.js rejects with 405 Method Not Allowed', async () => {
+    const res = await fetch(`${baseUrl}/microphone.js`, { method: 'POST' });
+    assert.equal(res.status, 405);
+    const data = await res.json();
+    assert.equal(data.success, false);
+    assert.equal(data.error, 'Method Not Allowed');
+  });
 });
+
 
