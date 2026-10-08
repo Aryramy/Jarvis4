@@ -11,6 +11,7 @@ import { Readable } from 'node:stream';
 import { handleText } from '../core/textCore.js';
 import { CheaperInferenceProvider } from '../providers/cheaperInference.js';
 import { OpenRouterSpeechToTextProvider } from '../providers/openRouterSTT.js';
+import { OpenRouterTextToSpeechProvider } from '../providers/openRouterTTS.js';
 import { ConversationSession } from '../core/conversationSession.js';
 import { ConversationStore } from '../core/conversationStore.js';
 
@@ -26,6 +27,7 @@ const DEFAULT_PORT = 8080;
  * @param {Object} [options]
  * @param {import('../providers/cheaperInference.js').CheaperInferenceProvider} [options.provider]
  * @param {import('../providers/openRouterSTT.js').OpenRouterSpeechToTextProvider} [options.sttProvider]
+ * @param {import('../providers/openRouterTTS.js').OpenRouterTextToSpeechProvider} [options.ttsProvider]
  * @param {import('../core/conversationSession.js').ConversationSession} [options.session]
  * @param {import('../core/conversationStore.js').ConversationStore} [options.store]
  * @returns {import('node:http').RequestListener}
@@ -563,6 +565,111 @@ export function createRequestListener(options = {}) {
         } catch (err) {
           let safeError = err.message || 'Internal server error';
           const apiKeyToRedact = (options.sttProvider && options.sttProvider.apiKey) || process.env.OPENROUTER_API_KEY;
+          if (apiKeyToRedact) {
+            safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
+          }
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: safeError
+          }));
+        }
+      });
+
+      return;
+    }
+
+    // Route: /api/tts (Brick 12 multilingual TTS endpoint)
+    if (url.pathname === '/api/tts') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      let isTooLarge = false;
+
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 1e6) {
+          isTooLarge = true;
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Payload Too Large' }));
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        if (isTooLarge) return;
+
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid JSON body' }));
+          return;
+        }
+
+        const text = parsedBody.text !== undefined ? parsedBody.text : parsedBody.input;
+        if (typeof text !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Text input must be a string' }));
+          return;
+        }
+
+        const trimmedText = text.trim();
+        if (trimmedText.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Text input cannot be empty or whitespace-only' }));
+          return;
+        }
+
+        if (text.length > 5000) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Text input exceeds maximum allowed length of 5000 characters' }));
+          return;
+        }
+
+        const ttsProvider = options.ttsProvider || new OpenRouterTextToSpeechProvider();
+        const configCheck = ttsProvider.validateConfig ? ttsProvider.validateConfig() : { valid: true };
+        if (!configCheck.valid) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: `Configuration error: ${configCheck.error}`
+          }));
+          return;
+        }
+
+        try {
+          const result = await ttsProvider.synthesize(text);
+
+          if (result.success) {
+            res.writeHead(200, {
+              'Content-Type': result.mimeType || 'audio/mpeg',
+              'Content-Length': result.audioBytes.length,
+              'X-TTS-Duration-Ms': String(result.durationMs ?? 0),
+              'Cache-Control': 'no-store'
+            });
+            res.end(result.audioBytes);
+          } else {
+            let safeError = result.error || 'TTS synthesis failed';
+            const apiKeyToRedact = ttsProvider.apiKey || process.env.OPENROUTER_API_KEY;
+            if (apiKeyToRedact) {
+              safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
+            }
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: false,
+              error: safeError,
+              durationMs: result.durationMs
+            }));
+          }
+        } catch (err) {
+          let safeError = err.message || 'Internal server error';
+          const apiKeyToRedact = (options.ttsProvider && options.ttsProvider.apiKey) || process.env.OPENROUTER_API_KEY;
           if (apiKeyToRedact) {
             safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
           }

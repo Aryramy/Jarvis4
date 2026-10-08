@@ -46,6 +46,8 @@ const REQUIRED_FILES = [
   'src/providers/cheaperInference.js',
   'src/providers/speechToTextBase.js',
   'src/providers/openRouterSTT.js',
+  'src/providers/textToSpeechBase.js',
+  'src/providers/openRouterTTS.js',
   'src/config/index.js',
   'src/utils/logger.js',
   'scripts/verify.mjs',
@@ -54,12 +56,14 @@ const REQUIRED_FILES = [
   'tests/unit/textCore.test.js',
   'tests/unit/cheaperInference.test.js',
   'tests/unit/openRouterSTT.test.js',
+  'tests/unit/openRouterTTS.test.js',
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
   'tests/smoke/foundation.test.js',
   'tests/regression/brick1Regression.test.js',
   'tests/integration/webServer.test.js',
   'tests/integration/sttEndpoint.test.js',
+  'tests/integration/ttsEndpoint.test.js',
   'tests/integration/voiceAiIntegration.test.js'
 ];
 
@@ -227,6 +231,22 @@ check('STT Provider Module Sanity Check', async () => {
   }
   if (typeof provider.transcribe !== 'function') {
     throw new Error('STT Provider must implement transcribe() method');
+  }
+});
+
+check('TTS Provider Module Sanity Check', async () => {
+  const { TextToSpeechProvider } = await import('../src/providers/textToSpeechBase.js');
+  const { OpenRouterTextToSpeechProvider } = await import('../src/providers/openRouterTTS.js');
+  const provider = new OpenRouterTextToSpeechProvider({
+    apiKey: 'mock-key',
+    model: 'elevenlabs/eleven-v4-turbo',
+    voice: 'george'
+  });
+  if (!(provider instanceof TextToSpeechProvider)) {
+    throw new Error('OpenRouterTextToSpeechProvider must inherit from TextToSpeechProvider');
+  }
+  if (typeof provider.synthesize !== 'function') {
+    throw new Error('TTS Provider must implement synthesize() method');
   }
 });
 

@@ -128,6 +128,22 @@
   5. State Isolation & Independent Error Handling: Client maintains current transcript state; new recordings reset transcript state until transcribed; failed STT cannot submit older transcripts; failed AI requests do not delete transcripts; busy state prevents accidental duplicate submission; and STT vs AI error displays remain strictly distinct.
 - **Consequences**: Connects voice input to JARVIS AI text response with minimal code additions, zero external dependencies, zero secret leakage, and 100% offline automated test verification.
 
+## ADR-0017: Unified Multilingual Text-to-Speech Output using OpenRouter
+- **Status**: Accepted
+- **Context**: Bricks 9–11 established browser microphone capture, speech-to-text via OpenRouter, and text generation via Cheaper Inference. Brick 12 requires adding voice output: converting the latest completed JARVIS text response into multilingual speech via OpenRouter TTS.
+- **Decision**:
+  1. Reusable TTS Provider Contract: Implement `TextToSpeechProvider` (`src/providers/textToSpeechBase.js`) defining `synthesize(text, options)`.
+  2. OpenRouter TTS Adapter: Implement `OpenRouterTextToSpeechProvider` (`src/providers/openRouterTTS.js`) encapsulating OpenRouter HTTP logic, endpoint (`POST /audio/speech`), model (`elevenlabs/eleven-v4-turbo`), voice (`george`), and format (`mp3`).
+  3. Unified Multilingual Architecture: The pipeline strictly omits any `language` parameter. The input Unicode text itself determines the spoken language (English, Urdu, Arabic, mixed). No language selectors, language dropdowns, per-language voices, per-language models, or per-language routes are used.
+  4. Verbatim Text Transmission: Input text is sent exactly as received without translation or romanization/transliteration.
+  5. Local Endpoint: Expose `POST /api/tts` in `src/web/server.js`, receiving `{ text }`, returning binary `audio/mpeg` with `X-TTS-Duration-Ms` and `Cache-Control: no-store`. Error responses are structured JSON with sanitized credentials.
+  6. Explicit Human Action: TTS does NOT auto-speak. The user explicitly clicks "Speak Response" to synthesize the latest successfully completed JARVIS text response.
+  7. Client State & Safety: `currentAssistantResponse` tracks the latest completed response only. Failed AI requests do not become speakable responses. Missing/empty responses prevent submission. Busy state prevents duplicate calls. Audio is played via `URL.createObjectURL(blob)` and previous object URLs are revoked. Replay is supported.
+  8. Output-Only Memory: TTS audio is strictly a presentation layer and is NEVER stored in `ConversationSession`, `ConversationStore`, or conversation memory.
+  9. Fully Mocked Offline Verification: Automated tests mock all network calls and make zero external network requests during `npm run verify`.
+- **Consequences**: Completes the first manual voice loop (Voice Mic → STT → Transcript → Ask JARVIS → AI → Response → Speak Response → TTS → Playback) with explicit human controls, zero auto-chaining, zero secret leakage, and 100% offline verification.
+
+
 
 
 

@@ -1,15 +1,15 @@
 Project: JARVIS4
-Current Brick: 11
+Current Brick: 12
 Status: VERIFIED
-Last Verified Brick: BRICK-011
-Current Feature: Voice transcript to existing JARVIS AI text response
+Last Verified Brick: BRICK-012
+Current Feature: Multilingual JARVIS text response → voice output
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
 
 - Zero-dependency Node.js ESM project foundation
 - Minimal reusable 4-level logger supporting DEBUG, INFO, WARN, ERROR
-- Environment configuration loader and validator (including Cheaper Inference and OpenRouter STT settings)
+- Environment configuration loader and validator (including Cheaper Inference, OpenRouter STT, and OpenRouter TTS settings)
 - Automated native test runner suite (`node:test`, `node:assert`)
 - Comprehensive verification suite (`scripts/verify.mjs` / `npm run verify`)
 - Deterministic text request/response core (`handleText`) with input validation and whitespace normalization
@@ -44,12 +44,22 @@ Next Feature: NOT AUTHORIZED
 - Full Unicode preservation for multilingual prompts across English, Urdu, Arabic, and code-switched mixed sentences without transliteration, client-side translation, or language-specific routes
 - Single shared conversation context between typed Ask AI, streaming Ask AI, and voice transcript queries across memory and disk persistence
 - Independent state isolation and error handling: failed STT does not submit stale transcripts, failed AI requests leave transcripts visible, and duplicate requests are prevented via thinking state
-- Comprehensive automated test suite (`tests/integration/voiceAiIntegration.test.js`) verifying all 25 Brick 11 integration requirements
+- Reusable base text-to-speech contract (`TextToSpeechProvider` in `src/providers/textToSpeechBase.js`)
+- OpenRouter multilingual text-to-speech adapter (`OpenRouterTextToSpeechProvider` in `src/providers/openRouterTTS.js`) connecting to `/audio/speech` using `elevenlabs/eleven-v4-turbo` and voice `george` (format: `mp3`)
+- Single multilingual TTS pipeline: language parameter strictly omitted; input text itself determines language spoken across English, Urdu, Arabic, and mixed code-switched text
+- Verbatim text forwarding: Unicode text preserved without translation, transliteration, or romanization
+- Local TTS web endpoint (`POST /api/tts`) accepting `{ text }`, returning binary `audio/mpeg` with `X-TTS-Duration-Ms` timing header and `Cache-Control: no-store`
+- Web interface Speak Response button (`#speak-response-btn`), TTS status indicator (`#tts-status`), and native browser audio playback (`#tts-playback`)
+- Explicit human action only: TTS is never automatic or auto-played; user explicitly clicks "Speak Response"
+- Deterministic client response state: `currentAssistantResponse` tracks latest successfully completed AI response only; failed AI states, transcripts, and prompts do not become speakable
+- Audio playback cleanup: object URLs revoked via `URL.revokeObjectURL` on replacement; replay supported without page reload
+- Output-only presentation: TTS audio is strictly presentation layer and is never added to `ConversationSession` or `ConversationStore` memory
+- Comprehensive automated test suite (`tests/integration/ttsEndpoint.test.js` & `tests/unit/openRouterTTS.test.js`) verifying all Brick 12 requirements offline
 
 ## External integrations
 
 - Cheaper Inference / OmniRoute hosted API (OpenAI-compatible `/chat/completions`)
-- OpenRouter hosted API (OpenAI-compatible `/audio/transcriptions` with `openai/whisper-large-v3-turbo`)
+- OpenRouter hosted API (OpenAI-compatible `/audio/transcriptions` with `openai/whisper-large-v3-turbo` for STT, and `/audio/speech` with `elevenlabs/eleven-v4-turbo` with voice `george` for TTS)
 
 ## Known issues
 
@@ -58,39 +68,42 @@ Next Feature: NOT AUTHORIZED
 - Multilingual Whisper STT observations:
   - Occasional extra trailing hallucinated words ("Thank you", "موسیقی", "شكرا", "ملتا") generated during audio silence or trailing background noise.
   - Mixed English terms in Urdu speech may be transliterated phonetically into Urdu script rather than Latin script (e.g., "ڈیشپورٹ").
-  - Live STT latency varies significantly depending on audio duration, gateway load, and routing (observed range: ~827ms to ~12s).
-- Live AI provider timeout observation:
-  - One Ask JARVIS request timed out during live verification; retry succeeded without loss of conversation context.
-  - Model normalized hyphen in verification code ("NOVA742" instead of "NOVA-742") while preserving value and conversational context.
+  - Live STT latency varies depending on audio duration, gateway load, and routing.
 - System boundary reminders:
-  - OpenRouter remains STT only.
-  - Cheaper Inference remains the text AI/LLM provider.
-  - TTS is NOT implemented.
+  - OpenRouter is used for STT (`/audio/transcriptions`) and TTS (`/audio/speech`).
+  - Cheaper Inference remains the text AI/LLM provider (`/chat/completions`).
+  - Automatic voice conversation / auto-chaining is NOT Brick 12.
+  - User explicitly clicks: Transcribe → Ask JARVIS → Speak Response.
 
 ## Last verification
 
-Status: PASS (Exit Code: 0)
-- Automated test & sanity verification: 221 tests across 14 suites passed offline (Exit Code: 0).
-- Provider: OpenRouter (STT only) & Cheaper Inference (Text AI only)
-- STT Model: openai/whisper-large-v3-turbo
-- Text Model: deepseek-v4-flash-0731
-- Endpoints: `POST /api/stt` and `POST /api/ai`
-- Language selection: automatic / no configured language parameter
-- Brick 4 browser live test: VERIFIED
-- Brick 5 browser live streaming test: VERIFIED
-- Brick 6 live browser & session test: VERIFIED
-- Brick 7 browser live streaming & session test: VERIFIED
-- Brick 8 live browser restart persistence test: VERIFIED
-- Brick 9 browser live microphone capture test: VERIFIED
-- Brick 10 browser live multilingual STT test: VERIFIED
-- Brick 11 browser live voice transcript → AI test: VERIFIED — Human operator confirmed end-to-end browser execution:
-  - TEST A (English Voice → AI): PASS (Spoken: "What is LLM explain it in one short sentence", STT Latency: 6188 ms, Transcript: "What is LLM explain it in one short sentence", JARVIS response: Relevant explanation of LLM returned successfully).
-  - TEST B (Urdu Voice → AI): PASS (Spoken: "جارویس، پاور بی آئی کیا ہے؟", STT Latency: 3213 ms, Transcript: "جارویس پاور بی آئی کیا ہے ملتا", JARVIS response: Relevant Urdu response about Power BI returned; trailing word "ملتا" noted).
-  - TEST C (Arabic Voice → AI): PASS (Spoken: "يا جارفس، ما هو Power BI؟", STT Latency: 4482 ms, Transcript: "جارو بيس ما هو باور بي آي؟", JARVIS response: Relevant Arabic response about Power BI returned; request meaning preserved).
-  - TEST D (Mixed Urdu + English Voice → AI): PASS (Spoken: "Jarvis, مجھے Power BI dashboard کے بارے میں بتاؤ", STT Latency: 827 ms, Transcript: "جارویس مجھے پاور بی آئی ڈیشپورٹ کے بارے میں بتاؤ", JARVIS response: Relevant Urdu response explaining Power BI dashboards returned).
-  - TEST E (Typed → Voice Shared Context): PASS (Typed: "My verification code is ORBIT-381.", Voice transcript: "What is my verification code?", STT Latency: 1492 ms, JARVIS response: Recalled ORBIT-381 from existing shared ConversationSession. First Ask JARVIS attempt timed out, retry succeeded cleanly without losing conversation context).
-  - TEST F (Voice → Typed Shared Context): PASS (Voice: "My second verification code is NOVA-742.", Typed: "What second verification code did I tell you?", JARVIS response: Recalled NOVA742 from existing shared ConversationSession).
-  - TEST G (New Recording without Refresh): PASS (Multiple distinct recordings captured, transcribed, and sent to JARVIS in same session without page refresh; each new transcript cleanly replaced prior current transcript with no stale submissions).
-  - Architecture verified: Single microphone, single `/api/stt` endpoint, single OpenRouter STT provider, single `/api/ai` endpoint, single Cheaper Inference provider, single shared `ConversationSession`, zero language selectors, zero automatic submissions, and zero TTS.
+Status: BRICK-012 VERIFIED (Exit Code: 0)
+- Automated test & sanity verification: 265 tests across 16 suites passed offline (Exit Code: 0).
+- Providers:
+  - STT: OpenRouter (`openai/whisper-large-v3-turbo` at `POST /audio/transcriptions`)
+  - AI: Cheaper Inference (`deepseek-v4-flash-0731` at `POST /chat/completions`)
+  - TTS: OpenRouter (`elevenlabs/eleven-v4-turbo`, voice: `george`, format: `mp3` at `POST /audio/speech`)
+- Endpoints: `POST /api/stt`, `POST /api/ai`, `POST /api/tts`
+- Complete manual voice loop verified:
+  Microphone → OpenRouter STT → Transcript → Explicit Ask JARVIS → Cheaper Inference AI → JARVIS Text Response → Explicit Speak Response → OpenRouter TTS (`elevenlabs/eleven-v4-turbo`, voice `george`) → Browser Audio Playback
+- Multilingual architecture: ONE model and ONE voice for all languages (English, Urdu, Arabic, mixed). NO language parameter sent. Input Unicode text itself determines language spoken.
+- Presentation only: TTS audio is NOT stored in `ConversationSession` or `ConversationStore`.
+- Brick 12 browser live tests: VERIFIED — Human operator confirmed end-to-end execution:
+  - TEST A (English TTS): PASS (JARVIS response: "Power BI is Microsoft's analytics service that turns raw data into interactive, visual insights through dashboards and reports.", TTS Latency: 3053 ms, Audio generation/playback: PASS).
+  - TEST B (Urdu TTS): PASS (JARVIS response: "پاور بی آئی مائیکروسافٹ کا ایک تجزیاتی پلیٹ فارم ہے جو خام ڈیٹا کو انٹرایکٹو ڈیش بورڈز اور رپورٹس کے ذریعے بصری بصیرت میں تبدیل کرتا ہے۔", TTS Latency: 2515 ms, Same model elevenlabs/eleven-v4-turbo, Same voice george, No language configuration change occurred).
+  - TEST C (Arabic TTS): PASS (JARVIS response: "Power BI هو أداة تحليلات من مايكروسوفت تحوّل البيانات إلى تقارير ولوحات تفاعلية لفهم أفضل.", TTS Latency: 2657 ms, Same TTS pipeline used successfully).
+  - TEST D (Mixed / Multilingual TTS): PASS (JARVIS response: "جارویس: پاور بی آئی ڈیش بورڈ ایک انٹرایکٹو صفحہ ہے جو اہم ڈیٹا کو بصری شکل میں دکھاتا ہے۔", TTS Latency: 2020 ms, Same endpoint/model/voice used successfully).
+  - TEST E (Complete Voice Loop): PASS (Microphone capture: 5.8s, 85.8 KB, audio/webm;codecs=opus; STT Latency: 3935 ms; Transcript: "What is Power BI in one sentence?"; JARVIS response: "Sir, Power BI is Microsoft's analytics service that transforms raw data into interactive, visual insights through dashboards and reports."; TTS Latency: 2152 ms; Complete flow verified from mic to browser playback).
+  - TEST F (New AI Response): PASS (Without page refresh, new AI response generated and Speak Response synthesized the NEW response; previous response not accidentally used).
+  - TEST G (Replay): PASS (Speak Response used again on current response; audio generated/played again successfully without page reload. Subsequent mic capture of 5.8s and STT of 3261 ms remained fully functional).
+- Prior bricks verified:
+  - Brick 4 browser live test: VERIFIED
+  - Brick 5 browser live streaming test: VERIFIED
+  - Brick 6 live browser & session test: VERIFIED
+  - Brick 7 browser live streaming & session test: VERIFIED
+  - Brick 8 live browser restart persistence test: VERIFIED
+  - Brick 9 browser live microphone capture test: VERIFIED
+  - Brick 10 browser live multilingual STT test: VERIFIED
+  - Brick 11 browser live voice transcript → AI test: VERIFIED
 
 

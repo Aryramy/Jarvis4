@@ -163,13 +163,14 @@
     <div id="response-area" class="response-area">Ready for input</div>
     <div id="status-indicator" class="status-indicator">Status: Ready</div>
 
-    <!-- Brick 9 Microphone Capture Section, Brick 10 Speech-to-Text & Brick 11 Voice AI -->
+    <!-- Brick 9 Microphone Capture Section, Brick 10 Speech-to-Text, Brick 11 Voice AI & Brick 12 TTS -->
     <div id="mic-section" class="mic-section">
       <div class="button-group">
         <button type="button" id="start-mic-btn" class="secondary">Start Microphone</button>
         <button type="button" id="stop-mic-btn" class="secondary" disabled>Stop Microphone</button>
         <button type="button" id="transcribe-btn" class="secondary" disabled>Transcribe</button>
         <button type="button" id="ask-jarvis-btn" disabled>Ask JARVIS</button>
+        <button type="button" id="speak-response-btn" disabled>Speak Response</button>
       </div>
       <div id="mic-status" class="mic-status">Microphone: Idle</div>
       <div id="mic-meta" class="mic-meta" style="display: none;"></div>
@@ -178,6 +179,8 @@
       <div id="transcript-display" class="response-area" style="display: none; margin-top: 8px;"></div>
       <div id="jarvis-status" class="mic-status" style="display: none;"></div>
       <div id="jarvis-response" class="response-area" style="display: none; margin-top: 8px;"></div>
+      <div id="tts-status" class="mic-status" style="display: none;"></div>
+      <audio id="tts-playback" controls style="display: none; width: 100%; margin-top: 4px;"></audio>
     </div>
   </div>
 
@@ -196,6 +199,7 @@
     const stopMicBtn = document.getElementById('stop-mic-btn');
     const transcribeBtn = document.getElementById('transcribe-btn');
     const askJarvisBtn = document.getElementById('ask-jarvis-btn');
+    const speakResponseBtn = document.getElementById('speak-response-btn');
     const micStatus = document.getElementById('mic-status');
     const micMeta = document.getElementById('mic-meta');
     const audioPlayback = document.getElementById('audio-playback');
@@ -203,10 +207,15 @@
     const transcriptDisplay = document.getElementById('transcript-display');
     const jarvisStatus = document.getElementById('jarvis-status');
     const jarvisResponse = document.getElementById('jarvis-response');
+    const ttsStatus = document.getElementById('tts-status');
+    const ttsPlayback = document.getElementById('tts-playback');
 
     const micRecorder = new MicrophoneRecorder();
     let currentCapturedAudio = null;
     let currentTranscript = null;
+    let currentAssistantResponse = null;
+    let currentTtsAudioUrl = null;
+    let isTtsBusy = false;
 
     function setBusy(busy, statusText) {
       sendBtn.disabled = busy;
@@ -215,6 +224,9 @@
       clearConvBtn.disabled = busy;
       if (askJarvisBtn) {
         askJarvisBtn.disabled = busy || !currentTranscript;
+      }
+      if (speakResponseBtn) {
+        speakResponseBtn.disabled = busy || isTtsBusy || !currentAssistantResponse;
       }
       if (statusText) {
         statusIndicator.textContent = statusText;
@@ -275,6 +287,8 @@
           responseArea.textContent = 'AI:\n' + data.response;
           responseArea.classList.remove('error');
           statusIndicator.textContent = 'Status: Ready';
+          currentAssistantResponse = data.response;
+          if (speakResponseBtn) speakResponseBtn.disabled = false;
         } else {
           responseArea.textContent = 'Error: ' + (data.error || 'Failed to process AI request');
           responseArea.classList.add('error');
@@ -317,6 +331,8 @@
         const decoder = new TextDecoder();
         let buffer = '';
 
+        let accumulatedStreamText = '';
+
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -333,6 +349,7 @@
               const msg = JSON.parse(trimmed);
               if (msg.type === 'delta') {
                 responseArea.textContent += msg.text;
+                accumulatedStreamText += msg.text;
               } else if (msg.type === 'error') {
                 responseArea.textContent = 'Error: ' + msg.message;
                 responseArea.classList.add('error');
@@ -340,6 +357,10 @@
               } else if (msg.type === 'done') {
                 if (!responseArea.classList.contains('error')) {
                   statusIndicator.textContent = 'Status: Ready';
+                  if (accumulatedStreamText.trim().length > 0) {
+                    currentAssistantResponse = accumulatedStreamText;
+                    if (speakResponseBtn) speakResponseBtn.disabled = false;
+                  }
                 }
               }
             } catch {
@@ -375,6 +396,17 @@
           responseArea.textContent = 'Conversation cleared.';
           responseArea.classList.remove('error');
           statusIndicator.textContent = 'Status: Ready';
+          currentAssistantResponse = null;
+          if (speakResponseBtn) speakResponseBtn.disabled = true;
+          if (ttsStatus) ttsStatus.style.display = 'none';
+          if (ttsPlayback) {
+            ttsPlayback.pause();
+            ttsPlayback.style.display = 'none';
+          }
+          if (currentTtsAudioUrl) {
+            URL.revokeObjectURL(currentTtsAudioUrl);
+            currentTtsAudioUrl = null;
+          }
           if (jarvisStatus) {
             jarvisStatus.style.display = 'none';
           }
@@ -569,6 +601,9 @@
           responseArea.textContent = 'JARVIS:\n' + data.response;
           responseArea.classList.remove('error');
           statusIndicator.textContent = 'Status: Ready';
+
+          currentAssistantResponse = data.response;
+          if (speakResponseBtn) speakResponseBtn.disabled = false;
         } else {
           jarvisStatus.textContent = 'JARVIS AI: Error';
           jarvisStatus.className = 'mic-status error';
@@ -597,8 +632,75 @@
         if (currentTranscript && currentTranscript.trim().length > 0) {
           askJarvisBtn.disabled = false;
         }
+        if (currentAssistantResponse && currentAssistantResponse.trim().length > 0) {
+          speakResponseBtn.disabled = false;
+        }
         if (statusIndicator.textContent === 'Status: Thinking...') {
           statusIndicator.textContent = 'Status: Ready';
+        }
+      }
+    });
+
+    // Speak Response handler (Brick 12 explicit TTS action)
+    speakResponseBtn.addEventListener('click', async () => {
+      if (!currentAssistantResponse || typeof currentAssistantResponse !== 'string' || currentAssistantResponse.trim().length === 0) {
+        ttsStatus.textContent = 'TTS: Error: No completed response to speak';
+        ttsStatus.className = 'mic-status error';
+        ttsStatus.style.display = 'block';
+        return;
+      }
+
+      if (isTtsBusy) return;
+      isTtsBusy = true;
+      speakResponseBtn.disabled = true;
+
+      ttsStatus.textContent = 'TTS: Generating...';
+      ttsStatus.className = 'mic-status';
+      ttsStatus.style.display = 'block';
+
+      try {
+        const res = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: currentAssistantResponse })
+        });
+
+        if (res.ok) {
+          const durationHeader = res.headers.get('x-tts-duration-ms');
+          const latencyText = durationHeader ? `TTS: ${durationHeader} ms` : 'TTS: Complete';
+          ttsStatus.textContent = latencyText;
+          ttsStatus.className = 'mic-status captured';
+
+          const blob = await res.blob();
+          if (currentTtsAudioUrl) {
+            URL.revokeObjectURL(currentTtsAudioUrl);
+          }
+          currentTtsAudioUrl = URL.createObjectURL(blob);
+          ttsPlayback.src = currentTtsAudioUrl;
+          ttsPlayback.style.display = 'block';
+
+          ttsStatus.textContent = 'TTS: Playing' + (durationHeader ? ` (${durationHeader} ms)` : '');
+          try {
+            await ttsPlayback.play();
+          } catch {
+            // Autoplay permissions or player fallback
+          }
+
+          ttsPlayback.onended = () => {
+            ttsStatus.textContent = 'TTS: Ready' + (durationHeader ? ` (${durationHeader} ms)` : '');
+          };
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          ttsStatus.textContent = 'TTS: Error: ' + (errData.error || 'Failed to synthesize speech');
+          ttsStatus.className = 'mic-status error';
+        }
+      } catch (err) {
+        ttsStatus.textContent = 'TTS: Error: ' + err.message;
+        ttsStatus.className = 'mic-status error';
+      } finally {
+        isTtsBusy = false;
+        if (currentAssistantResponse && currentAssistantResponse.trim().length > 0) {
+          speakResponseBtn.disabled = false;
         }
       }
     });

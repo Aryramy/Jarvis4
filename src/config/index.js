@@ -40,7 +40,11 @@ export function loadConfig(overrides = {}) {
     apiKey: overrides.OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY ?? '',
     sttBaseUrl: (overrides.OPENROUTER_STT_BASE_URL ?? process.env.OPENROUTER_STT_BASE_URL ?? 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, ''),
     sttModel: overrides.OPENROUTER_STT_MODEL ?? process.env.OPENROUTER_STT_MODEL ?? 'openai/whisper-large-v3-turbo',
-    timeoutMs: Number(overrides.OPENROUTER_STT_TIMEOUT_MS ?? process.env.OPENROUTER_STT_TIMEOUT_MS ?? 30000) || 30000
+    timeoutMs: Number(overrides.OPENROUTER_STT_TIMEOUT_MS ?? process.env.OPENROUTER_STT_TIMEOUT_MS ?? 30000) || 30000,
+    ttsBaseUrl: (overrides.OPENROUTER_TTS_BASE_URL ?? process.env.OPENROUTER_TTS_BASE_URL ?? 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, ''),
+    ttsModel: overrides.OPENROUTER_TTS_MODEL ?? process.env.OPENROUTER_TTS_MODEL ?? 'elevenlabs/eleven-v4-turbo',
+    ttsVoice: overrides.OPENROUTER_TTS_VOICE ?? process.env.OPENROUTER_TTS_VOICE ?? 'george',
+    ttsTimeoutMs: Number(overrides.OPENROUTER_TTS_TIMEOUT_MS ?? process.env.OPENROUTER_TTS_TIMEOUT_MS ?? 30000) || 30000
   });
 
   return Object.freeze({

@@ -11,7 +11,11 @@ describe('Configuration Utility', () => {
     'OPENROUTER_API_KEY',
     'OPENROUTER_STT_BASE_URL',
     'OPENROUTER_STT_MODEL',
-    'OPENROUTER_STT_TIMEOUT_MS'
+    'OPENROUTER_STT_TIMEOUT_MS',
+    'OPENROUTER_TTS_BASE_URL',
+    'OPENROUTER_TTS_MODEL',
+    'OPENROUTER_TTS_VOICE',
+    'OPENROUTER_TTS_TIMEOUT_MS'
   ];
 
   let originalEnv = {};
@@ -143,5 +147,41 @@ describe('Configuration Utility', () => {
     assert.equal(envCfg.openRouter.sttBaseUrl, 'https://env.openrouter.ai/v1');
     assert.equal(envCfg.openRouter.sttModel, 'env-whisper-model');
     assert.equal(envCfg.openRouter.timeoutMs, 20000);
+  });
+
+  test('should load openRouter TTS config defaults when environment is empty', () => {
+    const defaultCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
+    assert.equal(defaultCfg.openRouter.ttsBaseUrl, 'https://openrouter.ai/api/v1');
+    assert.equal(defaultCfg.openRouter.ttsModel, 'elevenlabs/eleven-v4-turbo');
+    assert.equal(defaultCfg.openRouter.ttsVoice, 'george');
+    assert.equal(defaultCfg.openRouter.ttsTimeoutMs, 30000);
+  });
+
+  test('should load openRouter TTS config overrides passed directly', () => {
+    const customCfg = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'info',
+      OPENROUTER_TTS_BASE_URL: 'https://custom.openrouter.ai/v1/',
+      OPENROUTER_TTS_MODEL: 'custom-tts-model',
+      OPENROUTER_TTS_VOICE: 'custom-voice',
+      OPENROUTER_TTS_TIMEOUT_MS: '45000'
+    });
+    assert.equal(customCfg.openRouter.ttsBaseUrl, 'https://custom.openrouter.ai/v1');
+    assert.equal(customCfg.openRouter.ttsModel, 'custom-tts-model');
+    assert.equal(customCfg.openRouter.ttsVoice, 'custom-voice');
+    assert.equal(customCfg.openRouter.ttsTimeoutMs, 45000);
+  });
+
+  test('should load openRouter TTS config from environment variables when overrides not provided', () => {
+    process.env.OPENROUTER_TTS_BASE_URL = 'https://env.openrouter.ai/v1/';
+    process.env.OPENROUTER_TTS_MODEL = 'env-tts-model';
+    process.env.OPENROUTER_TTS_VOICE = 'env-voice';
+    process.env.OPENROUTER_TTS_TIMEOUT_MS = '25000';
+
+    const envCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
+    assert.equal(envCfg.openRouter.ttsBaseUrl, 'https://env.openrouter.ai/v1');
+    assert.equal(envCfg.openRouter.ttsModel, 'env-tts-model');
+    assert.equal(envCfg.openRouter.ttsVoice, 'env-voice');
+    assert.equal(envCfg.openRouter.ttsTimeoutMs, 25000);
   });
 });
