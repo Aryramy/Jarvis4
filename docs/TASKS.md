@@ -28,4 +28,7 @@ Status: COMPLETED
 BRICK-009 — Microphone Capture Foundation Only
 Status: COMPLETED
 
+BRICK-010 — Unified Multilingual Speech-to-Text using OpenRouter Only
+Status: COMPLETED
+
 

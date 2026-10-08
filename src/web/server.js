@@ -7,8 +7,10 @@ import { createServer as createHttpServer } from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Readable } from 'node:stream';
 import { handleText } from '../core/textCore.js';
 import { CheaperInferenceProvider } from '../providers/cheaperInference.js';
+import { OpenRouterSpeechToTextProvider } from '../providers/openRouterSTT.js';
 import { ConversationSession } from '../core/conversationSession.js';
 import { ConversationStore } from '../core/conversationStore.js';
 
@@ -23,7 +25,9 @@ const DEFAULT_PORT = 8080;
  * Creates the HTTP request listener.
  * @param {Object} [options]
  * @param {import('../providers/cheaperInference.js').CheaperInferenceProvider} [options.provider]
+ * @param {import('../providers/openRouterSTT.js').OpenRouterSpeechToTextProvider} [options.sttProvider]
  * @param {import('../core/conversationSession.js').ConversationSession} [options.session]
+ * @param {import('../core/conversationStore.js').ConversationStore} [options.store]
  * @returns {import('node:http').RequestListener}
  */
 export function createRequestListener(options = {}) {
@@ -416,6 +420,149 @@ export function createRequestListener(options = {}) {
 
           let safeError = err.message || 'Internal server error';
           const apiKeyToRedact = (options.provider && options.provider.apiKey) || process.env.CHEAPER_INFERENCE_API_KEY;
+          if (apiKeyToRedact) {
+            safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
+          }
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: safeError
+          }));
+        }
+      });
+
+      return;
+    }
+
+    // Route: /api/stt (Brick 10 multilingual STT endpoint)
+    if (url.pathname === '/api/stt') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      const contentType = req.headers['content-type'] || '';
+      const chunks = [];
+      let totalLength = 0;
+      let isTooLarge = false;
+      const MAX_STT_BYTES = 25 * 1024 * 1024; // 25 MB limit for speech transcription
+
+      req.on('data', (chunk) => {
+        totalLength += chunk.length;
+        if (totalLength > MAX_STT_BYTES) {
+          isTooLarge = true;
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Payload Too Large' }));
+          req.destroy();
+          return;
+        }
+        chunks.push(chunk);
+      });
+
+      req.on('end', async () => {
+        if (isTooLarge) return;
+
+        try {
+          const bodyBuffer = Buffer.concat(chunks);
+          let audioBuffer = null;
+          let mimeType = 'audio/webm';
+          let filename = 'recording.webm';
+
+          if (contentType.toLowerCase().startsWith('multipart/form-data')) {
+            const stream = Readable.toWeb(Readable.from([bodyBuffer]));
+            const webRequest = new Request('http://localhost', {
+              method: 'POST',
+              headers: req.headers,
+              body: stream,
+              duplex: 'half'
+            });
+
+            let formData;
+            try {
+              formData = await webRequest.formData();
+            } catch (err) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: false, error: `Malformed multipart form data: ${err.message}` }));
+              return;
+            }
+
+            const file = formData.get('audio') || formData.get('file');
+            if (!file || typeof file.arrayBuffer !== 'function') {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: false, error: 'Audio file is required in multipart upload' }));
+              return;
+            }
+
+            const arrayBuffer = await file.arrayBuffer();
+            audioBuffer = Buffer.from(arrayBuffer);
+            mimeType = file.type || 'audio/webm';
+            filename = file.name || 'recording.webm';
+          } else if (contentType.toLowerCase().startsWith('audio/')) {
+            audioBuffer = bodyBuffer;
+            mimeType = contentType.split(';')[0].trim();
+            filename = 'recording.webm';
+          } else {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: false,
+              error: 'Invalid Content-Type. Expected audio/* or multipart/form-data'
+            }));
+            return;
+          }
+
+          if (!audioBuffer || audioBuffer.length === 0) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Audio data cannot be empty (0 bytes)' }));
+            return;
+          }
+
+          if (mimeType && !mimeType.toLowerCase().startsWith('audio/')) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: `Invalid audio MIME type: ${mimeType}` }));
+            return;
+          }
+
+          const sttProvider = options.sttProvider || new OpenRouterSpeechToTextProvider();
+          const configCheck = sttProvider.validateConfig ? sttProvider.validateConfig() : { valid: true };
+          if (!configCheck.valid) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: false,
+              error: `Configuration error: ${configCheck.error}`
+            }));
+            return;
+          }
+
+          const result = await sttProvider.transcribe(audioBuffer, { mimeType, filename });
+
+          if (result.success) {
+            const responsePayload = {
+              success: true,
+              text: result.text,
+              durationMs: result.durationMs
+            };
+            if (result.language) {
+              responsePayload.language = result.language;
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(responsePayload));
+          } else {
+            let safeError = result.error || 'Transcription failed';
+            const apiKeyToRedact = sttProvider.apiKey || process.env.OPENROUTER_API_KEY;
+            if (apiKeyToRedact) {
+              safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
+            }
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: false,
+              error: safeError,
+              durationMs: result.durationMs
+            }));
+          }
+        } catch (err) {
+          let safeError = err.message || 'Internal server error';
+          const apiKeyToRedact = (options.sttProvider && options.sttProvider.apiKey) || process.env.OPENROUTER_API_KEY;
           if (apiKeyToRedact) {
             safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
           }

@@ -36,12 +36,20 @@ export function loadConfig(overrides = {}) {
     timeoutMs: Number(overrides.CHEAPER_INFERENCE_TIMEOUT_MS ?? process.env.CHEAPER_INFERENCE_TIMEOUT_MS ?? 30000) || 30000
   });
 
+  const openRouter = Object.freeze({
+    apiKey: overrides.OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY ?? '',
+    sttBaseUrl: (overrides.OPENROUTER_STT_BASE_URL ?? process.env.OPENROUTER_STT_BASE_URL ?? 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, ''),
+    sttModel: overrides.OPENROUTER_STT_MODEL ?? process.env.OPENROUTER_STT_MODEL ?? 'openai/whisper-large-v3-turbo',
+    timeoutMs: Number(overrides.OPENROUTER_STT_TIMEOUT_MS ?? process.env.OPENROUTER_STT_TIMEOUT_MS ?? 30000) || 30000
+  });
+
   return Object.freeze({
     nodeEnv,
     logLevel,
     isProduction: nodeEnv === 'production',
     isTest: nodeEnv === 'test',
-    cheaperInference
+    cheaperInference,
+    openRouter
   });
 }
 

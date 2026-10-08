@@ -163,15 +163,18 @@
     <div id="response-area" class="response-area">Ready for input</div>
     <div id="status-indicator" class="status-indicator">Status: Ready</div>
 
-    <!-- Brick 9 Microphone Capture Section -->
+    <!-- Brick 9 Microphone Capture Section & Brick 10 Speech-to-Text -->
     <div id="mic-section" class="mic-section">
       <div class="button-group">
         <button type="button" id="start-mic-btn" class="secondary">Start Microphone</button>
         <button type="button" id="stop-mic-btn" class="secondary" disabled>Stop Microphone</button>
+        <button type="button" id="transcribe-btn" class="secondary" disabled>Transcribe</button>
       </div>
       <div id="mic-status" class="mic-status">Microphone: Idle</div>
       <div id="mic-meta" class="mic-meta" style="display: none;"></div>
       <audio id="audio-playback" controls style="display: none; width: 100%; margin-top: 4px;"></audio>
+      <div id="stt-status" class="mic-status" style="display: none;"></div>
+      <div id="transcript-display" class="response-area" style="display: none; margin-top: 8px;"></div>
     </div>
   </div>
 
@@ -365,19 +368,27 @@
       }
     });
 
-    // Microphone capture handlers (Brick 9)
+    // Microphone capture handlers (Brick 9) & STT handlers (Brick 10)
     const startMicBtn = document.getElementById('start-mic-btn');
     const stopMicBtn = document.getElementById('stop-mic-btn');
+    const transcribeBtn = document.getElementById('transcribe-btn');
     const micStatus = document.getElementById('mic-status');
     const micMeta = document.getElementById('mic-meta');
     const audioPlayback = document.getElementById('audio-playback');
+    const sttStatus = document.getElementById('stt-status');
+    const transcriptDisplay = document.getElementById('transcript-display');
 
     const micRecorder = new MicrophoneRecorder();
+    let currentCapturedAudio = null;
 
     startMicBtn.addEventListener('click', async () => {
       micMeta.style.display = 'none';
       audioPlayback.style.display = 'none';
       audioPlayback.src = '';
+      sttStatus.style.display = 'none';
+      transcriptDisplay.style.display = 'none';
+      currentCapturedAudio = null;
+      transcribeBtn.disabled = true;
 
       micStatus.textContent = 'Microphone: Requesting permission...';
       micStatus.className = 'mic-status';
@@ -404,6 +415,7 @@
       try {
         const captured = await micRecorder.stop();
         if (captured && captured.size > 0) {
+          currentCapturedAudio = captured;
           micStatus.textContent = 'Microphone: Captured';
           micStatus.className = 'mic-status captured';
 
@@ -415,16 +427,69 @@
             audioPlayback.src = captured.url;
             audioPlayback.style.display = 'block';
           }
+          transcribeBtn.disabled = false;
         } else {
           micStatus.textContent = 'Microphone: Error: Captured audio is empty';
           micStatus.className = 'mic-status error';
+          transcribeBtn.disabled = true;
         }
       } catch (err) {
         micStatus.textContent = 'Microphone: Error: ' + err.message;
         micStatus.className = 'mic-status error';
+        transcribeBtn.disabled = true;
       } finally {
         startMicBtn.disabled = false;
         stopMicBtn.disabled = true;
+      }
+    });
+
+    transcribeBtn.addEventListener('click', async () => {
+      if (!currentCapturedAudio || !currentCapturedAudio.blob) {
+        return;
+      }
+
+      transcribeBtn.disabled = true;
+      sttStatus.textContent = 'STT: Transcribing...';
+      sttStatus.className = 'mic-status';
+      sttStatus.style.display = 'block';
+      transcriptDisplay.style.display = 'none';
+
+      try {
+        const formData = new FormData();
+        formData.append('audio', currentCapturedAudio.blob, 'recording.webm');
+
+        const res = await fetch('/api/stt', {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.success) {
+          const latencyText = typeof data.durationMs === 'number' ? `STT: ${data.durationMs} ms` : 'STT: Complete';
+          sttStatus.textContent = latencyText;
+          sttStatus.className = 'mic-status captured';
+
+          transcriptDisplay.textContent = 'Transcript:\n' + data.text;
+          transcriptDisplay.classList.remove('error');
+          transcriptDisplay.style.display = 'block';
+        } else {
+          sttStatus.textContent = 'STT: Error';
+          sttStatus.className = 'mic-status error';
+
+          transcriptDisplay.textContent = 'Error: ' + (data.error || 'Transcription failed');
+          transcriptDisplay.classList.add('error');
+          transcriptDisplay.style.display = 'block';
+        }
+      } catch (err) {
+        sttStatus.textContent = 'STT: Error';
+        sttStatus.className = 'mic-status error';
+
+        transcriptDisplay.textContent = 'Error: ' + err.message;
+        transcriptDisplay.classList.add('error');
+        transcriptDisplay.style.display = 'block';
+      } finally {
+        transcribeBtn.disabled = false;
       }
     });
   </script>

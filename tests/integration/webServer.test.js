@@ -12,7 +12,11 @@ describe('Web Server - Brick 2, Brick 4, Brick 5 & Brick 6', () => {
     'CHEAPER_INFERENCE_API_KEY',
     'CHEAPER_INFERENCE_BASE_URL',
     'CHEAPER_INFERENCE_MODEL',
-    'CHEAPER_INFERENCE_TIMEOUT_MS'
+    'CHEAPER_INFERENCE_TIMEOUT_MS',
+    'OPENROUTER_API_KEY',
+    'OPENROUTER_STT_BASE_URL',
+    'OPENROUTER_STT_MODEL',
+    'OPENROUTER_STT_TIMEOUT_MS'
   ];
 
   let originalEnv = {};
@@ -1546,6 +1550,12 @@ describe('Web Server - Brick 2, Brick 4, Brick 5 & Brick 6', () => {
 
     // Script import check
     assert.match(html, /from '\/microphone\.js'/);
+
+    // Brick 10 Transcribe button and displays
+    assert.match(html, /id="transcribe-btn"/);
+    assert.match(html, /id="stt-status"/);
+    assert.match(html, /id="transcript-display"/);
+    assert.match(html, /Transcribe/);
 
     // Ensure all prior controls remain present
     assert.match(html, /id="text-input"/);

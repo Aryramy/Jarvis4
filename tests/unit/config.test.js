@@ -7,7 +7,11 @@ describe('Configuration Utility', () => {
     'CHEAPER_INFERENCE_API_KEY',
     'CHEAPER_INFERENCE_BASE_URL',
     'CHEAPER_INFERENCE_MODEL',
-    'CHEAPER_INFERENCE_TIMEOUT_MS'
+    'CHEAPER_INFERENCE_TIMEOUT_MS',
+    'OPENROUTER_API_KEY',
+    'OPENROUTER_STT_BASE_URL',
+    'OPENROUTER_STT_MODEL',
+    'OPENROUTER_STT_TIMEOUT_MS'
   ];
 
   let originalEnv = {};
@@ -103,5 +107,41 @@ describe('Configuration Utility', () => {
     assert.equal(envCfg.cheaperInference.baseUrl, 'https://env.provider.com/v1');
     assert.equal(envCfg.cheaperInference.model, 'test-env-model');
     assert.equal(envCfg.cheaperInference.timeoutMs, 15000);
+  });
+
+  test('should load openRouter STT config defaults when environment is empty', () => {
+    const defaultCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
+    assert.equal(defaultCfg.openRouter.apiKey, '');
+    assert.equal(defaultCfg.openRouter.sttBaseUrl, 'https://openrouter.ai/api/v1');
+    assert.equal(defaultCfg.openRouter.sttModel, 'openai/whisper-large-v3-turbo');
+    assert.equal(defaultCfg.openRouter.timeoutMs, 30000);
+  });
+
+  test('should load openRouter STT config overrides passed directly', () => {
+    const customCfg = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'info',
+      OPENROUTER_API_KEY: 'sk-or-test-key',
+      OPENROUTER_STT_BASE_URL: 'https://custom.openrouter.ai/v1/',
+      OPENROUTER_STT_MODEL: 'custom-whisper-model',
+      OPENROUTER_STT_TIMEOUT_MS: '60000'
+    });
+    assert.equal(customCfg.openRouter.apiKey, 'sk-or-test-key');
+    assert.equal(customCfg.openRouter.sttBaseUrl, 'https://custom.openrouter.ai/v1');
+    assert.equal(customCfg.openRouter.sttModel, 'custom-whisper-model');
+    assert.equal(customCfg.openRouter.timeoutMs, 60000);
+  });
+
+  test('should load openRouter STT config from environment variables when overrides not provided', () => {
+    process.env.OPENROUTER_API_KEY = 'sk-or-env-key';
+    process.env.OPENROUTER_STT_BASE_URL = 'https://env.openrouter.ai/v1/';
+    process.env.OPENROUTER_STT_MODEL = 'env-whisper-model';
+    process.env.OPENROUTER_STT_TIMEOUT_MS = '20000';
+
+    const envCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
+    assert.equal(envCfg.openRouter.apiKey, 'sk-or-env-key');
+    assert.equal(envCfg.openRouter.sttBaseUrl, 'https://env.openrouter.ai/v1');
+    assert.equal(envCfg.openRouter.sttModel, 'env-whisper-model');
+    assert.equal(envCfg.openRouter.timeoutMs, 20000);
   });
 });

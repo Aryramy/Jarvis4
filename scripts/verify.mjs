@@ -44,6 +44,8 @@ const REQUIRED_FILES = [
   'src/web/microphone.js',
   'src/providers/base.js',
   'src/providers/cheaperInference.js',
+  'src/providers/speechToTextBase.js',
+  'src/providers/openRouterSTT.js',
   'src/config/index.js',
   'src/utils/logger.js',
   'scripts/verify.mjs',
@@ -51,11 +53,13 @@ const REQUIRED_FILES = [
   'tests/unit/config.test.js',
   'tests/unit/textCore.test.js',
   'tests/unit/cheaperInference.test.js',
+  'tests/unit/openRouterSTT.test.js',
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
   'tests/smoke/foundation.test.js',
   'tests/regression/brick1Regression.test.js',
-  'tests/integration/webServer.test.js'
+  'tests/integration/webServer.test.js',
+  'tests/integration/sttEndpoint.test.js'
 ];
 
 const REQUIRED_DIRS = [
@@ -166,6 +170,7 @@ check('Config & Logger Module Sanity Check', async () => {
   const testConfig = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
   if (testConfig.nodeEnv !== 'test') throw new Error('Config failed to parse nodeEnv');
   if (!testConfig.cheaperInference) throw new Error('Config missing cheaperInference settings');
+  if (!testConfig.openRouter) throw new Error('Config missing openRouter settings');
 
   const { Logger, LogLevel } = await import('../src/utils/logger.js');
   const testLogger = new Logger({ level: LogLevel.ERROR, destination: { error: () => {} } });
@@ -206,6 +211,21 @@ check('AI Provider Module Sanity Check', async () => {
   }
   if (typeof provider.streamMessages !== 'function') {
     throw new Error('Provider must implement streamMessages() method');
+  }
+});
+
+check('STT Provider Module Sanity Check', async () => {
+  const { SpeechToTextProvider } = await import('../src/providers/speechToTextBase.js');
+  const { OpenRouterSpeechToTextProvider } = await import('../src/providers/openRouterSTT.js');
+  const provider = new OpenRouterSpeechToTextProvider({
+    apiKey: 'mock-key',
+    model: 'openai/whisper-large-v3-turbo'
+  });
+  if (!(provider instanceof SpeechToTextProvider)) {
+    throw new Error('OpenRouterSpeechToTextProvider must inherit from SpeechToTextProvider');
+  }
+  if (typeof provider.transcribe !== 'function') {
+    throw new Error('STT Provider must implement transcribe() method');
   }
 });
 

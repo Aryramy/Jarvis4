@@ -108,6 +108,17 @@
   7. Automated verification is completely offline and deterministic using injected/mocked MediaDevices and MediaRecorder abstractions, ensuring no real hardware dependencies during automated tests.
 - **Consequences**: Provides reliable browser microphone capture and metadata extraction ready for future unified multilingual STT integration in subsequent bricks, without premature framework dependencies or language silos.
 
+## ADR-0015: Unified Multilingual Speech-to-Text using OpenRouter
+- **Status**: Accepted
+- **Context**: Brick 9 established the browser microphone capture foundation. Brick 10 requires connecting browser microphone recordings to a speech-to-text pipeline through OpenRouter without language silos, manual selectors, or per-language configuration.
+- **Decision**:
+  1. Reusable STT Provider Contract: Implement `SpeechToTextProvider` (`src/providers/speechToTextBase.js`) defining `transcribe(audioBytes, metadata, options)`.
+  2. OpenRouter STT Adapter: Implement `OpenRouterSpeechToTextProvider` (`src/providers/openRouterSTT.js`) encapsulating OpenRouter HTTP multipart/form-data logic, model configuration (`openai/whisper-large-v3-turbo`), timeout handling via `AbortController`, duration measurement, Unicode preservation, and credential redaction.
+  3. Single Multilingual Pipeline: Strictly omit the `language` parameter by default, allowing the multilingual Whisper model to automatically identify spoken language across English, Urdu, Arabic, and code-switched mixed sentences (e.g., Urdu + English) without language dropdowns, selectors, or per-language routes.
+  4. Local Web Server Endpoint: Expose `POST /api/stt` in `src/web/server.js` accepting microphone audio (multipart or raw audio stream), validating audio presence, non-zero size, MIME type, and configuration. Audio is forwarded in-memory without saving to disk or polluting conversation memory.
+  5. Minimal UI Extension: Add a "Transcribe" button to `src/web/index.html` after recording. When clicked, displays `STT: Transcribing...`, followed by measured latency (`STT: <ms> ms`) and transcript (`Transcript:\n<text>`). The transcript is NOT forwarded to Ask AI, nor is TTS added.
+- **Consequences**: One unified STT pipeline handles all languages through OpenRouter Whisper. Automated test suites remain strictly offline and deterministic with zero live API calls.
+
 
 
 
