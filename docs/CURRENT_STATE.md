@@ -1,8 +1,8 @@
 Project: JARVIS4
-Current Brick: 10
+Current Brick: 11
 Status: VERIFIED
-Last Verified Brick: BRICK-010
-Current Feature: Unified multilingual speech-to-text
+Last Verified Brick: BRICK-011
+Current Feature: Voice transcript to existing JARVIS AI text response
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
@@ -38,6 +38,13 @@ Next Feature: NOT AUTHORIZED
 - Strict single multilingual pipeline architecture: automatic language detection without language selector, language dropdown, or per-language configuration
 - Real STT web endpoint (`POST /api/stt`) accepting browser microphone recordings (multipart or raw audio stream) with validation (presence, >0 bytes, MIME type, max size 25MB, configuration) and in-memory forwarding
 - Web interface Transcribe button (`#transcribe-btn`), STT status indicator (`#stt-status`), latency display, and transcript output (`#transcript-display`)
+- Web interface Ask JARVIS button (`#ask-jarvis-btn`), thinking loading indicator (`#jarvis-status`), and text response display (`#jarvis-response`)
+- Compositional browser-driven architecture connecting verified Brick 10 speech-to-text transcript (`POST /api/stt`) to verified Brick 4/6 text AI pipeline (`POST /api/ai`)
+- Human-in-the-loop explicit submission: transcript is displayed for human verification before explicit click on "Ask JARVIS" submits it to the AI
+- Full Unicode preservation for multilingual prompts across English, Urdu, Arabic, and code-switched mixed sentences without transliteration, client-side translation, or language-specific routes
+- Single shared conversation context between typed Ask AI, streaming Ask AI, and voice transcript queries across memory and disk persistence
+- Independent state isolation and error handling: failed STT does not submit stale transcripts, failed AI requests leave transcripts visible, and duplicate requests are prevented via thinking state
+- Comprehensive automated test suite (`tests/integration/voiceAiIntegration.test.js`) verifying all 25 Brick 11 integration requirements
 
 ## External integrations
 
@@ -49,31 +56,41 @@ Next Feature: NOT AUTHORIZED
 - On this Windows machine, portable Node v24.21.0 is recommended for live external provider calls; the installed Node v24.19.0 exhibited an upstream Windows/libuv shutdown assertion after successful fetch.
 - On corporate / office Wi-Fi networks, direct OpenRouter HTTPS connections are reset with ECONNRESET; mobile hotspot or unrestricted network bypasses this limitation and works reliably.
 - Multilingual Whisper STT observations:
-  - Occasional extra trailing hallucinated words ("Thank you", "موسیقی", "شكرا") generated during audio silence or trailing background noise.
-  - Mixed English terms in Urdu speech may be transliterated phonetically into Urdu script rather than Latin script.
-  - Live STT latency currently varies significantly between ~3.4s and ~12s depending on audio duration, gateway load, and routing.
+  - Occasional extra trailing hallucinated words ("Thank you", "موسیقی", "شكرا", "ملتا") generated during audio silence or trailing background noise.
+  - Mixed English terms in Urdu speech may be transliterated phonetically into Urdu script rather than Latin script (e.g., "ڈیشپورٹ").
+  - Live STT latency varies significantly depending on audio duration, gateway load, and routing (observed range: ~827ms to ~12s).
+- Live AI provider timeout observation:
+  - One Ask JARVIS request timed out during live verification; retry succeeded without loss of conversation context.
+  - Model normalized hyphen in verification code ("NOVA742" instead of "NOVA-742") while preserving value and conversational context.
+- System boundary reminders:
+  - OpenRouter remains STT only.
+  - Cheaper Inference remains the text AI/LLM provider.
+  - TTS is NOT implemented.
 
 ## Last verification
 
 Status: PASS (Exit Code: 0)
-- Automated test & sanity verification: 200 tests across 13 suites passed offline (Exit Code: 0).
-- Provider: OpenRouter
-- Model: openai/whisper-large-v3-turbo
-- Endpoint: /audio/transcriptions
+- Automated test & sanity verification: 221 tests across 14 suites passed offline (Exit Code: 0).
+- Provider: OpenRouter (STT only) & Cheaper Inference (Text AI only)
+- STT Model: openai/whisper-large-v3-turbo
+- Text Model: deepseek-v4-flash-0731
+- Endpoints: `POST /api/stt` and `POST /api/ai`
 - Language selection: automatic / no configured language parameter
-- Real live provider verification (Brick 3): `npm run ai -- "Reply with exactly: JARVIS4 AI CONNECTED"` successfully executed against live Cheaper Inference endpoint (`deepseek-v4-flash-0731`) and returned `JARVIS4 AI CONNECTED`.
-- Brick 4 browser live test: VERIFIED — Human operator confirmed end-to-end browser execution through `POST /api/ai` to hosted model (`deepseek-v4-flash-0731`) with real AI response rendered in browser.
-- Brick 5 browser live streaming test: VERIFIED — Human operator confirmed live streaming behavior: progressive text delta display before full response completion, continuous delta arrival, normal completion, return to Ready status, non-streaming and deterministic paths functioning, and zero Node/libuv crashes.
-- Brick 6 live browser & session test: VERIFIED — Human operator confirmed same-session recall with Ask AI, confirmed Clear Conversation removes temporary context, confirmed server restart removes temporary context without persistent memory leakage, and streaming remained intentionally stateless in Brick 6.
-- Brick 7 browser live streaming & session test: VERIFIED — Human operator confirmed end-to-end live verification: Stream -> Stream context recall, Normal Ask AI -> Ask AI — Stream shared context, Ask AI — Stream -> Normal Ask AI shared context, Clear Conversation removes shared context cleanly, server restart removes temporary context without persistence leakage, streaming remained progressive, and zero crashes occurred.
-- Brick 8 live browser restart persistence test: VERIFIED — Human operator confirmed end-to-end persistence across restarts: Normal Ask AI -> server restart -> Normal Ask AI restored context, Ask AI — Stream -> server restart -> Normal Ask AI restored context, Normal Ask AI -> server restart -> Ask AI — Stream restored context with progressive streaming, Clear Conversation cleared disk and memory state, server restart after Clear did not restore old context, and zero process crashes occurred.
-- Brick 9 browser live microphone capture test: VERIFIED — Human operator confirmed end-to-end live browser microphone capture: browser permission request succeeded, Start Microphone captured real speech, Stop Microphone completed non-zero recording with accurate duration and MIME type, native audio playback reproduced clear spoken audio, second recording worked cleanly without page refresh, microphone tracks were released cleanly between recordings, and all existing features (Deterministic Test, Ask AI, Ask AI — Stream, Clear Conversation, persistent conversation state) remained fully functional.
-- Brick 10 browser live multilingual STT test: VERIFIED — Human operator confirmed end-to-end live multilingual speech-to-text through OpenRouter (`openai/whisper-large-v3-turbo`):
-  - English Test: PASS (Latency: 12054 ms, Transcript: `"Hello Jarvis, this is Multilingual Speech Test No. 742 Thank you."`)
-  - Urdu Test: PASS (Latency: 3435 ms, Transcript: `"جارویز آج ہم ملٹی لنگویل وائز تیسٹ کر رہے ہیں۔ موسیقی"`)
-  - Arabic Test: PASS (Latency: 9385 ms, Transcript: `"يا جارفس نحن نختبر التعرف على الكلام متعدد اللغات اليوم شكرا"`)
-  - Mixed Urdu + English Test: PASS (Latency: 6408 ms, Transcript: `"جارویس مجھے پاور بی آئی ڈیش بورڈ اوپن کرنا ہے"`)
-  - Repeat without page refresh: PASS (New recording produced new transcript with updated latency)
-  - All tests used single microphone, single `/api/stt` endpoint, single OpenRouter provider, single model, zero language selectors, zero language parameters, and zero per-language configurations.
+- Brick 4 browser live test: VERIFIED
+- Brick 5 browser live streaming test: VERIFIED
+- Brick 6 live browser & session test: VERIFIED
+- Brick 7 browser live streaming & session test: VERIFIED
+- Brick 8 live browser restart persistence test: VERIFIED
+- Brick 9 browser live microphone capture test: VERIFIED
+- Brick 10 browser live multilingual STT test: VERIFIED
+- Brick 11 browser live voice transcript → AI test: VERIFIED — Human operator confirmed end-to-end browser execution:
+  - TEST A (English Voice → AI): PASS (Spoken: "What is LLM explain it in one short sentence", STT Latency: 6188 ms, Transcript: "What is LLM explain it in one short sentence", JARVIS response: Relevant explanation of LLM returned successfully).
+  - TEST B (Urdu Voice → AI): PASS (Spoken: "جارویس، پاور بی آئی کیا ہے؟", STT Latency: 3213 ms, Transcript: "جارویس پاور بی آئی کیا ہے ملتا", JARVIS response: Relevant Urdu response about Power BI returned; trailing word "ملتا" noted).
+  - TEST C (Arabic Voice → AI): PASS (Spoken: "يا جارفس، ما هو Power BI؟", STT Latency: 4482 ms, Transcript: "جارو بيس ما هو باور بي آي؟", JARVIS response: Relevant Arabic response about Power BI returned; request meaning preserved).
+  - TEST D (Mixed Urdu + English Voice → AI): PASS (Spoken: "Jarvis, مجھے Power BI dashboard کے بارے میں بتاؤ", STT Latency: 827 ms, Transcript: "جارویس مجھے پاور بی آئی ڈیشپورٹ کے بارے میں بتاؤ", JARVIS response: Relevant Urdu response explaining Power BI dashboards returned).
+  - TEST E (Typed → Voice Shared Context): PASS (Typed: "My verification code is ORBIT-381.", Voice transcript: "What is my verification code?", STT Latency: 1492 ms, JARVIS response: Recalled ORBIT-381 from existing shared ConversationSession. First Ask JARVIS attempt timed out, retry succeeded cleanly without losing conversation context).
+  - TEST F (Voice → Typed Shared Context): PASS (Voice: "My second verification code is NOVA-742.", Typed: "What second verification code did I tell you?", JARVIS response: Recalled NOVA742 from existing shared ConversationSession).
+  - TEST G (New Recording without Refresh): PASS (Multiple distinct recordings captured, transcribed, and sent to JARVIS in same session without page refresh; each new transcript cleanly replaced prior current transcript with no stale submissions).
+  - Architecture verified: Single microphone, single `/api/stt` endpoint, single OpenRouter STT provider, single `/api/ai` endpoint, single Cheaper Inference provider, single shared `ConversationSession`, zero language selectors, zero automatic submissions, and zero TTS.
 
 

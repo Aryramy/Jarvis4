@@ -117,7 +117,16 @@
   3. Single Multilingual Pipeline: Strictly omit the `language` parameter by default, allowing the multilingual Whisper model to automatically identify spoken language across English, Urdu, Arabic, and code-switched mixed sentences (e.g., Urdu + English) without language dropdowns, selectors, or per-language routes.
   4. Local Web Server Endpoint: Expose `POST /api/stt` in `src/web/server.js` accepting microphone audio (multipart or raw audio stream), validating audio presence, non-zero size, MIME type, and configuration. Audio is forwarded in-memory without saving to disk or polluting conversation memory.
   5. Minimal UI Extension: Add a "Transcribe" button to `src/web/index.html` after recording. When clicked, displays `STT: Transcribing...`, followed by measured latency (`STT: <ms> ms`) and transcript (`Transcript:\n<text>`). The transcript is NOT forwarded to Ask AI, nor is TTS added.
-- **Consequences**: One unified STT pipeline handles all languages through OpenRouter Whisper. Automated test suites remain strictly offline and deterministic with zero live API calls.
+## ADR-0016: Voice Transcript to Existing JARVIS AI Pipeline Integration
+- **Status**: Accepted
+- **Context**: Brick 10 established multilingual speech-to-text via OpenRouter (`openai/whisper-large-v3-turbo`). Brick 11 requires connecting voice transcripts to the existing JARVIS text AI pipeline (Cheaper Inference) without creating redundant backend routes, without language silos, without speech output (TTS), and without automatic submission.
+- **Decision**:
+  1. Composable Architecture: Avoid creating a redundant compound backend route (e.g. `/api/voice-ai`). Compose the existing verified `POST /api/stt` and `POST /api/ai` endpoints directly from the browser.
+  2. Explicit Human Control: Do not automatically submit transcripts to the AI. Require the human to explicitly click "Ask JARVIS" after reviewing the recognized text, keeping STT and AI verification independently observable.
+  3. Shared Conversation Memory: Submitting transcripts to `POST /api/ai` transparently participates in the single existing `ConversationSession` and persistent `ConversationStore`. Context is shared seamlessly bidirectionally between typed prompts and voice-transcribed prompts.
+  4. Language-Agnostic Unicode Flow: Transcripts in English, Urdu, Arabic, or code-switched mixed sentences are passed verbatim as Unicode UTF-8 strings to `POST /api/ai` without transliteration, client-side translation, or language-specific routes.
+  5. State Isolation & Independent Error Handling: Client maintains current transcript state; new recordings reset transcript state until transcribed; failed STT cannot submit older transcripts; failed AI requests do not delete transcripts; busy state prevents accidental duplicate submission; and STT vs AI error displays remain strictly distinct.
+- **Consequences**: Connects voice input to JARVIS AI text response with minimal code additions, zero external dependencies, zero secret leakage, and 100% offline automated test verification.
 
 
 

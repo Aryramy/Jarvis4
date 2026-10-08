@@ -1557,6 +1557,12 @@ describe('Web Server - Brick 2, Brick 4, Brick 5 & Brick 6', () => {
     assert.match(html, /id="transcript-display"/);
     assert.match(html, /Transcribe/);
 
+    // Brick 11 Ask JARVIS button and displays
+    assert.match(html, /id="ask-jarvis-btn"/);
+    assert.match(html, /id="jarvis-status"/);
+    assert.match(html, /id="jarvis-response"/);
+    assert.match(html, /Ask JARVIS/);
+
     // Ensure all prior controls remain present
     assert.match(html, /id="text-input"/);
     assert.match(html, /id="send-btn"/);

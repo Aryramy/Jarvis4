@@ -10,7 +10,14 @@ Currently tracked issues in JARVIS4:
    - On certain restricted corporate / office Wi-Fi networks, direct HTTPS requests to OpenRouter (`https://openrouter.ai/api/v1`) are reset with `ECONNRESET`.
    - Bypassing the network restriction (e.g. via mobile hotspot or unrestricted network) connects cleanly and functions reliably.
 
-3. **Whisper Multilingual STT Quality & Latency Observations (Brick 10)**:
-   - Occasional extra trailing words (such as "Thank you", "موسیقی", or "شكرا") may appear in Whisper output during audio padding or trailing silence.
-   - Code-switched mixed English terms within Urdu sentences may be transliterated phonetically into Urdu script rather than Latin script (e.g. "پاور بی آئی ڈیش بورڈ اوپن").
-   - Live transcription latency currently varies between roughly 3.4 seconds and 12 seconds depending on network route, audio size, and provider load. These are baseline observations and will be addressed in future optimization bricks.
+3. **Whisper Multilingual STT Quality & Latency Observations (Brick 10 & Brick 11)**:
+   - Occasional extra trailing words (such as "Thank you", "موسیقی", "شكرا", or "ملتا") may appear in Whisper output during audio padding or trailing background noise.
+   - Code-switched mixed English terms within Urdu sentences may be transliterated phonetically into Urdu script rather than Latin script (e.g., "پاور بی آئی ڈیشپورٹ").
+   - Live transcription latency varies significantly depending on network route, audio size, and provider load (observed range: ~827 ms to ~12 seconds).
+   - The wake/name portion in other languages (such as Arabic "جارو بيس") may be transcribed phonetically or imperfectly, but query meaning was preserved and correctly understood by the AI model.
+
+4. **Live AI Request Timeout & Model Normalization Observations (Brick 11)**:
+   - An occasional request timeout was observed during live `Ask JARVIS` submission to Cheaper Inference; retrying the request succeeded cleanly without losing conversation context.
+   - The AI model normalized/dropped punctuation/hyphens in recall responses (e.g., recalling "NOVA742" for "NOVA-742") while accurately preserving code identity and conversation continuity.
+   - OpenRouter remains speech-to-text only; Cheaper Inference remains text AI/LLM only; TTS is NOT implemented.
+

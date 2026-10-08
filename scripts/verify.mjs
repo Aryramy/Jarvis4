@@ -59,7 +59,8 @@ const REQUIRED_FILES = [
   'tests/smoke/foundation.test.js',
   'tests/regression/brick1Regression.test.js',
   'tests/integration/webServer.test.js',
-  'tests/integration/sttEndpoint.test.js'
+  'tests/integration/sttEndpoint.test.js',
+  'tests/integration/voiceAiIntegration.test.js'
 ];
 
 const REQUIRED_DIRS = [
