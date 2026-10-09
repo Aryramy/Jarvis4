@@ -42,6 +42,7 @@ const REQUIRED_FILES = [
   'src/web/server.js',
   'src/web/index.html',
   'src/web/microphone.js',
+  'src/web/voiceTurn.js',
   'src/providers/base.js',
   'src/providers/cheaperInference.js',
   'src/providers/speechToTextBase.js',
@@ -59,12 +60,14 @@ const REQUIRED_FILES = [
   'tests/unit/openRouterTTS.test.js',
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
+  'tests/unit/voiceTurn.test.js',
   'tests/smoke/foundation.test.js',
   'tests/regression/brick1Regression.test.js',
   'tests/integration/webServer.test.js',
   'tests/integration/sttEndpoint.test.js',
   'tests/integration/ttsEndpoint.test.js',
-  'tests/integration/voiceAiIntegration.test.js'
+  'tests/integration/voiceAiIntegration.test.js',
+  'tests/integration/voiceTurnSequence.test.js'
 ];
 
 const REQUIRED_DIRS = [
@@ -299,6 +302,17 @@ check('Microphone Capture Module Sanity Check', async () => {
   }
   if (typeof recorder.cleanup !== 'function' || typeof recorder.isSupported !== 'function') {
     throw new Error('MicrophoneRecorder must implement cleanup and isSupported methods');
+  }
+});
+
+check('Voice Turn Module Sanity Check', async () => {
+  const { VoiceTurnRunner, VoiceTurnState } = await import('../src/web/voiceTurn.js');
+  const runner = new VoiceTurnRunner({ fetchFn: async () => {} });
+  if (runner.state !== VoiceTurnState.IDLE) {
+    throw new Error('VoiceTurnRunner initial state must be IDLE');
+  }
+  if (typeof runner.execute !== 'function' || typeof runner.getState !== 'function') {
+    throw new Error('VoiceTurnRunner must implement execute and getState methods');
   }
 });
 

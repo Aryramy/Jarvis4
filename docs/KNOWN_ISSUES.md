@@ -19,5 +19,14 @@ Currently tracked issues in JARVIS4:
 4. **Live AI Request Timeout & Model Normalization Observations (Brick 11)**:
    - An occasional request timeout was observed during live `Ask JARVIS` submission to Cheaper Inference; retrying the request succeeded cleanly without losing conversation context.
    - The AI model normalized/dropped punctuation/hyphens in recall responses (e.g., recalling "NOVA742" for "NOVA-742") while accurately preserving code identity and conversation continuity.
-   - OpenRouter remains speech-to-text only; Cheaper Inference remains text AI/LLM only; TTS is NOT implemented.
+   - OpenRouter is used for STT (`/audio/transcriptions`) and TTS (`/audio/speech`); Cheaper Inference remains text AI/LLM (`/chat/completions`).
+
+5. **Voice Turn Overall Latency & Diagnostic Observation (Brick 13)**:
+   - STT latency is currently generally acceptable (~2.5s–3.2s).
+   - TTS latency is currently generally acceptable (~1.2s–3.0s).
+   - The complete voice turn is still significantly slower than desired (observed total elapsed times: ~18s–31s across live tests).
+   - A large portion of the total elapsed time occurs outside the measured STT and TTS stages.
+   - Brick 13 does not expose an isolated AI-stage latency measurement. The remaining elapsed time may include AI provider latency, network roundtrip delays, request/response payload handling, and client orchestration overhead.
+   - Future architectural principle: measure isolated AI latency first. Do not optimize or modify AI provider/model until empirical measurement identifies the actual bottleneck.
+
 

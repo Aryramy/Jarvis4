@@ -143,6 +143,19 @@
   9. Fully Mocked Offline Verification: Automated tests mock all network calls and make zero external network requests during `npm run verify`.
 - **Consequences**: Completes the first manual voice loop (Voice Mic → STT → Transcript → Ask JARVIS → AI → Response → Speak Response → TTS → Playback) with explicit human controls, zero auto-chaining, zero secret leakage, and 100% offline verification.
 
+## ADR-0018: One-Action Sequential Voice Turn Orchestration
+- **Status**: Accepted
+- **Context**: Bricks 9–12 established browser microphone capture, speech-to-text via OpenRouter STT, text AI via Cheaper Inference, and speech synthesis via OpenRouter TTS. However, exercising the complete loop required 3 separate explicit user actions: Transcribe -> Ask JARVIS -> Speak Response. Brick 13 requires connecting these already verified stages sequentially behind a single user action ("Run Voice Turn") operating on an existing captured audio recording, without continuous listening, wake words, automatic recording restarts, VAD, or redundant backend pipeline routes.
+- **Decision**:
+  1. Browser-Side Sequential Composition: Orchestrate existing local endpoints (`POST /api/stt` -> `POST /api/ai` -> `POST /api/tts` -> browser MP3 playback) entirely in the browser via `VoiceTurnRunner` (`src/web/voiceTurn.js`), without creating compound backend routes (`/api/voice`, `/api/voice-agent`, etc.).
+  2. Single Explicit Action: User explicitly clicks "Run Voice Turn" (`#run-voice-turn-btn`) after completing a microphone recording. Old manual diagnostic controls (`Transcribe`, `Ask JARVIS`, `Speak Response`) remain fully functional.
+  3. Client-Side Deterministic State Machine: Implemented via `VoiceTurnState` (`IDLE` -> `STT` -> `AI` -> `TTS` -> `PLAYING` -> `COMPLETE`). On failure, transitions to `STT_ERROR`, `AI_ERROR`, or `TTS_ERROR`, halting downstream execution immediately.
+  4. Stale Data Protection: Each turn has a unique monotonically increasing turn ID; intermediate results are scoped strictly to the current turn execution. Failed STT cannot submit old transcripts to AI; failed AI cannot synthesize old responses; failed TTS cannot play old audio.
+  5. Shared Conversation Context: Voice-turn AI calls submit directly to `POST /api/ai`, preserving conversation context in `ConversationSession` and `ConversationStore` seamlessly across typed and voice turns. Zero audio data is stored in conversation memory.
+  6. Multilingual Verbatim Flow: Single pipeline without language parameters or selectors. Unicode strings are forwarded verbatim across English, Urdu, Arabic, and code-switched mixed sentences.
+  7. Latency Measurement: Total voice turn latency (click to playback start) and individual stage latencies (`STT: <ms> ms`, `TTS: <ms> ms`) are tracked and displayed.
+- **Consequences**: Enables single-click voice turn execution from captured audio while preserving existing independent controls, zero secrets exposure, and 100% offline automated test verification.
+
 
 
 

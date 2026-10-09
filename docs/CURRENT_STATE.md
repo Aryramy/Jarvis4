@@ -1,8 +1,8 @@
 Project: JARVIS4
-Current Brick: 12
+Current Brick: 13
 Status: VERIFIED
-Last Verified Brick: BRICK-012
-Current Feature: Multilingual JARVIS text response → voice output
+Last Verified Brick: BRICK-013
+Current Feature: One-action sequential voice turn
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
@@ -55,6 +55,18 @@ Next Feature: NOT AUTHORIZED
 - Audio playback cleanup: object URLs revoked via `URL.revokeObjectURL` on replacement; replay supported without page reload
 - Output-only presentation: TTS audio is strictly presentation layer and is never added to `ConversationSession` or `ConversationStore` memory
 - Comprehensive automated test suite (`tests/integration/ttsEndpoint.test.js` & `tests/unit/openRouterTTS.test.js`) verifying all Brick 12 requirements offline
+- Sequential one-action voice turn orchestration module (`VoiceTurnRunner` in `src/web/voiceTurn.js`)
+- Dedicated `/voiceTurn.js` static module route served by minimal HTTP server
+- Client-side deterministic state machine (`IDLE` -> `STT` -> `AI` -> `TTS` -> `PLAYING` -> `COMPLETE` / `STT_ERROR` / `AI_ERROR` / `TTS_ERROR` / `PLAYBACK_ERROR`)
+- Web interface Run Voice Turn button (`#run-voice-turn-btn`), stage-specific status indicator (`#voice-turn-status`), and total voice-turn elapsed latency measurement
+- Sequential composition of existing verified local endpoints: captured audio Blob -> `POST /api/stt` -> transcript -> `POST /api/ai` -> JARVIS response -> `POST /api/tts` -> browser MP3 playback triggered from a single explicit action
+- Preserved existing manual diagnostic controls (`Start Microphone`, `Stop Microphone`, `Transcribe`, `Ask JARVIS`, `Speak Response`)
+- Strict stale-data protection with monotonic turn identity: failed STT stops pipeline and cannot submit old transcripts to AI; failed AI stops pipeline and cannot synthesize old responses; failed TTS stops pipeline and cannot play old audio
+- Shared conversational continuity: voice-turn AI requests seamlessly participate in `ConversationSession` and `ConversationStore` alongside typed prompts
+- Zero audio bytes stored in conversation memory: TTS audio is strictly presentation layer
+- Full Unicode preservation across English, Urdu, Arabic, and code-switched mixed speech without language selectors, manual mode switches, or language-specific routes
+- Comprehensive automated test suite (`tests/integration/voiceTurnSequence.test.js` & `tests/unit/voiceTurn.test.js`) verifying all 53 Brick 13 requirements offline (300 tests passed, 0 failed)
+- Strict boundary adherence: zero continuous listening, zero automatic recording restarts, zero wake words, zero VAD
 
 ## External integrations
 
@@ -72,30 +84,38 @@ Next Feature: NOT AUTHORIZED
 - System boundary reminders:
   - OpenRouter is used for STT (`/audio/transcriptions`) and TTS (`/audio/speech`).
   - Cheaper Inference remains the text AI/LLM provider (`/chat/completions`).
-  - Automatic voice conversation / auto-chaining is NOT Brick 12.
-  - User explicitly clicks: Transcribe → Ask JARVIS → Speak Response.
+  - Brick 13 is one-action sequential voice turn; automatic recording restart, continuous listening, and wake words are strictly prohibited.
+  - User explicitly clicks "Run Voice Turn" after recording.
+- Voice turn overall latency & diagnostic observation (Brick 13):
+  - STT latency is currently generally acceptable (~2.5s–3.2s).
+  - TTS latency is currently generally acceptable (~1.2s–3.0s).
+  - The complete voice turn is still significantly slower than desired (observed total elapsed times: ~18s–31s across live tests).
+  - A large portion of the total elapsed time occurs outside the measured STT and TTS stages.
+  - Brick 13 does not expose an isolated AI-stage latency measurement. The remaining elapsed time may include AI provider latency, network roundtrip delays, request/response handling, and client orchestration overhead.
+  - Future architectural principle: measure isolated AI latency first. Do not optimize or modify AI provider/model until empirical measurement identifies the actual bottleneck.
 
 ## Last verification
 
-Status: BRICK-012 VERIFIED (Exit Code: 0)
-- Automated test & sanity verification: 265 tests across 16 suites passed offline (Exit Code: 0).
+Status: BRICK-013 VERIFIED (Exit Code: 0)
+- Automated test & sanity verification: 300 tests across 18 suites passed offline (Exit Code: 0).
 - Providers:
   - STT: OpenRouter (`openai/whisper-large-v3-turbo` at `POST /audio/transcriptions`)
   - AI: Cheaper Inference (`deepseek-v4-flash-0731` at `POST /chat/completions`)
   - TTS: OpenRouter (`elevenlabs/eleven-v4-turbo`, voice: `george`, format: `mp3` at `POST /audio/speech`)
 - Endpoints: `POST /api/stt`, `POST /api/ai`, `POST /api/tts`
-- Complete manual voice loop verified:
-  Microphone → OpenRouter STT → Transcript → Explicit Ask JARVIS → Cheaper Inference AI → JARVIS Text Response → Explicit Speak Response → OpenRouter TTS (`elevenlabs/eleven-v4-turbo`, voice `george`) → Browser Audio Playback
-- Multilingual architecture: ONE model and ONE voice for all languages (English, Urdu, Arabic, mixed). NO language parameter sent. Input Unicode text itself determines language spoken.
+- Complete one-action voice turn pipeline verified:
+  Microphone Capture → Single Click "Run Voice Turn" → OpenRouter STT → Transcript → Cheaper Inference AI → JARVIS Text Response → OpenRouter TTS (`elevenlabs/eleven-v4-turbo`, voice `george`) → Browser Audio Playback
+- Multilingual architecture: ONE model and ONE voice for all languages (English, Urdu, Arabic, mixed). NO language selector, NO manual language switch, NO per-language routes.
 - Presentation only: TTS audio is NOT stored in `ConversationSession` or `ConversationStore`.
-- Brick 12 browser live tests: VERIFIED — Human operator confirmed end-to-end execution:
-  - TEST A (English TTS): PASS (JARVIS response: "Power BI is Microsoft's analytics service that turns raw data into interactive, visual insights through dashboards and reports.", TTS Latency: 3053 ms, Audio generation/playback: PASS).
-  - TEST B (Urdu TTS): PASS (JARVIS response: "پاور بی آئی مائیکروسافٹ کا ایک تجزیاتی پلیٹ فارم ہے جو خام ڈیٹا کو انٹرایکٹو ڈیش بورڈز اور رپورٹس کے ذریعے بصری بصیرت میں تبدیل کرتا ہے۔", TTS Latency: 2515 ms, Same model elevenlabs/eleven-v4-turbo, Same voice george, No language configuration change occurred).
-  - TEST C (Arabic TTS): PASS (JARVIS response: "Power BI هو أداة تحليلات من مايكروسوفت تحوّل البيانات إلى تقارير ولوحات تفاعلية لفهم أفضل.", TTS Latency: 2657 ms, Same TTS pipeline used successfully).
-  - TEST D (Mixed / Multilingual TTS): PASS (JARVIS response: "جارویس: پاور بی آئی ڈیش بورڈ ایک انٹرایکٹو صفحہ ہے جو اہم ڈیٹا کو بصری شکل میں دکھاتا ہے۔", TTS Latency: 2020 ms, Same endpoint/model/voice used successfully).
-  - TEST E (Complete Voice Loop): PASS (Microphone capture: 5.8s, 85.8 KB, audio/webm;codecs=opus; STT Latency: 3935 ms; Transcript: "What is Power BI in one sentence?"; JARVIS response: "Sir, Power BI is Microsoft's analytics service that transforms raw data into interactive, visual insights through dashboards and reports."; TTS Latency: 2152 ms; Complete flow verified from mic to browser playback).
-  - TEST F (New AI Response): PASS (Without page refresh, new AI response generated and Speak Response synthesized the NEW response; previous response not accidentally used).
-  - TEST G (Replay): PASS (Speak Response used again on current response; audio generated/played again successfully without page reload. Subsequent mic capture of 5.8s and STT of 3261 ms remained fully functional).
+- Brick 13 browser live tests: VERIFIED — Human operator confirmed end-to-end execution:
+  - TEST A (English One-Action Turn): PASS (Query: "What is Microsoft Fabric in one short sentence?", Voice Turn Total: 31614 ms, STT: 2555 ms, Transcript: "What is Microsoft fabric in one short sentence? Sure.", JARVIS: "Microsoft Fabric is a unified SaaS analytics platform that combines data engineering, integration, and business intelligence into one seamless, AI-powered environment.", TTS: 2970 ms; audio playback: PASS. Note: Whisper appended minor trailing word "Sure", an existing STT quality observation).
+  - TEST B (Urdu One-Action Turn): PASS (Query: "جارویس پاور بی آئی کیا ہے؟ ایک مختصر جواب دو", Voice Turn Total: 19243 ms, STT: 2634 ms, JARVIS: "سر، پاور بی آئی مائیکروسافٹ کا ایک تجزیاتی پلیٹ فارم ہے جو ڈیٹا کو انٹرایکٹو ڈیش بورڈز اور رپورٹس میں تبدیل کرتا ہے۔", TTS: 2424 ms; same STT/AI/TTS pipeline, no language selector).
+  - TEST C (Arabic One-Action Turn): PASS (Query: "ما هو باور بي آئي؟ أجيبه بجملة قصيوة", Voice Turn Total: 18249 ms, STT: 2600 ms, JARVIS: "باور بي آي هو أداة تحليلات من مايكروسوفت تحوّل البيانات إلى تقارير ولوحات تفاعلية لاتخاذ قرارات أفضل.", TTS: 2022 ms; full pipeline executed).
+  - TEST D (Mixed Language One-Action Turn): PASS (Query: "جارویس مجھے پاور بی آئی ڈیشپورٹ کے بارے میں ون شورٹ سینٹنس میں بتاؤ", Voice Turn Total: 21393 ms, STT: 3057 ms, JARVIS: "جارویس، پاور بی آئی ڈیش بورڈ ایک انٹرایکٹو صفحہ ہے جو اہم ڈیٹا کو بصری شکل میں ایک جگہ پیش کرتا ہے۔", TTS: 2450 ms; mixed speech handled through unified pipeline without language-specific routing).
+  - TEST E (Typed → Voice Shared Memory): PASS (Project code `007` typed, voice query "What is my project code?", STT: 2753 ms, JARVIS correctly recalled `007`, TTS: 2209 ms, Voice Turn Total: 23612 ms; verifies automated voice turns reuse existing ConversationSession).
+  - TEST F (Voice Turn → Typed Memory): PASS (Information from automated voice turn successfully recalled in later typed Ask AI query, verifying bidirectional shared context across ConversationSession and ConversationStore).
+  - TEST G (Second Turn Without Page Refresh): PASS (New query "What is the capital of Japan in one short sentence?", Voice Turn Total: 27649 ms, STT: 3194 ms, JARVIS: "The capital of Japan is Tokyo.", TTS: 1228 ms; verified new recording replacement and zero stale data leakage).
+  - TEST H (Error Observability): PASS (Distinguishes STT_ERROR, AI_ERROR, TTS_ERROR; transient network error observed and recovered cleanly on retry).
 - Prior bricks verified:
   - Brick 4 browser live test: VERIFIED
   - Brick 5 browser live streaming test: VERIFIED
@@ -105,5 +125,7 @@ Status: BRICK-012 VERIFIED (Exit Code: 0)
   - Brick 9 browser live microphone capture test: VERIFIED
   - Brick 10 browser live multilingual STT test: VERIFIED
   - Brick 11 browser live voice transcript → AI test: VERIFIED
+  - Brick 12 browser live TTS test: VERIFIED
+
 
 

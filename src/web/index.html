@@ -163,11 +163,12 @@
     <div id="response-area" class="response-area">Ready for input</div>
     <div id="status-indicator" class="status-indicator">Status: Ready</div>
 
-    <!-- Brick 9 Microphone Capture Section, Brick 10 Speech-to-Text, Brick 11 Voice AI & Brick 12 TTS -->
+    <!-- Brick 9 Microphone Capture Section, Brick 10 Speech-to-Text, Brick 11 Voice AI, Brick 12 TTS & Brick 13 Voice Turn -->
     <div id="mic-section" class="mic-section">
       <div class="button-group">
         <button type="button" id="start-mic-btn" class="secondary">Start Microphone</button>
         <button type="button" id="stop-mic-btn" class="secondary" disabled>Stop Microphone</button>
+        <button type="button" id="run-voice-turn-btn" disabled>Run Voice Turn</button>
         <button type="button" id="transcribe-btn" class="secondary" disabled>Transcribe</button>
         <button type="button" id="ask-jarvis-btn" disabled>Ask JARVIS</button>
         <button type="button" id="speak-response-btn" disabled>Speak Response</button>
@@ -175,6 +176,7 @@
       <div id="mic-status" class="mic-status">Microphone: Idle</div>
       <div id="mic-meta" class="mic-meta" style="display: none;"></div>
       <audio id="audio-playback" controls style="display: none; width: 100%; margin-top: 4px;"></audio>
+      <div id="voice-turn-status" class="mic-status" style="display: none;"></div>
       <div id="stt-status" class="mic-status" style="display: none;"></div>
       <div id="transcript-display" class="response-area" style="display: none; margin-top: 8px;"></div>
       <div id="jarvis-status" class="mic-status" style="display: none;"></div>
@@ -186,6 +188,7 @@
 
   <script type="module">
     import { MicrophoneRecorder } from '/microphone.js';
+    import { VoiceTurnRunner, VoiceTurnState } from '/voiceTurn.js';
     const form = document.getElementById('text-form');
     const input = document.getElementById('text-input');
     const sendBtn = document.getElementById('send-btn');
@@ -197,12 +200,14 @@
 
     const startMicBtn = document.getElementById('start-mic-btn');
     const stopMicBtn = document.getElementById('stop-mic-btn');
+    const runVoiceTurnBtn = document.getElementById('run-voice-turn-btn');
     const transcribeBtn = document.getElementById('transcribe-btn');
     const askJarvisBtn = document.getElementById('ask-jarvis-btn');
     const speakResponseBtn = document.getElementById('speak-response-btn');
     const micStatus = document.getElementById('mic-status');
     const micMeta = document.getElementById('mic-meta');
     const audioPlayback = document.getElementById('audio-playback');
+    const voiceTurnStatus = document.getElementById('voice-turn-status');
     const sttStatus = document.getElementById('stt-status');
     const transcriptDisplay = document.getElementById('transcript-display');
     const jarvisStatus = document.getElementById('jarvis-status');
@@ -211,6 +216,7 @@
     const ttsPlayback = document.getElementById('tts-playback');
 
     const micRecorder = new MicrophoneRecorder();
+    const voiceTurnRunner = new VoiceTurnRunner();
     let currentCapturedAudio = null;
     let currentTranscript = null;
     let currentAssistantResponse = null;
@@ -222,11 +228,17 @@
       askAiBtn.disabled = busy;
       askAiStreamBtn.disabled = busy;
       clearConvBtn.disabled = busy;
+      if (runVoiceTurnBtn) {
+        runVoiceTurnBtn.disabled = busy || voiceTurnRunner.isBusy || !currentCapturedAudio || !currentCapturedAudio.blob;
+      }
+      if (transcribeBtn) {
+        transcribeBtn.disabled = busy || voiceTurnRunner.isBusy || !currentCapturedAudio || !currentCapturedAudio.blob;
+      }
       if (askJarvisBtn) {
-        askJarvisBtn.disabled = busy || !currentTranscript;
+        askJarvisBtn.disabled = busy || voiceTurnRunner.isBusy || !currentTranscript;
       }
       if (speakResponseBtn) {
-        speakResponseBtn.disabled = busy || isTtsBusy || !currentAssistantResponse;
+        speakResponseBtn.disabled = busy || voiceTurnRunner.isBusy || isTtsBusy || !currentAssistantResponse;
       }
       if (statusText) {
         statusIndicator.textContent = statusText;
@@ -413,6 +425,9 @@
           if (jarvisResponse) {
             jarvisResponse.style.display = 'none';
           }
+          if (voiceTurnStatus) {
+            voiceTurnStatus.style.display = 'none';
+          }
         } else {
           responseArea.textContent = 'Error: ' + (data.error || 'Failed to clear conversation');
           responseArea.classList.add('error');
@@ -440,7 +455,10 @@
       currentCapturedAudio = null;
       currentTranscript = null;
       transcribeBtn.disabled = true;
+      if (runVoiceTurnBtn) runVoiceTurnBtn.disabled = true;
       if (askJarvisBtn) askJarvisBtn.disabled = true;
+      if (speakResponseBtn) speakResponseBtn.disabled = true;
+      if (voiceTurnStatus) voiceTurnStatus.style.display = 'none';
 
       micStatus.textContent = 'Microphone: Requesting permission...';
       micStatus.className = 'mic-status';
@@ -480,15 +498,18 @@
             audioPlayback.style.display = 'block';
           }
           transcribeBtn.disabled = false;
+          if (runVoiceTurnBtn) runVoiceTurnBtn.disabled = false;
         } else {
           micStatus.textContent = 'Microphone: Error: Captured audio is empty';
           micStatus.className = 'mic-status error';
           transcribeBtn.disabled = true;
+          if (runVoiceTurnBtn) runVoiceTurnBtn.disabled = true;
         }
       } catch (err) {
         micStatus.textContent = 'Microphone: Error: ' + err.message;
         micStatus.className = 'mic-status error';
         transcribeBtn.disabled = true;
+        if (runVoiceTurnBtn) runVoiceTurnBtn.disabled = true;
       } finally {
         startMicBtn.disabled = false;
         stopMicBtn.disabled = true;
@@ -702,6 +723,175 @@
         if (currentAssistantResponse && currentAssistantResponse.trim().length > 0) {
           speakResponseBtn.disabled = false;
         }
+      }
+    });
+
+    // Run Voice Turn handler (Brick 13 explicit sequential voice turn)
+    runVoiceTurnBtn.addEventListener('click', async () => {
+      // 1. Safety Checks
+      if (voiceTurnRunner.isBusy) return;
+
+      if (micRecorder && micRecorder.state === 'recording') {
+        voiceTurnStatus.textContent = 'Voice Turn: Error: Microphone is currently recording';
+        voiceTurnStatus.className = 'mic-status error';
+        voiceTurnStatus.style.display = 'block';
+        return;
+      }
+
+      if (!currentCapturedAudio || !currentCapturedAudio.blob) {
+        voiceTurnStatus.textContent = 'Voice Turn: Error: No recording captured';
+        voiceTurnStatus.className = 'mic-status error';
+        voiceTurnStatus.style.display = 'block';
+        return;
+      }
+
+      if (currentCapturedAudio.size === 0 || currentCapturedAudio.blob.size === 0) {
+        voiceTurnStatus.textContent = 'Voice Turn: Error: Captured audio is empty (0 bytes)';
+        voiceTurnStatus.className = 'mic-status error';
+        voiceTurnStatus.style.display = 'block';
+        return;
+      }
+
+      // 2. Prevent duplicate / concurrent actions during turn
+      setBusy(true, 'Status: Running Voice Turn...');
+      runVoiceTurnBtn.disabled = true;
+      startMicBtn.disabled = true;
+      stopMicBtn.disabled = true;
+      transcribeBtn.disabled = true;
+      if (askJarvisBtn) askJarvisBtn.disabled = true;
+      if (speakResponseBtn) speakResponseBtn.disabled = true;
+
+      // 3. Stale data reset for this turn
+      currentTranscript = null;
+      currentAssistantResponse = null;
+      transcriptDisplay.style.display = 'none';
+      jarvisResponse.style.display = 'none';
+      if (ttsPlayback) {
+        ttsPlayback.style.display = 'none';
+        ttsPlayback.pause();
+      }
+
+      try {
+        await voiceTurnRunner.execute({
+          audioBlob: currentCapturedAudio.blob,
+          audioSize: currentCapturedAudio.size,
+          isRecording: micRecorder.state === 'recording',
+          onStageChange: (stage, details) => {
+            if (stage === VoiceTurnState.STT) {
+              voiceTurnStatus.textContent = 'Voice Turn: Transcribing...';
+              voiceTurnStatus.className = 'mic-status';
+              voiceTurnStatus.style.display = 'block';
+
+              sttStatus.textContent = 'STT: Transcribing...';
+              sttStatus.className = 'mic-status';
+              sttStatus.style.display = 'block';
+            } else if (stage === VoiceTurnState.STT_ERROR) {
+              voiceTurnStatus.textContent = 'Voice Turn: STT Error';
+              voiceTurnStatus.className = 'mic-status error';
+
+              sttStatus.textContent = 'STT: Error';
+              sttStatus.className = 'mic-status error';
+
+              transcriptDisplay.textContent = 'Error: ' + (details.error || 'Transcription failed');
+              transcriptDisplay.classList.add('error');
+              transcriptDisplay.style.display = 'block';
+            } else if (stage === 'STT_SUCCESS') {
+              currentTranscript = details.transcript;
+              const sttLatencyText = typeof details.durationMs === 'number' ? `STT: ${details.durationMs} ms` : 'STT: Complete';
+              sttStatus.textContent = sttLatencyText;
+              sttStatus.className = 'mic-status captured';
+
+              transcriptDisplay.textContent = 'Transcript:\n' + details.transcript;
+              transcriptDisplay.classList.remove('error');
+              transcriptDisplay.style.display = 'block';
+            } else if (stage === VoiceTurnState.AI) {
+              voiceTurnStatus.textContent = 'Voice Turn: Thinking...';
+              voiceTurnStatus.className = 'mic-status';
+
+              jarvisStatus.textContent = 'JARVIS: Thinking...';
+              jarvisStatus.className = 'mic-status';
+              jarvisStatus.style.display = 'block';
+            } else if (stage === VoiceTurnState.AI_ERROR) {
+              voiceTurnStatus.textContent = 'Voice Turn: AI Error';
+              voiceTurnStatus.className = 'mic-status error';
+
+              jarvisStatus.textContent = 'JARVIS AI: Error';
+              jarvisStatus.className = 'mic-status error';
+
+              jarvisResponse.textContent = 'Error: ' + (details.error || 'Failed to process AI request');
+              jarvisResponse.classList.add('error');
+              jarvisResponse.style.display = 'block';
+            } else if (stage === 'AI_SUCCESS') {
+              currentAssistantResponse = details.response;
+              jarvisStatus.textContent = 'JARVIS: Ready';
+              jarvisStatus.className = 'mic-status captured';
+
+              jarvisResponse.textContent = 'JARVIS:\n' + details.response;
+              jarvisResponse.classList.remove('error');
+              jarvisResponse.style.display = 'block';
+
+              responseArea.textContent = 'JARVIS:\n' + details.response;
+              responseArea.classList.remove('error');
+            } else if (stage === VoiceTurnState.TTS) {
+              voiceTurnStatus.textContent = 'Voice Turn: Generating speech...';
+              voiceTurnStatus.className = 'mic-status';
+
+              ttsStatus.textContent = 'TTS: Generating...';
+              ttsStatus.className = 'mic-status';
+              ttsStatus.style.display = 'block';
+            } else if (stage === VoiceTurnState.TTS_ERROR) {
+              voiceTurnStatus.textContent = 'Voice Turn: TTS Error';
+              voiceTurnStatus.className = 'mic-status error';
+
+              ttsStatus.textContent = 'TTS: Error: ' + (details.error || 'Failed to synthesize speech');
+              ttsStatus.className = 'mic-status error';
+            } else if (stage === 'TTS_SUCCESS') {
+              const latencyText = typeof details.durationMs === 'number' ? `TTS: ${details.durationMs} ms` : 'TTS: Complete';
+              ttsStatus.textContent = latencyText;
+              ttsStatus.className = 'mic-status captured';
+            } else if (stage === VoiceTurnState.PLAYING) {
+              voiceTurnStatus.textContent = `Voice Turn: Playing | Voice Turn Total: ${details.totalDurationMs} ms`;
+              voiceTurnStatus.className = 'mic-status captured';
+            } else if (stage === VoiceTurnState.PLAYBACK_ERROR) {
+              voiceTurnStatus.textContent = 'Voice Turn: Playback Error';
+              voiceTurnStatus.className = 'mic-status error';
+            }
+          },
+          playAudioFn: async (blob, metrics) => {
+            if (currentTtsAudioUrl) {
+              URL.revokeObjectURL(currentTtsAudioUrl);
+            }
+            currentTtsAudioUrl = URL.createObjectURL(blob);
+            ttsPlayback.src = currentTtsAudioUrl;
+            ttsPlayback.style.display = 'block';
+
+            const ttsDurationText = metrics.ttsDurationMs ? ` (${metrics.ttsDurationMs} ms)` : '';
+            ttsStatus.textContent = 'TTS: Playing' + ttsDurationText;
+
+            try {
+              if (typeof ttsPlayback.play === 'function') {
+                const p = ttsPlayback.play();
+                if (p !== undefined) await p;
+              }
+            } catch {
+              // Controlled fallback if autoplay restricted
+            }
+
+            ttsPlayback.onended = () => {
+              voiceTurnRunner.state = VoiceTurnState.COMPLETE;
+              voiceTurnStatus.textContent = `Voice Turn: Complete | Voice Turn Total: ${metrics.totalDurationMs} ms`;
+              ttsStatus.textContent = 'TTS: Ready' + ttsDurationText;
+            };
+          }
+        });
+      } finally {
+        setBusy(false, 'Status: Ready');
+        runVoiceTurnBtn.disabled = !currentCapturedAudio || !currentCapturedAudio.blob;
+        transcribeBtn.disabled = !currentCapturedAudio || !currentCapturedAudio.blob;
+        if (askJarvisBtn) askJarvisBtn.disabled = !currentTranscript;
+        if (speakResponseBtn) speakResponseBtn.disabled = !currentAssistantResponse;
+        startMicBtn.disabled = false;
+        stopMicBtn.disabled = true;
       }
     });
   </script>

@@ -37,5 +37,8 @@ Status: COMPLETED
 BRICK-012 — Multilingual JARVIS Text Response → Voice Output
 Status: VERIFIED
 
+BRICK-013 — One-Action Sequential Voice Turn
+Status: VERIFIED
+
 
 
