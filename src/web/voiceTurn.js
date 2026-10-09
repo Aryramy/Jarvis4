@@ -125,11 +125,17 @@ export class VoiceTurnRunner {
     this.lastError = null;
     this.lastResult = null;
 
-    const turnStartTime = Date.now();
+    const turnStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      ? performance.now()
+      : Date.now();
     let stageTranscript = null;
     let stageAiResponse = null;
     let stageAudioBlob = null;
     let sttDurationMs = null;
+    let aiDurationMs = null;
+    let clientAiDurationMs = null;
+    let serverAiDurationMs = null;
+    let providerDurationMs = null;
     let ttsDurationMs = null;
 
     try {
@@ -182,6 +188,10 @@ export class VoiceTurnRunner {
       this.state = VoiceTurnState.AI;
       onStageChange?.(VoiceTurnState.AI, { text: 'Thinking...' });
 
+      const aiStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+
       let aiRes;
       let aiData;
       try {
@@ -191,12 +201,14 @@ export class VoiceTurnRunner {
           body: JSON.stringify({ input: stageTranscript })
         });
         aiData = await aiRes.json().catch(() => ({}));
+        clientAiDurationMs = Math.max(0, Math.round(((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now()) - aiStartTime));
       } catch (networkErr) {
+        clientAiDurationMs = Math.max(0, Math.round(((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now()) - aiStartTime));
         this.state = VoiceTurnState.AI_ERROR;
         const err = networkErr.message || 'AI network error';
-        this.lastError = { stage: 'AI', error: err };
-        onStageChange?.(VoiceTurnState.AI_ERROR, { error: err, transcript: stageTranscript });
-        return { success: false, stage: VoiceTurnState.AI_ERROR, error: err, transcript: stageTranscript };
+        this.lastError = { stage: 'AI', error: err, clientAiDurationMs };
+        onStageChange?.(VoiceTurnState.AI_ERROR, { error: err, transcript: stageTranscript, clientAiDurationMs });
+        return { success: false, stage: VoiceTurnState.AI_ERROR, error: err, transcript: stageTranscript, clientAiDurationMs };
       }
 
       // Check turn identity
@@ -207,13 +219,25 @@ export class VoiceTurnRunner {
       if (!aiRes.ok || !aiData.success || typeof aiData.response !== 'string' || aiData.response.trim().length === 0) {
         this.state = VoiceTurnState.AI_ERROR;
         const err = aiData.error || 'Failed to process AI request';
-        this.lastError = { stage: 'AI', error: err };
-        onStageChange?.(VoiceTurnState.AI_ERROR, { error: err, transcript: stageTranscript });
-        return { success: false, stage: VoiceTurnState.AI_ERROR, error: err, transcript: stageTranscript };
+        this.lastError = { stage: 'AI', error: err, clientAiDurationMs };
+        onStageChange?.(VoiceTurnState.AI_ERROR, { error: err, transcript: stageTranscript, clientAiDurationMs });
+        return { success: false, stage: VoiceTurnState.AI_ERROR, error: err, transcript: stageTranscript, clientAiDurationMs };
       }
 
       stageAiResponse = aiData.response;
-      onStageChange?.('AI_SUCCESS', { response: stageAiResponse, transcript: stageTranscript });
+      serverAiDurationMs = aiData.timing?.serverAiDurationMs ?? (typeof aiData.serverAiDurationMs === 'number' ? aiData.serverAiDurationMs : null);
+      providerDurationMs = aiData.timing?.providerDurationMs ?? (typeof aiData.providerDurationMs === 'number' ? aiData.providerDurationMs : null);
+      aiDurationMs = clientAiDurationMs;
+
+      onStageChange?.('AI_SUCCESS', {
+        response: stageAiResponse,
+        transcript: stageTranscript,
+        durationMs: aiDurationMs,
+        aiDurationMs,
+        clientAiDurationMs,
+        serverAiDurationMs,
+        providerDurationMs
+      });
 
       // -----------------------------------------------------------------
       // STEP 3 — TTS
@@ -282,13 +306,17 @@ export class VoiceTurnRunner {
       // STEP 4 — PLAYBACK
       // -----------------------------------------------------------------
       this.state = VoiceTurnState.PLAYING;
-      const totalDurationMs = Date.now() - turnStartTime;
+      const totalDurationMs = Math.max(0, Math.round(((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now()) - turnStartTime));
 
       if (typeof playAudioFn === 'function') {
         try {
           await playAudioFn(stageAudioBlob, {
             totalDurationMs,
             sttDurationMs,
+            aiDurationMs,
+            clientAiDurationMs,
+            serverAiDurationMs,
+            providerDurationMs,
             ttsDurationMs
           });
         } catch (playErr) {
@@ -301,6 +329,12 @@ export class VoiceTurnRunner {
             stage: VoiceTurnState.PLAYBACK_ERROR,
             error: err,
             totalDurationMs,
+            sttDurationMs,
+            aiDurationMs,
+            clientAiDurationMs,
+            serverAiDurationMs,
+            providerDurationMs,
+            ttsDurationMs,
             transcript: stageTranscript,
             response: stageAiResponse
           };
@@ -310,6 +344,10 @@ export class VoiceTurnRunner {
       onStageChange?.(VoiceTurnState.PLAYING, {
         totalDurationMs,
         sttDurationMs,
+        aiDurationMs,
+        clientAiDurationMs,
+        serverAiDurationMs,
+        providerDurationMs,
         ttsDurationMs,
         transcript: stageTranscript,
         response: stageAiResponse
@@ -322,6 +360,10 @@ export class VoiceTurnRunner {
         audioBlob: stageAudioBlob,
         totalDurationMs,
         sttDurationMs,
+        aiDurationMs,
+        clientAiDurationMs,
+        serverAiDurationMs,
+        providerDurationMs,
         ttsDurationMs
       };
 

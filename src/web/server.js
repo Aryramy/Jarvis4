@@ -338,6 +338,17 @@ export function createRequestListener(options = {}) {
         return;
       }
 
+      const requestStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+
+      const getServerAiDurationMs = () => {
+        const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+          ? performance.now()
+          : Date.now();
+        return Math.max(0, Math.round(now - requestStartTime));
+      };
+
       let body = '';
       let isTooLarge = false;
 
@@ -384,10 +395,13 @@ export function createRequestListener(options = {}) {
 
           const configCheck = provider.validateConfig ? provider.validateConfig() : { valid: true };
           if (!configCheck.valid) {
+            const serverAiDurationMs = getServerAiDurationMs();
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
               success: false,
-              error: `Configuration error: ${configCheck.error}`
+              error: `Configuration error: ${configCheck.error}`,
+              timing: { serverAiDurationMs },
+              serverAiDurationMs
             }));
             return;
           }
@@ -402,6 +416,11 @@ export function createRequestListener(options = {}) {
             ? await provider.generateMessages(messages)
             : await provider.generate(trimmedInput);
 
+          const serverAiDurationMs = getServerAiDurationMs();
+          const providerDurationMs = typeof result.providerDurationMs === 'number'
+            ? result.providerDurationMs
+            : (typeof result.durationMs === 'number' ? result.durationMs : 0);
+
           if (result.success) {
             // Store assistant response in session context
             session.addAssistantMessage(result.text);
@@ -414,10 +433,18 @@ export function createRequestListener(options = {}) {
               }
             }
 
+            const timing = {
+              providerDurationMs,
+              serverAiDurationMs
+            };
+
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
               success: true,
-              response: result.text
+              response: result.text,
+              timing,
+              providerDurationMs,
+              serverAiDurationMs
             }));
           } else {
             // Provider failed: roll back user turn so context remains clean and uncorrupted
@@ -430,10 +457,21 @@ export function createRequestListener(options = {}) {
             if (apiKeyToRedact) {
               safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
             }
+
+            const timing = {
+              serverAiDurationMs
+            };
+            if (typeof result.providerDurationMs === 'number') {
+              timing.providerDurationMs = result.providerDurationMs;
+            }
+
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
               success: false,
-              error: safeError
+              error: safeError,
+              timing,
+              providerDurationMs: timing.providerDurationMs,
+              serverAiDurationMs
             }));
           }
         } catch (err) {
@@ -442,6 +480,7 @@ export function createRequestListener(options = {}) {
             session.pop();
           }
 
+          const serverAiDurationMs = getServerAiDurationMs();
           let safeError = err.message || 'Internal server error';
           const apiKeyToRedact = (options.provider && options.provider.apiKey) || process.env.CHEAPER_INFERENCE_API_KEY;
           if (apiKeyToRedact) {
@@ -450,7 +489,9 @@ export function createRequestListener(options = {}) {
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             success: false,
-            error: safeError
+            error: safeError,
+            timing: { serverAiDurationMs },
+            serverAiDurationMs
           }));
         }
       });

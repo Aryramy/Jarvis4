@@ -286,6 +286,10 @@
 
       setBusy(true, 'Status: Thinking...');
 
+      const clientAiStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+
       try {
         const res = await fetch('/api/ai', {
           method: 'POST',
@@ -294,11 +298,12 @@
         });
 
         const data = await res.json();
+        const clientAiDurationMs = Math.max(0, Math.round(((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now()) - clientAiStartTime));
 
         if (res.ok && data.success) {
           responseArea.textContent = 'AI:\n' + data.response;
           responseArea.classList.remove('error');
-          statusIndicator.textContent = 'Status: Ready';
+          statusIndicator.textContent = `Status: Ready | AI: ${clientAiDurationMs} ms`;
           currentAssistantResponse = data.response;
           if (speakResponseBtn) speakResponseBtn.disabled = false;
         } else {
@@ -602,6 +607,10 @@
       jarvisStatus.className = 'mic-status';
       jarvisStatus.style.display = 'block';
 
+      const clientAiStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+
       try {
         const res = await fetch('/api/ai', {
           method: 'POST',
@@ -610,9 +619,10 @@
         });
 
         const data = await res.json().catch(() => ({}));
+        const clientAiDurationMs = Math.max(0, Math.round(((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now()) - clientAiStartTime));
 
         if (res.ok && data.success) {
-          jarvisStatus.textContent = 'JARVIS: Ready';
+          jarvisStatus.textContent = `AI: ${clientAiDurationMs} ms`;
           jarvisStatus.className = 'mic-status captured';
 
           jarvisResponse.textContent = 'JARVIS:\n' + data.response;
@@ -621,7 +631,7 @@
 
           responseArea.textContent = 'JARVIS:\n' + data.response;
           responseArea.classList.remove('error');
-          statusIndicator.textContent = 'Status: Ready';
+          statusIndicator.textContent = `Status: Ready | AI: ${clientAiDurationMs} ms`;
 
           currentAssistantResponse = data.response;
           if (speakResponseBtn) speakResponseBtn.disabled = false;
@@ -823,7 +833,8 @@
               jarvisResponse.style.display = 'block';
             } else if (stage === 'AI_SUCCESS') {
               currentAssistantResponse = details.response;
-              jarvisStatus.textContent = 'JARVIS: Ready';
+              const aiLatencyText = typeof details.durationMs === 'number' ? `AI: ${details.durationMs} ms` : 'AI: Complete';
+              jarvisStatus.textContent = aiLatencyText;
               jarvisStatus.className = 'mic-status captured';
 
               jarvisResponse.textContent = 'JARVIS:\n' + details.response;

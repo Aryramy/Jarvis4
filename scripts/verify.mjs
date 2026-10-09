@@ -61,13 +61,15 @@ const REQUIRED_FILES = [
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
   'tests/unit/voiceTurn.test.js',
+  'tests/unit/aiLatencyInstrumentation.test.js',
   'tests/smoke/foundation.test.js',
   'tests/regression/brick1Regression.test.js',
   'tests/integration/webServer.test.js',
   'tests/integration/sttEndpoint.test.js',
   'tests/integration/ttsEndpoint.test.js',
   'tests/integration/voiceAiIntegration.test.js',
-  'tests/integration/voiceTurnSequence.test.js'
+  'tests/integration/voiceTurnSequence.test.js',
+  'tests/integration/aiLatencyInstrumentation.test.js'
 ];
 
 const REQUIRED_DIRS = [

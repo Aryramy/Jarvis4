@@ -26,7 +26,14 @@ Currently tracked issues in JARVIS4:
    - TTS latency is currently generally acceptable (~1.2s–3.0s).
    - The complete voice turn is still significantly slower than desired (observed total elapsed times: ~18s–31s across live tests).
    - A large portion of the total elapsed time occurs outside the measured STT and TTS stages.
-   - Brick 13 does not expose an isolated AI-stage latency measurement. The remaining elapsed time may include AI provider latency, network roundtrip delays, request/response payload handling, and client orchestration overhead.
-   - Future architectural principle: measure isolated AI latency first. Do not optimize or modify AI provider/model until empirical measurement identifies the actual bottleneck.
+   - Brick 13 did not expose an isolated AI-stage latency measurement.
+
+6. **Cheaper Inference External Provider Latency & Timeout Bottleneck (Brick 14 Diagnostic Finding)**:
+   - Isolated AI timing instrumentation proved that the dominant bottleneck in the complete voice pipeline is the external Cheaper Inference request path (`providerDurationMs`: ~23.6s to ~30.0s).
+   - Local JARVIS AI server overhead is negligible (~0–7 ms).
+   - Live requests frequently take 24–30 seconds and repeatedly approach or hit the configured 30000 ms timeout threshold.
+   - The measurement captures the full external request path (which may include routing, queueing, upstream provider processing, model inference, and upstream network latency); instrumentation does not single out any one upstream component as the sole cause.
+   - This latency is unsuitable for a fast voice-assistant experience and is recorded as a verified performance issue for future optimization. No optimization was performed in Brick 14.
+
 
 

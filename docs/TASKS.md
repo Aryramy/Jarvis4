@@ -40,5 +40,9 @@ Status: VERIFIED
 BRICK-013 — One-Action Sequential Voice Turn
 Status: VERIFIED
 
+BRICK-014 — AI Latency Instrumentation & Bottleneck Diagnosis
+Status: VERIFIED
+
+
 
 

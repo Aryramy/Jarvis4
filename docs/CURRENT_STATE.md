@@ -1,8 +1,8 @@
 Project: JARVIS4
-Current Brick: 13
+Current Brick: 14
 Status: VERIFIED
-Last Verified Brick: BRICK-013
-Current Feature: One-action sequential voice turn
+Last Verified Brick: BRICK-014
+Current Feature: AI Latency Instrumentation & Bottleneck Diagnosis
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
@@ -67,6 +67,13 @@ Next Feature: NOT AUTHORIZED
 - Full Unicode preservation across English, Urdu, Arabic, and code-switched mixed speech without language selectors, manual mode switches, or language-specific routes
 - Comprehensive automated test suite (`tests/integration/voiceTurnSequence.test.js` & `tests/unit/voiceTurn.test.js`) verifying all 53 Brick 13 requirements offline (300 tests passed, 0 failed)
 - Strict boundary adherence: zero continuous listening, zero automatic recording restarts, zero wake words, zero VAD
+- Multi-tier AI latency instrumentation (Brick 14):
+  - `providerDurationMs`: External Cheaper Inference provider HTTP round-trip timing measured directly in `CheaperInferenceProvider`
+  - `serverAiDurationMs`: Server-side endpoint timing measured inside `/api/ai` request handler encompassing session/store and request lifecycle
+  - `clientAiDurationMs`: Browser orchestration timing measured across `/api/ai` fetch and response parsing
+- Diagnostic timing metadata contract exposed in `/api/ai` (`timing: { providerDurationMs, serverAiDurationMs }`) with credential redaction and zero prompt leakage
+- Visible diagnostic UI displays: `AI: <ms> ms` for typed Ask AI / Ask JARVIS, and full pipeline stage breakdown (`STT: <ms> ms`, `AI: <ms> ms`, `TTS: <ms> ms`, `Voice Turn Total: <ms> ms`) for automated Voice Turn
+- Automated test suite expanded to 318 tests across 20 suites passing offline with zero live external calls (Exit Code: 0)
 
 ## External integrations
 
@@ -96,26 +103,28 @@ Next Feature: NOT AUTHORIZED
 
 ## Last verification
 
-Status: BRICK-013 VERIFIED (Exit Code: 0)
-- Automated test & sanity verification: 300 tests across 18 suites passed offline (Exit Code: 0).
+Status: BRICK-014 VERIFIED (Exit Code: 0)
+- Automated test & sanity verification: 318 tests across 20 suites passed offline (Exit Code: 0).
 - Providers:
   - STT: OpenRouter (`openai/whisper-large-v3-turbo` at `POST /audio/transcriptions`)
   - AI: Cheaper Inference (`deepseek-v4-flash-0731` at `POST /chat/completions`)
   - TTS: OpenRouter (`elevenlabs/eleven-v4-turbo`, voice: `george`, format: `mp3` at `POST /audio/speech`)
 - Endpoints: `POST /api/stt`, `POST /api/ai`, `POST /api/tts`
-- Complete one-action voice turn pipeline verified:
+- Complete one-action voice turn pipeline with isolated AI latency instrumentation verified:
   Microphone Capture → Single Click "Run Voice Turn" → OpenRouter STT → Transcript → Cheaper Inference AI → JARVIS Text Response → OpenRouter TTS (`elevenlabs/eleven-v4-turbo`, voice `george`) → Browser Audio Playback
 - Multilingual architecture: ONE model and ONE voice for all languages (English, Urdu, Arabic, mixed). NO language selector, NO manual language switch, NO per-language routes.
 - Presentation only: TTS audio is NOT stored in `ConversationSession` or `ConversationStore`.
-- Brick 13 browser live tests: VERIFIED — Human operator confirmed end-to-end execution:
-  - TEST A (English One-Action Turn): PASS (Query: "What is Microsoft Fabric in one short sentence?", Voice Turn Total: 31614 ms, STT: 2555 ms, Transcript: "What is Microsoft fabric in one short sentence? Sure.", JARVIS: "Microsoft Fabric is a unified SaaS analytics platform that combines data engineering, integration, and business intelligence into one seamless, AI-powered environment.", TTS: 2970 ms; audio playback: PASS. Note: Whisper appended minor trailing word "Sure", an existing STT quality observation).
-  - TEST B (Urdu One-Action Turn): PASS (Query: "جارویس پاور بی آئی کیا ہے؟ ایک مختصر جواب دو", Voice Turn Total: 19243 ms, STT: 2634 ms, JARVIS: "سر، پاور بی آئی مائیکروسافٹ کا ایک تجزیاتی پلیٹ فارم ہے جو ڈیٹا کو انٹرایکٹو ڈیش بورڈز اور رپورٹس میں تبدیل کرتا ہے۔", TTS: 2424 ms; same STT/AI/TTS pipeline, no language selector).
-  - TEST C (Arabic One-Action Turn): PASS (Query: "ما هو باور بي آئي؟ أجيبه بجملة قصيوة", Voice Turn Total: 18249 ms, STT: 2600 ms, JARVIS: "باور بي آي هو أداة تحليلات من مايكروسوفت تحوّل البيانات إلى تقارير ولوحات تفاعلية لاتخاذ قرارات أفضل.", TTS: 2022 ms; full pipeline executed).
-  - TEST D (Mixed Language One-Action Turn): PASS (Query: "جارویس مجھے پاور بی آئی ڈیشپورٹ کے بارے میں ون شورٹ سینٹنس میں بتاؤ", Voice Turn Total: 21393 ms, STT: 3057 ms, JARVIS: "جارویس، پاور بی آئی ڈیش بورڈ ایک انٹرایکٹو صفحہ ہے جو اہم ڈیٹا کو بصری شکل میں ایک جگہ پیش کرتا ہے۔", TTS: 2450 ms; mixed speech handled through unified pipeline without language-specific routing).
-  - TEST E (Typed → Voice Shared Memory): PASS (Project code `007` typed, voice query "What is my project code?", STT: 2753 ms, JARVIS correctly recalled `007`, TTS: 2209 ms, Voice Turn Total: 23612 ms; verifies automated voice turns reuse existing ConversationSession).
-  - TEST F (Voice Turn → Typed Memory): PASS (Information from automated voice turn successfully recalled in later typed Ask AI query, verifying bidirectional shared context across ConversationSession and ConversationStore).
-  - TEST G (Second Turn Without Page Refresh): PASS (New query "What is the capital of Japan in one short sentence?", Voice Turn Total: 27649 ms, STT: 3194 ms, JARVIS: "The capital of Japan is Tokyo.", TTS: 1228 ms; verified new recording replacement and zero stale data leakage).
-  - TEST H (Error Observability): PASS (Distinguishes STT_ERROR, AI_ERROR, TTS_ERROR; transient network error observed and recovered cleanly on retry).
+- Brick 14 live verification tests (Human operator confirmed):
+  - TEST A (Simple Typed AI Latency): PASS (Query: "What is 2 + 2? Answer with only the number.", Response: "4", clientAiDurationMs: 29190 ms, providerDurationMs: 29064 ms, serverAiDurationMs: 29071 ms, local server overhead: ~7 ms)
+  - TEST B (Voice Turn AI Latency): PASS (Query: "What is the capital of Japan? Answer briefly.", STT: 5299 ms, providerDurationMs: 26797 ms, serverAiDurationMs: 26798 ms, TTS ≈ 2000 ms, local server overhead: ~1 ms)
+  - TEST C (Second AI Request - Variability): PASS (Query: "What is the capital of France? Answer briefly.", Response: "Paris", providerDurationMs: 23686 ms, serverAiDurationMs: 23687 ms, local server overhead: ~1 ms; confirmed significant variance between provider requests)
+  - TEST D (Conversation Context & Timeout Observation): PASS (Query: "My test number is 4821.", initial attempt timed out at providerDurationMs: 30016 ms, retry succeeded at 29979 ms; Recall Query: "What is my test number?", initial attempt timed out at providerDurationMs: 30009 ms, retry succeeded at 27319 ms with response "Your test number is **4821**, sir."; confirmed memory context remains functional across timeouts and retries)
+- Diagnostic Result & Bottleneck Isolation supported by evidence:
+  - External Cheaper Inference provider request path is the dominant measured bottleneck (~23.6s to 30.0s).
+  - Local JARVIS AI server overhead is negligible (~0–7 ms in tested cases).
+  - Repeated near-30-second timeouts were observed (30009 ms, 30016 ms), proving the route frequently approaches or exceeds the configured 30000 ms timeout.
+  - The measurement captures the full external request path (routing, queueing, upstream provider processing, model inference, network latency); no specific upstream component is proven to be the sole cause.
+  - Recorded as a verified performance issue for future architectural optimization. Zero optimization performed in Brick 14.
 - Prior bricks verified:
   - Brick 4 browser live test: VERIFIED
   - Brick 5 browser live streaming test: VERIFIED

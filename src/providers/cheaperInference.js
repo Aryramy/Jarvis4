@@ -103,6 +103,17 @@ export class CheaperInferenceProvider extends AIProvider {
       }, timeout);
     }
 
+    const reqStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      ? performance.now()
+      : Date.now();
+
+    const getElapsedProviderMs = () => {
+      const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+      return Math.max(0, Math.round(now - reqStartTime));
+    };
+
     try {
       const response = await this.fetchFn(endpoint, {
         method: 'POST',
@@ -133,7 +144,8 @@ export class CheaperInferenceProvider extends AIProvider {
         const safeError = this.sanitizeError(errorDetail || response.statusText);
         return {
           success: false,
-          error: `Provider HTTP ${response.status}: ${safeError || response.statusText}`
+          error: `Provider HTTP ${response.status}: ${safeError || response.statusText}`,
+          providerDurationMs: getElapsedProviderMs()
         };
       }
 
@@ -143,14 +155,16 @@ export class CheaperInferenceProvider extends AIProvider {
       } catch (err) {
         return {
           success: false,
-          error: `Malformed response from provider: failed to parse JSON (${err.message})`
+          error: `Malformed response from provider: failed to parse JSON (${err.message})`,
+          providerDurationMs: getElapsedProviderMs()
         };
       }
 
       if (!data || !Array.isArray(data.choices) || data.choices.length === 0) {
         return {
           success: false,
-          error: 'Malformed response from provider: missing choices array'
+          error: 'Malformed response from provider: missing choices array',
+          providerDurationMs: getElapsedProviderMs()
         };
       }
 
@@ -160,7 +174,8 @@ export class CheaperInferenceProvider extends AIProvider {
       if (typeof assistantMessage !== 'string') {
         return {
           success: false,
-          error: 'Malformed response from provider: missing message content'
+          error: 'Malformed response from provider: missing message content',
+          providerDurationMs: getElapsedProviderMs()
         };
       }
 
@@ -168,18 +183,21 @@ export class CheaperInferenceProvider extends AIProvider {
         success: true,
         text: assistantMessage,
         model: data.model || this.model,
-        usage: data.usage || null
+        usage: data.usage || null,
+        providerDurationMs: getElapsedProviderMs()
       };
     } catch (err) {
       if (err.name === 'AbortError' || controller.signal.aborted) {
         return {
           success: false,
-          error: `Request timed out after ${timeout}ms`
+          error: `Request timed out after ${timeout}ms`,
+          providerDurationMs: getElapsedProviderMs()
         };
       }
       return {
         success: false,
-        error: `Network error: ${this.sanitizeError(err.message)}`
+        error: `Network error: ${this.sanitizeError(err.message)}`,
+        providerDurationMs: getElapsedProviderMs()
       };
     } finally {
       if (timeoutId) {

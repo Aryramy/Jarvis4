@@ -156,6 +156,21 @@
   7. Latency Measurement: Total voice turn latency (click to playback start) and individual stage latencies (`STT: <ms> ms`, `TTS: <ms> ms`) are tracked and displayed.
 - **Consequences**: Enables single-click voice turn execution from captured audio while preserving existing independent controls, zero secrets exposure, and 100% offline automated test verification.
 
+## ADR-0019: AI Latency Instrumentation and Bottleneck Diagnosis
+- **Status**: Accepted
+- **Context**: In Brick 13, complete sequential voice turns exhibited noticeable latency (~18s–31s), with STT taking ~2.5s–3.2s and TTS taking ~1.2s–3.0s. The AI stage was suspected of accounting for the majority of the elapsed time, but isolated AI timing was not previously instrumented. Optimization without empirical measurement violates core architecture guidelines.
+- **Decision**:
+  1. Multi-tier High-Resolution/Monotonic Timing: Instrument three independent latency metrics using monotonic clocks (`performance.now()` where available):
+     - `providerDurationMs`: Measured inside `CheaperInferenceProvider` immediately across external HTTP provider calls.
+     - `serverAiDurationMs`: Measured inside `/api/ai` from request handler entry to response readiness, capturing server-side session/store and payload processing.
+     - `clientAiDurationMs`: Measured in the browser from before `fetch('/api/ai')` until the response is parsed.
+  2. Safe Response Metadata Contract: Expose `{ timing: { providerDurationMs, serverAiDurationMs } }` in the `/api/ai` JSON response without altering existing response keys (`success`, `response`, `error`) and without leaking secrets, API keys, or prompt internals.
+  3. UI Diagnostic Visibility: In `index.html`, display `AI: <ms> ms` for typed Ask AI, Ask JARVIS, and automated Voice Turn. Voice Turn displays a complete breakdown across all stages: `STT: <ms> ms`, `AI: <ms> ms`, `TTS: <ms> ms`, and `Voice Turn Total: <ms> ms`.
+  4. Diagnostic Only: Strictly prohibit provider changes, model switching, fallback routing, prompt engineering, streaming TTS, or speculation in this brick.
+  5. 100% Mocked Offline Tests: Automated tests execute with deterministic mocks and zero live network requests during `npm run verify`.
+- **Consequences**: Makes the AI stage and external provider latency fully observable and isolated without altering conversation semantics or breaking existing contracts.
+
+
 
 
 
