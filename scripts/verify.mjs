@@ -53,6 +53,7 @@ const REQUIRED_FILES = [
   'src/utils/logger.js',
   'scripts/verify.mjs',
   'scripts/benchmark-ai-latency.mjs',
+  'scripts/benchmark-ai-gateways.mjs',
   'tests/unit/logger.test.js',
   'tests/unit/config.test.js',
   'tests/unit/textCore.test.js',
@@ -64,6 +65,7 @@ const REQUIRED_FILES = [
   'tests/unit/voiceTurn.test.js',
   'tests/unit/aiLatencyInstrumentation.test.js',
   'tests/unit/benchmarkAiLatency.test.js',
+  'tests/unit/benchmarkAiGateways.test.js',
   'tests/smoke/foundation.test.js',
   'tests/regression/brick1Regression.test.js',
   'tests/integration/webServer.test.js',
@@ -327,6 +329,19 @@ check('AI Latency Benchmark Module Sanity Check', async () => {
   }
   if (benchmark.DEFAULT_BASELINE_MODEL !== 'deepseek-v4-flash-0731') {
     throw new Error('AI Benchmark default baseline model must be deepseek-v4-flash-0731');
+  }
+});
+
+check('Cross-Gateway AI Benchmark Module Sanity Check', async () => {
+  const benchmark = await import('../scripts/benchmark-ai-gateways.mjs');
+  if (typeof benchmark.runCrossGatewayBenchmark !== 'function' || typeof benchmark.verifyOpenRouterModelAvailability !== 'function') {
+    throw new Error('Cross-Gateway AI Benchmark module failed to export required functions');
+  }
+  if (benchmark.CHEAPER_TARGET_MODEL !== 'deepseek-v4-flash-0731') {
+    throw new Error('Cheaper target model must be deepseek-v4-flash-0731');
+  }
+  if (benchmark.OPENROUTER_TARGET_MODEL !== 'deepseek/deepseek-v4-flash-0731') {
+    throw new Error('OpenRouter target model must be deepseek/deepseek-v4-flash-0731');
   }
 });
 

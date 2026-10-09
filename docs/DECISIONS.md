@@ -186,6 +186,27 @@
   - Empirical finding: 10/12 requests timed out near 30s. Only `deepseek-v4.1-flash` completed 2/3 requests (median: 29385 ms, with 1 timeout).
   - Decision: NO production model switch is authorized or performed. Changing model ID alone on the existing Cheaper Inference request path does not resolve latency. Production model remains `deepseek-v4-flash-0731`. Future architectural investigation must focus on alternative gateways/pathways rather than blind model swapping on the same provider path.
 
+## ADR-0021: Cross-Gateway Same-Model AI Latency Benchmark
+- **Status**: Accepted
+- **Context**: In Brick 15, live benchmarking of 4 alternative model candidates across the Cheaper Inference gateway resulted in 10 out of 12 requests timing out near 30s. Changing model ID alone on the existing gateway pathway did not resolve the latency bottleneck. However, Brick 15 did not isolate gateway/pathway infrastructure from model behavior. Brick 16 performs a clean cross-gateway comparison holding the model constant (DeepSeek V4 Flash 0731 release) across Cheaper Inference (`deepseek-v4-flash-0731`) and OpenRouter (`deepseek/deepseek-v4-flash-0731`).
+- **Decision**:
+  1. Diagnostic Only: Implement an isolated tool (`scripts/benchmark-ai-gateways.mjs` and `npm run benchmark:gateways`). The cross-gateway benchmark is strictly an operator diagnostic tool and is NEVER run automatically by `verify.mjs`, web server startup, `/api/ai`, voice turns, or test suites.
+  2. Production Immutability: Production model remains strictly `deepseek-v4-flash-0731` on Cheaper Inference. No production routing, provider changes, or fallbacks are introduced.
+  3. Pre-Benchmark Check Mode: Provide `--check` mode verifying credentials for both gateways and querying OpenRouter's model catalog (`GET /models`) to verify target model `deepseek/deepseek-v4-flash-0731` is available. If unavailable, execution stops cleanly; silent model substitution is strictly prohibited. Check mode sends 0 prompt requests.
+  4. Controlled Sequential Workload: Executes exactly 3 sequential trials per gateway (6 live requests maximum) using the identical prompt `"What is 2 + 2? Answer with only the number."`, identical 30000 ms timeout, identical temperature (0.1), identical max output tokens (50), and `stream: false`.
+  5. Statistical & Correctness Evaluation: Evaluates semantic correctness ("4"). Computes min, max, average, and median latencies. If Cheaper has 0 successful trials, no fake ratio is fabricated.
+  6. Gitignored Secure Persistence: Results saved to `runtime/ai-gateway-benchmark-latest.json` (and `.txt`), with all secrets redacted.
+  7. 100% Mocked Offline Tests: Automated test suite (`tests/unit/benchmarkAiGateways.test.js`) verifies all 41 requirements offline with zero live external requests during `npm run verify`.
+- **Consequences**:
+  - Pre-benchmark check (`node scripts/benchmark-ai-gateways.mjs --check`) passed with 0 prompt requests, confirming credentials and OpenRouter catalog target availability without silent model substitution.
+  - Live benchmark (`npm run benchmark:gateways`) executed 6 sequential requests across both gateways for the same model release (`deepseek-v4-flash-0731` on Cheaper Inference vs `deepseek/deepseek-v4-flash-0731` on OpenRouter).
+  - Empirical results:
+    - Cheaper Inference: 1/3 success, 2/3 timeouts (30011 ms, 25529 ms [correct: 4], 30013 ms); successful median: 25529 ms.
+    - OpenRouter: 3/3 success, 0 timeouts (1314 ms [correct: 4], 674 ms [correct: 4], 483 ms [correct: 4]); median: 674 ms, average: 824 ms.
+    - Fastest observed gateway: OpenRouter (674 ms median vs 25529 ms Cheaper median; absolute difference: 24855 ms; observed speed ratio: ~37.88x faster).
+  - Key finding: Changing gateway/path while holding the DeepSeek V4 Flash 0731 model release constant produced a dramatic latency improvement. This confirms that gateway/path selection materially affects current JARVIS AI latency. Gateways may differ in upstream provider, queueing, routing, hardware, batching, geography, network path, provider selection, and infrastructure configuration.
+  - Production Immutability: Zero production migration performed in Brick 16. Production provider remains Cheaper Inference (`deepseek-v4-flash-0731` at `https://api.cheaperinference.com/v1`). No routing, fallback, or timeout changes introduced. Controlled production migration is deferred to a future brick only after GREEN-016 is safely committed.
+
 
 
 

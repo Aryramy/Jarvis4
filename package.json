@@ -10,6 +10,7 @@
     "web": "node src/web/server.js",
     "ai": "node src/cli/ai.js",
     "benchmark:ai": "node scripts/benchmark-ai-latency.mjs",
+    "benchmark:gateways": "node scripts/benchmark-ai-gateways.mjs",
     "verify": "node scripts/verify.mjs"
   },
   "keywords": [

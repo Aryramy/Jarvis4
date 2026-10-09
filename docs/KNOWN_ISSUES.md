@@ -44,5 +44,15 @@ Currently tracked issues in JARVIS4:
    - Production model remains unchanged (`deepseek-v4-flash-0731`).
    - Resolving this bottleneck will require investigating alternative gateways/routes rather than model swaps on the existing pathway.
 
+8. **Cross-Gateway Same-Model Latency Benchmark Findings (Brick 16 Diagnostic Finding)**:
+   - Live cross-gateway benchmarking comparing the same model release (DeepSeek V4 Flash 0731) across Cheaper Inference (`deepseek-v4-flash-0731`) and OpenRouter (`deepseek/deepseek-v4-flash-0731`) demonstrated a dramatic difference in latency and reliability:
+     - Cheaper Inference: 1/3 success, 2/3 timeouts (30011 ms, 25529 ms, 30013 ms); successful median: 25529 ms.
+     - OpenRouter: 3/3 success, 0 timeouts (1314 ms, 674 ms, 483 ms); median: 674 ms (observed ~37.88x faster in this benchmark run).
+   - Empirical finding: The same DeepSeek V4 Flash 0731 model release responded dramatically faster through OpenRouter than through Cheaper Inference. This strongly supports that gateway/path selection materially affects current JARVIS AI latency. Gateways may differ in upstream provider, queueing, routing, hardware, batching, geography, network path, provider selection, or infrastructure configuration.
+   - This is an empirical finding from this benchmark only; it does not claim permanent speed advantage across all circumstances or future reliability from 3 samples.
+   - Production provider remains unchanged: Cheaper Inference (`deepseek-v4-flash-0731`). No automatic switch, routing, or fallback was implemented.
+   - Any controlled production migration to OpenRouter for text AI is deferred to a future brick after human review and safe commit of GREEN-016.
+
+
 
 

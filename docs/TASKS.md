@@ -45,3 +45,6 @@ Status: VERIFIED
 
 BRICK-015 — Cheaper Inference AI Latency Benchmark & Candidate Selection
 Status: VERIFIED
+
+BRICK-016 — Cross-Gateway Same-Model Latency Benchmark
+Status: VERIFIED

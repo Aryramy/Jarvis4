@@ -1,8 +1,8 @@
 Project: JARVIS4
-Current Brick: 15
+Current Brick: 16
 Status: VERIFIED
-Last Verified Brick: BRICK-015
-Current Feature: Cheaper Inference AI Latency Benchmark & Candidate Selection
+Last Verified Brick: BRICK-016
+Current Feature: Cross-Gateway Same-Model Latency Benchmark
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
@@ -82,7 +82,16 @@ Next Feature: NOT AUTHORIZED
   - Sequential live trials: executes 3 sequential trials per candidate (up to 12 live requests maximum) with 30000 ms timeout per trial using deterministic short prompt `"What is 2 + 2? Answer with only the number."`
   - Correctness verification & statistical analysis: verifies semantic answer `"4"`; fast incorrect responses are never selected as winners; computes min, max, average, and median latencies
   - Secure gitignored output: results saved to `runtime/ai-benchmark-latest.json` (and `.txt`) with zero secret/API key leakage
-- Automated test suite expanded to 339 tests across 21 suites passing offline with zero live external calls (Exit Code: 0)
+- Safe, isolated, manually-invoked cross-gateway same-model AI latency benchmark tool (`scripts/benchmark-ai-gateways.mjs` / `npm run benchmark:gateways`) (Brick 16):
+  - Compares DeepSeek V4 Flash 0731 release across two distinct gateway paths: Cheaper Inference (`deepseek-v4-flash-0731`) and OpenRouter (`deepseek/deepseek-v4-flash-0731`)
+  - Strictly isolated diagnostic tool: zero automatic invocation by verify, server startup, `/api/ai`, voice turns, or test suites
+  - Production model immutability: production provider remains Cheaper Inference (`deepseek-v4-flash-0731`) throughout; zero modifications to `.env`, `process.env`, or production `/api/ai`
+  - Pre-benchmark check mode: `--check` validates credentials for both gateways and queries OpenRouter model catalog (`GET /models`) to confirm target model availability; stops cleanly without prompt requests if unavailable (silent substitution strictly prohibited)
+  - Strict request parameters: exactly 3 sequential trials per gateway (6 live requests maximum) using identical prompt `"What is 2 + 2? Answer with only the number."`, identical 30000 ms timeout, identical temperature (0.1), identical max output tokens (50), and `stream: false`
+  - Monotonic latency measurement & correctness evaluation: verifies semantic answer `"4"`; flags wrong answers, timeouts, and errors; computes min, max, avg, and median latencies
+  - Safe comparative analysis: prevents fake ratio fabrication when a gateway produces zero successful samples
+  - Secure gitignored output: results saved to `runtime/ai-gateway-benchmark-latest.json` (and `.txt`) with zero secret/API key leakage
+- Automated test suite expanded to 358 tests across 22 suites passing offline with zero live external calls (Exit Code: 0)
 
 ## External integrations
 
@@ -109,42 +118,60 @@ Next Feature: NOT AUTHORIZED
   - A large portion of the total elapsed time occurs outside the measured STT and TTS stages.
   - Brick 13 does not expose an isolated AI-stage latency measurement. The remaining elapsed time may include AI provider latency, network roundtrip delays, request/response handling, and client orchestration overhead.
   - Future architectural principle: measure isolated AI latency first. Do not optimize or modify AI provider/model until empirical measurement identifies the actual bottleneck.
+- Cross-gateway latency diagnosis (Brick 16):
+  - Holding the model release constant (`DeepSeek V4 Flash 0731`) across gateways revealed that Cheaper Inference had 1/3 success and 2/3 timeouts (median: 25529 ms), while OpenRouter had 3/3 success and 0 timeouts (median: 674 ms, ~37.88x faster empirically).
+  - The primary bottleneck is the external Cheaper Inference request path, not the model release itself. Production remains on Cheaper Inference until a future brick authorizes migration.
 
 ## Last verification
 
-Status: BRICK-015 VERIFIED (Exit Code: 0)
-- Automated test & sanity verification: 339 tests across 21 suites passed offline (Exit Code: 0).
+Status: BRICK-016 VERIFIED (Exit Code: 0)
+- Automated test & sanity verification: 358 tests across 22 suites passed offline (Exit Code: 0).
 - Providers:
   - STT: OpenRouter (`openai/whisper-large-v3-turbo` at `POST /audio/transcriptions`)
   - AI: Cheaper Inference (`deepseek-v4-flash-0731` at `POST /chat/completions`) — UNCHANGED
   - TTS: OpenRouter (`elevenlabs/eleven-v4-turbo`, voice: `george`, format: `mp3` at `POST /audio/speech`)
 - Endpoints: `POST /api/stt`, `POST /api/ai`, `POST /api/tts`
-- Brick 15 live benchmark results (Operator confirmed):
-  - LIVE TEST A (Model Catalog Discovery): PASS
-    - Command: `node scripts/benchmark-ai-latency.mjs --discover`
-    - Live catalog: 97 models available
-    - Candidates selected:
-      - `deepseek-v4-flash-0731` [CURRENT PRODUCTION BASELINE]
-      - `aion-3.0-mini`
-      - `deepseek-v4.1-flash`
-      - `gemini-3.8-flash`
-    - Discovery mode safely exited with 0 prompt requests; production configuration unmodified.
-  - LIVE TEST B (Sequential Latency Benchmark): PASS
-    - Command: `npm run benchmark:ai`
-    - 4 models × 3 sequential trials = 12 total live requests (prompt: "What is 2 + 2? Answer with only the number.")
-    - Results:
-      - `deepseek-v4-flash-0731` (baseline): 0/3 success, 3/3 timeouts (~30010, 30012, 30015 ms), median N/A, correct 0/3
-      - `aion-3.0-mini`: 0/3 success, 3/3 timeouts (~30014, 30018, 30013 ms), median N/A, correct 0/3
-      - `deepseek-v4.1-flash`: 2/3 success (29407 ms, 29362 ms), 1/3 timeout (30008 ms), median 29385 ms, correct 2/3 (answer: 4)
-      - `gemini-3.8-flash`: 0/3 success, 3/3 timeouts (~30015, 30018, 30002 ms), median N/A, correct 0/3
-    - Total benchmark requests: 12 (2 successful, 10 timeouts).
-    - Fastest observed candidate: `deepseek-v4.1-flash` (median: 29385 ms).
-    - Crucial finding: `deepseek-v4.1-flash` is NOT a suitable production replacement (~29.4s latency, 1 timeout). NO tested candidate demonstrated latency suitable for a fast voice assistant.
-    - Zero production model switch performed; `CHEAPER_INFERENCE_MODEL` remains `deepseek-v4-flash-0731`.
-  - LIVE TEST C (Production Integrity Verification): PASS FOR CONFIGURATION INTEGRITY
-    - Environment verified: `CHEAPER_INFERENCE_MODEL` is `deepseek-v4-flash-0731`.
-    - Normal production requests repeatedly timed out after 30000 ms, confirming the external gateway latency issue persists while verifying configuration remained 100% untouched.
-  - Diagnostic Conclusion: Changing model ID alone on the existing Cheaper Inference request path did NOT solve the latency problem (10/12 requests timed out). Future architectural work should investigate an alternative AI gateway/path rather than blindly switching among these tested models.
+- Brick 16 live cross-gateway benchmark results (Operator confirmed):
+  - LIVE TEST A (Pre-Benchmark Check): PASS
+    - Command: `node scripts/benchmark-ai-gateways.mjs --check`
+    - Target models confirmed:
+      - Cheaper target: `deepseek-v4-flash-0731`
+      - OpenRouter target: `deepseek/deepseek-v4-flash-0731`
+    - Cheaper credentials configured: YES
+    - OpenRouter credentials configured: YES
+    - OpenRouter target availability: CONFIRMED
+    - Timeout: 30000 ms
+    - Planned live requests: 6 maximum
+    - Benchmark prompt requests sent during check: 0
+    - Silent model substitution: None (strictly prevented)
+  - LIVE TEST B (Cross-Gateway Same-Model Benchmark): PASS
+    - Command: `npm run benchmark:gateways`
+    - Benchmark prompt: "What is 2 + 2? Answer with only the number."
+    - Models: Cheaper Inference (`deepseek-v4-flash-0731`) vs OpenRouter (`deepseek/deepseek-v4-flash-0731`)
+    - Same timeout: 30000 ms; 3 sequential trials per gateway (6 requests max)
+    - Cheaper Inference results:
+      - Trial 1: TIMEOUT (30011 ms)
+      - Trial 2: SUCCESS (25529 ms, Correct: 4)
+      - Trial 3: TIMEOUT (30013 ms)
+      - Summary: 1/3 success, 2/3 timeouts, 1/3 correct, successful median: 25529 ms, average: 25529 ms, min: 25529 ms, max: 25529 ms
+    - OpenRouter results:
+      - Trial 1: SUCCESS (1314 ms, Correct: 4)
+      - Trial 2: SUCCESS (674 ms, Correct: 4)
+      - Trial 3: SUCCESS (483 ms, Correct: 4)
+      - Summary: 3/3 success, 0/3 timeouts, 3/3 correct, median: 674 ms, average: 824 ms, min: 483 ms, max: 1314 ms
+    - Comparison:
+      - Fastest observed gateway: OpenRouter
+      - Cheaper successful median: 25529 ms vs OpenRouter median: 674 ms
+      - Absolute median difference: 24855 ms
+      - Observed speed ratio: approximately 37.88x faster (empirical result for this benchmark run)
+    - Diagnostic finding: The same DeepSeek V4 Flash 0731 model release responded dramatically faster through the tested OpenRouter path than through the tested Cheaper Inference path. This strongly supports that gateway/path selection materially affects current JARVIS AI latency. Gateways may differ in upstream provider, queueing, routing, hardware, batching, geography, network path, provider selection, or infrastructure configuration.
+  - LIVE TEST C (Production Integrity Verification): PASS
+    - Production model: `deepseek-v4-flash-0731`
+    - Cheaper base URL: `https://api.cheaperinference.com/v1`
+    - Production provider remains: Cheaper Inference / OmniRoute
+    - No OpenRouter production switch occurred
+    - Routing added: NO; Fallback added: NO; ConversationSession / ConversationStore / STT / TTS / voice-turn routing / timeout changed: NO
+    - Runtime artifact isolation: `runtime/ai-gateway-benchmark-latest.json` is safely gitignored and was not tracked
 - Prior bricks verified:
   - Brick 4 browser live test: VERIFIED
   - Brick 5 browser live streaming test: VERIFIED
@@ -157,6 +184,7 @@ Status: BRICK-015 VERIFIED (Exit Code: 0)
   - Brick 12 browser live TTS test: VERIFIED
   - Brick 13 browser live voice turn test: VERIFIED
   - Brick 14 live AI latency instrumentation test: VERIFIED
+  - Brick 15 live AI latency benchmark & candidate selection: VERIFIED
 
 
 
