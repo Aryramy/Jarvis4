@@ -52,6 +52,7 @@ const REQUIRED_FILES = [
   'src/config/index.js',
   'src/utils/logger.js',
   'scripts/verify.mjs',
+  'scripts/benchmark-ai-latency.mjs',
   'tests/unit/logger.test.js',
   'tests/unit/config.test.js',
   'tests/unit/textCore.test.js',
@@ -62,6 +63,7 @@ const REQUIRED_FILES = [
   'tests/unit/microphone.test.js',
   'tests/unit/voiceTurn.test.js',
   'tests/unit/aiLatencyInstrumentation.test.js',
+  'tests/unit/benchmarkAiLatency.test.js',
   'tests/smoke/foundation.test.js',
   'tests/regression/brick1Regression.test.js',
   'tests/integration/webServer.test.js',
@@ -315,6 +317,16 @@ check('Voice Turn Module Sanity Check', async () => {
   }
   if (typeof runner.execute !== 'function' || typeof runner.getState !== 'function') {
     throw new Error('VoiceTurnRunner must implement execute and getState methods');
+  }
+});
+
+check('AI Latency Benchmark Module Sanity Check', async () => {
+  const benchmark = await import('../scripts/benchmark-ai-latency.mjs');
+  if (typeof benchmark.selectCandidates !== 'function' || typeof benchmark.runSequentialBenchmark !== 'function') {
+    throw new Error('AI Benchmark module failed to export required functions');
+  }
+  if (benchmark.DEFAULT_BASELINE_MODEL !== 'deepseek-v4-flash-0731') {
+    throw new Error('AI Benchmark default baseline model must be deepseek-v4-flash-0731');
   }
 });
 

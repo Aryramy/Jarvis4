@@ -170,6 +170,22 @@
   5. 100% Mocked Offline Tests: Automated tests execute with deterministic mocks and zero live network requests during `npm run verify`.
 - **Consequences**: Makes the AI stage and external provider latency fully observable and isolated without altering conversation semantics or breaking existing contracts.
 
+## ADR-0020: Cheaper Inference AI Latency Benchmark & Candidate Selection
+- **Status**: Accepted
+- **Context**: In Brick 14, multi-tier timing instrumentation isolated the dominant latency bottleneck in the voice pipeline to the external Cheaper Inference request path (23.6s–30.0s), with local server overhead negligible (0–7 ms). To evaluate whether faster models exist on the Cheaper Inference / OmniRoute gateway for short JARVIS-style requests without risking production regressions, an isolated, safe, manually-invoked benchmark tool is needed.
+- **Decision**:
+  1. Isolated Diagnostic Tooling: Implement `scripts/benchmark-ai-latency.mjs` and expose explicit CLI command `npm run benchmark:ai`. The benchmark is strictly an operator diagnostic tool and is NEVER invoked automatically by `verify.mjs`, web server startup, `/api/ai`, voice turns, or automated test suites.
+  2. Production Model Immutability: The production model (`deepseek-v4-flash-0731`) and `/api/ai` configuration remain completely unchanged. The benchmark instantiates isolated provider instances without mutating `.env`, `process.env`, or production config.
+  3. Live Model Catalog Discovery: Discovers available models via `GET /v1/models` from the configured base URL without hard-coding static catalogs. Filters out non-text models (embeddings, audio, whisper, vision/diffusion, moderation) and caps candidate selection at 1 baseline + up to 3 alternatives (4 models total). Supports discovery-only mode via `--discover` making zero prompt requests.
+  4. Sequential Execution & Deterministic Evaluation: Runs 3 sequential trials per candidate (max 12 total live requests) with 30000 ms timeout per trial using deterministic short prompt `"What is 2 + 2? Answer with only the number."` expecting `"4"`. Sequential execution prevents local contention and rate-limit ambiguity.
+  5. Correctness Filter & Statistical Metric: Evaluates semantic correctness; candidates that fail fast or answer incorrectly are never selected as fastest candidate. Computes min, max, average, and median latencies. For 3 trials, median latency determines the fastest observed candidate.
+  6. Gitignored Runtime Output: Results saved to `runtime/ai-benchmark-latest.json` (and `.txt`), completely ignored by git. All secrets and API keys are strictly redacted from logs, errors, and stored JSON.
+  7. 100% Mocked Offline Tests: Automated test suite (`tests/unit/benchmarkAiLatency.test.js`) executes 100% offline with zero live network requests during `npm run verify`.
+- **Consequences**:
+  - Live benchmark executed with 12 sequential requests across 4 models (`deepseek-v4-flash-0731`, `aion-3.0-mini`, `deepseek-v4.1-flash`, `gemini-3.8-flash`).
+  - Empirical finding: 10/12 requests timed out near 30s. Only `deepseek-v4.1-flash` completed 2/3 requests (median: 29385 ms, with 1 timeout).
+  - Decision: NO production model switch is authorized or performed. Changing model ID alone on the existing Cheaper Inference request path does not resolve latency. Production model remains `deepseek-v4-flash-0731`. Future architectural investigation must focus on alternative gateways/pathways rather than blind model swapping on the same provider path.
+
 
 
 

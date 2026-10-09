@@ -35,5 +35,14 @@ Currently tracked issues in JARVIS4:
    - The measurement captures the full external request path (which may include routing, queueing, upstream provider processing, model inference, and upstream network latency); instrumentation does not single out any one upstream component as the sole cause.
    - This latency is unsuitable for a fast voice-assistant experience and is recorded as a verified performance issue for future optimization. No optimization was performed in Brick 14.
 
+7. **Cheaper Inference Candidate Model Benchmark Findings (Brick 15 Diagnostic Finding)**:
+   - Live latency benchmarking across 4 candidates (`deepseek-v4-flash-0731`, `aion-3.0-mini`, `deepseek-v4.1-flash`, `gemini-3.8-flash`) showed that 10 out of 12 sequential requests timed out at 30000 ms.
+   - The only model to complete responses was `deepseek-v4.1-flash` (2/3 completed at ~29385 ms median, 1/3 timed out).
+   - Normal production requests with `deepseek-v4-flash-0731` also repeatedly timed out at 30000 ms.
+   - Model substitution on the current Cheaper Inference pathway does not resolve the latency bottleneck.
+   - None of the tested candidates demonstrated responsiveness suitable for a conversational voice assistant.
+   - Production model remains unchanged (`deepseek-v4-flash-0731`).
+   - Resolving this bottleneck will require investigating alternative gateways/routes rather than model swaps on the existing pathway.
+
 
 

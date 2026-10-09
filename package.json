@@ -9,6 +9,7 @@
     "jarvis": "node src/cli/jarvis.js",
     "web": "node src/web/server.js",
     "ai": "node src/cli/ai.js",
+    "benchmark:ai": "node scripts/benchmark-ai-latency.mjs",
     "verify": "node scripts/verify.mjs"
   },
   "keywords": [

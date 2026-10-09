@@ -43,6 +43,5 @@ Status: VERIFIED
 BRICK-014 — AI Latency Instrumentation & Bottleneck Diagnosis
 Status: VERIFIED
 
-
-
-
+BRICK-015 — Cheaper Inference AI Latency Benchmark & Candidate Selection
+Status: VERIFIED

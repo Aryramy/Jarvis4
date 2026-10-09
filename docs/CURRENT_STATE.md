@@ -1,8 +1,8 @@
 Project: JARVIS4
-Current Brick: 14
+Current Brick: 15
 Status: VERIFIED
-Last Verified Brick: BRICK-014
-Current Feature: AI Latency Instrumentation & Bottleneck Diagnosis
+Last Verified Brick: BRICK-015
+Current Feature: Cheaper Inference AI Latency Benchmark & Candidate Selection
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
@@ -73,7 +73,16 @@ Next Feature: NOT AUTHORIZED
   - `clientAiDurationMs`: Browser orchestration timing measured across `/api/ai` fetch and response parsing
 - Diagnostic timing metadata contract exposed in `/api/ai` (`timing: { providerDurationMs, serverAiDurationMs }`) with credential redaction and zero prompt leakage
 - Visible diagnostic UI displays: `AI: <ms> ms` for typed Ask AI / Ask JARVIS, and full pipeline stage breakdown (`STT: <ms> ms`, `AI: <ms> ms`, `TTS: <ms> ms`, `Voice Turn Total: <ms> ms`) for automated Voice Turn
-- Automated test suite expanded to 318 tests across 20 suites passing offline with zero live external calls (Exit Code: 0)
+- Safe, isolated, manually-invoked Cheaper Inference AI latency benchmark & candidate selection tool (`scripts/benchmark-ai-latency.mjs` / `npm run benchmark:ai`) (Brick 15):
+  - Strictly isolated diagnostic tool: zero automatic invocation by verify, server startup, `/api/ai`, voice turns, or test suites
+  - Production model immutability: production model remains `deepseek-v4-flash-0731` throughout; zero modification to `.env`, `process.env`, or production `/api/ai`
+  - Live model catalog discovery: dynamically queries `GET /v1/models` from configured Cheaper Inference endpoint; filters out non-text models (embeddings, audio, whisper, vision/diffusion, moderation)
+  - Strict candidate count bounds: limits benchmarking to 1 baseline (`deepseek-v4-flash-0731` labeled `CURRENT PRODUCTION BASELINE`) + up to ~3 alternative candidates (4 models maximum)
+  - Discovery-only inspection mode: `--discover` queries live catalog and displays selected candidates without making benchmark prompt calls
+  - Sequential live trials: executes 3 sequential trials per candidate (up to 12 live requests maximum) with 30000 ms timeout per trial using deterministic short prompt `"What is 2 + 2? Answer with only the number."`
+  - Correctness verification & statistical analysis: verifies semantic answer `"4"`; fast incorrect responses are never selected as winners; computes min, max, average, and median latencies
+  - Secure gitignored output: results saved to `runtime/ai-benchmark-latest.json` (and `.txt`) with zero secret/API key leakage
+- Automated test suite expanded to 339 tests across 21 suites passing offline with zero live external calls (Exit Code: 0)
 
 ## External integrations
 
@@ -103,28 +112,39 @@ Next Feature: NOT AUTHORIZED
 
 ## Last verification
 
-Status: BRICK-014 VERIFIED (Exit Code: 0)
-- Automated test & sanity verification: 318 tests across 20 suites passed offline (Exit Code: 0).
+Status: BRICK-015 VERIFIED (Exit Code: 0)
+- Automated test & sanity verification: 339 tests across 21 suites passed offline (Exit Code: 0).
 - Providers:
   - STT: OpenRouter (`openai/whisper-large-v3-turbo` at `POST /audio/transcriptions`)
-  - AI: Cheaper Inference (`deepseek-v4-flash-0731` at `POST /chat/completions`)
+  - AI: Cheaper Inference (`deepseek-v4-flash-0731` at `POST /chat/completions`) — UNCHANGED
   - TTS: OpenRouter (`elevenlabs/eleven-v4-turbo`, voice: `george`, format: `mp3` at `POST /audio/speech`)
 - Endpoints: `POST /api/stt`, `POST /api/ai`, `POST /api/tts`
-- Complete one-action voice turn pipeline with isolated AI latency instrumentation verified:
-  Microphone Capture → Single Click "Run Voice Turn" → OpenRouter STT → Transcript → Cheaper Inference AI → JARVIS Text Response → OpenRouter TTS (`elevenlabs/eleven-v4-turbo`, voice `george`) → Browser Audio Playback
-- Multilingual architecture: ONE model and ONE voice for all languages (English, Urdu, Arabic, mixed). NO language selector, NO manual language switch, NO per-language routes.
-- Presentation only: TTS audio is NOT stored in `ConversationSession` or `ConversationStore`.
-- Brick 14 live verification tests (Human operator confirmed):
-  - TEST A (Simple Typed AI Latency): PASS (Query: "What is 2 + 2? Answer with only the number.", Response: "4", clientAiDurationMs: 29190 ms, providerDurationMs: 29064 ms, serverAiDurationMs: 29071 ms, local server overhead: ~7 ms)
-  - TEST B (Voice Turn AI Latency): PASS (Query: "What is the capital of Japan? Answer briefly.", STT: 5299 ms, providerDurationMs: 26797 ms, serverAiDurationMs: 26798 ms, TTS ≈ 2000 ms, local server overhead: ~1 ms)
-  - TEST C (Second AI Request - Variability): PASS (Query: "What is the capital of France? Answer briefly.", Response: "Paris", providerDurationMs: 23686 ms, serverAiDurationMs: 23687 ms, local server overhead: ~1 ms; confirmed significant variance between provider requests)
-  - TEST D (Conversation Context & Timeout Observation): PASS (Query: "My test number is 4821.", initial attempt timed out at providerDurationMs: 30016 ms, retry succeeded at 29979 ms; Recall Query: "What is my test number?", initial attempt timed out at providerDurationMs: 30009 ms, retry succeeded at 27319 ms with response "Your test number is **4821**, sir."; confirmed memory context remains functional across timeouts and retries)
-- Diagnostic Result & Bottleneck Isolation supported by evidence:
-  - External Cheaper Inference provider request path is the dominant measured bottleneck (~23.6s to 30.0s).
-  - Local JARVIS AI server overhead is negligible (~0–7 ms in tested cases).
-  - Repeated near-30-second timeouts were observed (30009 ms, 30016 ms), proving the route frequently approaches or exceeds the configured 30000 ms timeout.
-  - The measurement captures the full external request path (routing, queueing, upstream provider processing, model inference, network latency); no specific upstream component is proven to be the sole cause.
-  - Recorded as a verified performance issue for future architectural optimization. Zero optimization performed in Brick 14.
+- Brick 15 live benchmark results (Operator confirmed):
+  - LIVE TEST A (Model Catalog Discovery): PASS
+    - Command: `node scripts/benchmark-ai-latency.mjs --discover`
+    - Live catalog: 97 models available
+    - Candidates selected:
+      - `deepseek-v4-flash-0731` [CURRENT PRODUCTION BASELINE]
+      - `aion-3.0-mini`
+      - `deepseek-v4.1-flash`
+      - `gemini-3.8-flash`
+    - Discovery mode safely exited with 0 prompt requests; production configuration unmodified.
+  - LIVE TEST B (Sequential Latency Benchmark): PASS
+    - Command: `npm run benchmark:ai`
+    - 4 models × 3 sequential trials = 12 total live requests (prompt: "What is 2 + 2? Answer with only the number.")
+    - Results:
+      - `deepseek-v4-flash-0731` (baseline): 0/3 success, 3/3 timeouts (~30010, 30012, 30015 ms), median N/A, correct 0/3
+      - `aion-3.0-mini`: 0/3 success, 3/3 timeouts (~30014, 30018, 30013 ms), median N/A, correct 0/3
+      - `deepseek-v4.1-flash`: 2/3 success (29407 ms, 29362 ms), 1/3 timeout (30008 ms), median 29385 ms, correct 2/3 (answer: 4)
+      - `gemini-3.8-flash`: 0/3 success, 3/3 timeouts (~30015, 30018, 30002 ms), median N/A, correct 0/3
+    - Total benchmark requests: 12 (2 successful, 10 timeouts).
+    - Fastest observed candidate: `deepseek-v4.1-flash` (median: 29385 ms).
+    - Crucial finding: `deepseek-v4.1-flash` is NOT a suitable production replacement (~29.4s latency, 1 timeout). NO tested candidate demonstrated latency suitable for a fast voice assistant.
+    - Zero production model switch performed; `CHEAPER_INFERENCE_MODEL` remains `deepseek-v4-flash-0731`.
+  - LIVE TEST C (Production Integrity Verification): PASS FOR CONFIGURATION INTEGRITY
+    - Environment verified: `CHEAPER_INFERENCE_MODEL` is `deepseek-v4-flash-0731`.
+    - Normal production requests repeatedly timed out after 30000 ms, confirming the external gateway latency issue persists while verifying configuration remained 100% untouched.
+  - Diagnostic Conclusion: Changing model ID alone on the existing Cheaper Inference request path did NOT solve the latency problem (10/12 requests timed out). Future architectural work should investigate an alternative AI gateway/path rather than blindly switching among these tested models.
 - Prior bricks verified:
   - Brick 4 browser live test: VERIFIED
   - Brick 5 browser live streaming test: VERIFIED
@@ -135,6 +155,8 @@ Status: BRICK-014 VERIFIED (Exit Code: 0)
   - Brick 10 browser live multilingual STT test: VERIFIED
   - Brick 11 browser live voice transcript → AI test: VERIFIED
   - Brick 12 browser live TTS test: VERIFIED
+  - Brick 13 browser live voice turn test: VERIFIED
+  - Brick 14 live AI latency instrumentation test: VERIFIED
 
 
 
