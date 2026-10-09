@@ -52,3 +52,6 @@ Status: VERIFIED
 BRICK-017 — Controlled Production Text-AI Migration to OpenRouter
 Status: VERIFIED
 
+BRICK-018 — STT Latency & Quality Instrumentation
+Status: VERIFIED
+

@@ -1,8 +1,8 @@
 Project: JARVIS4
-Current Brick: 17
+Current Brick: 18
 Status: VERIFIED
-Last Verified Brick: BRICK-017
-Current Feature: Controlled Production Text-AI Migration to OpenRouter
+Last Verified Brick: BRICK-018
+Current Feature: STT Latency & Quality Instrumentation
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
@@ -80,7 +80,15 @@ Next Feature: NOT AUTHORIZED
 - Visible diagnostic UI displays: `AI: <ms> ms` for typed Ask AI / Ask JARVIS, and full pipeline stage breakdown (`STT: <ms> ms`, `AI: <ms> ms`, `TTS: <ms> ms`, `Voice Turn Total: <ms> ms`) for automated Voice Turn
 - Safe, isolated, manually-invoked Cheaper Inference AI latency benchmark & candidate selection tool (`scripts/benchmark-ai-latency.mjs` / `npm run benchmark:ai`) (Brick 15)
 - Safe, isolated, manually-invoked cross-gateway same-model AI latency benchmark tool (`scripts/benchmark-ai-gateways.mjs` / `npm run benchmark:gateways`) (Brick 16)
-- Automated test suite expanded to 382 tests across 23 suites passing offline with zero live external calls (Exit Code: 0)
+- Multi-tier STT latency & quality instrumentation (Brick 18):
+  - `providerSttDurationMs`: External OpenRouter Whisper HTTP round-trip timing measured directly in `OpenRouterSpeechToTextProvider` across POST `/audio/transcriptions`
+  - `serverSttDurationMs`: Server-side endpoint timing measured inside `/api/stt` request handler encompassing request body processing, validation, and provider forwarding
+  - `clientSttDurationMs`: Browser orchestration timing measured across `/api/stt` fetch and response parsing
+  - Audio request metadata: `audioDurationMs`, `audioSizeBytes`, and `audioMimeType` recorded and safely exposed
+  - Safe diagnostic metadata contract exposed in `/api/stt` (`timing: { providerSttDurationMs, serverSttDurationMs }`, `provider: "openrouter"`, `model: "openai/whisper-large-v3-turbo"`) with complete credential redaction
+  - Consistent STT diagnostic display across both standalone Transcribe and automated Voice Turn (Primary: `STT: <clientSttDurationMs> ms`, Secondary: `STT Provider: <ms> ms | STT Server: <ms> ms | STT Client: <ms> ms`)
+  - Strict preservation of raw provider transcript without automatic hallucination filtering, normalization, silence trimming, or translation
+- Automated test suite expanded to 404 tests across 27 suites passing offline with zero live external calls (Exit Code: 0)
 
 ## External integrations
 
@@ -92,10 +100,25 @@ Next Feature: NOT AUTHORIZED
 - On this Windows machine, portable Node v24.21.0 is recommended for live external provider calls; the installed Node v24.19.0 exhibited an upstream Windows/libuv shutdown assertion after successful fetch.
 - On corporate / office Wi-Fi networks, direct OpenRouter HTTPS connections are reset with ECONNRESET; mobile hotspot or unrestricted network bypasses this limitation and works reliably.
 - Multilingual Whisper STT observations:
-  - Occasional extra trailing hallucinated words ("Thank you", "موسیقی", "شكرا", "ملتا") generated during audio silence or trailing background noise.
-  - In Brick 17 live testing, an unwanted noise prefix hallucination ("*Mario plays*") appeared during audio capture in Test F.
+  - Occasional extra trailing words ("Thank you", "موسیقی", "شكرا", "ملتا") generated during audio silence or trailing background noise.
+  - In Brick 17 live testing, an unwanted noise prefix ("*Mario plays*") appeared during audio capture in Test F.
   - Mixed English terms in Urdu speech may be transliterated phonetically into Urdu script rather than Latin script (e.g., "ڈیشپورٹ").
   - Live STT latency varies depending on audio duration, gateway load, and routing.
+- **Observed STT Quality Variability Under a Noisy / Shared-Mic Environment (Brick 18 Live Diagnostic Context)**:
+  - Brick 18 live voice tests were performed using the laptop's built-in microphone in a shared environment where other people were speaking nearby.
+  - Therefore, observed transcription anomalies cannot currently be attributed solely to OpenRouter, Whisper, `openai/whisper-large-v3-turbo`, or JARVIS STT logic.
+  - Possible contributing factors: nearby people speaking, overlapping speech, background noise, room acoustics, laptop microphone pickup pattern, and distance from microphone.
+  - Observed examples included:
+    - "*Mario plays*"
+    - "*sad music*"
+    - trailing Urdu text such as "سوے"
+    - one Arabic script/language misrecognition
+    - transliteration of English terms into Urdu/Arabic script
+    - occasional omission/distortion in mixed-language speech
+  - Recorded strictly as: **OBSERVED STT QUALITY VARIABILITY UNDER A NOISY / SHARED-MIC ENVIRONMENT**. Do NOT classify them as confirmed Whisper hallucinations or confirmed provider defects.
+  - Root cause has NOT been isolated.
+  - A future controlled quiet-environment comparison may determine whether these behaviors originate primarily from: input audio quality, background speech, microphone characteristics, STT model behavior, or provider behavior.
+  - No correction or mitigation is implemented in Brick 18.
 - OpenRouter Production Text AI observations (Brick 17 Verified):
   - Migrated from Cheaper Inference; model release preserved as DeepSeek V4 Flash 0731 (`deepseek/deepseek-v4-flash-0731`).
   - Substantially improved latency in most tested requests compared to the previous Cheaper Inference baseline.
@@ -103,10 +126,74 @@ Next Feature: NOT AUTHORIZED
   - Do not claim permanent fixed latency or guaranteed sub-5-second performance.
   - No fallback to Cheaper Inference exists; CheaperInferenceProvider is retained strictly for diagnostics and benchmarks.
 
+
 ## Last verification
 
-Status: BRICK-017 VERIFIED (Exit Code: 0)
+Status: BRICK-018 VERIFIED (Exit Code: 0)
+- Automated test & sanity verification: 404 tests across 27 suites passed offline (Exit Code: 0).
+- Production Providers:
+  - Text AI: OpenRouter (`deepseek/deepseek-v4-flash-0731` at `POST /chat/completions`) — UNCHANGED
+  - STT: OpenRouter (`openai/whisper-large-v3-turbo` at `POST /audio/transcriptions`) — UNCHANGED
+  - TTS: OpenRouter (`elevenlabs/eleven-v4-turbo`, voice: `george`, format: `mp3` at `POST /audio/speech`) — UNCHANGED
+- Diagnostic / Historical Providers:
+  - Cheaper Inference: `deepseek-v4-flash-0731` at `https://api.cheaperinference.com/v1` — PRESERVED FOR HISTORICAL TESTS & BENCHMARKS
+- Endpoints: `POST /api/stt`, `POST /api/ai`, `POST /api/tts`
+- Multi-tier STT latency instrumentation:
+  - `providerSttDurationMs`: Measured inside `OpenRouterSpeechToTextProvider`
+  - `serverSttDurationMs`: Measured inside `/api/stt`
+  - `clientSttDurationMs`: Measured in browser across `fetch('/api/stt')`
+- Audio metadata: `audioDurationMs`, `audioSizeBytes`, `audioMimeType` safely captured and returned.
+- Diagnostic identity: `/api/stt` returns `provider: "openrouter"` and `model: "openai/whisper-large-v3-turbo"`.
+- Brick 18 human live verification results (Operator confirmed):
+  - TEST A (English Manual Transcribe): PASS
+    - Audio: 6.9 s (audioDurationMs: 6900 ms), 96.2 KB, MIME: audio/webm;codecs=opus
+    - Timings: `providerSttDurationMs`: 4556 ms, `serverSttDurationMs`: 4600 ms, `clientSttDurationMs`: 4639 ms
+    - Transcript: "*sad music* What is the capital of Japan?"
+    - Identity: `provider: "openrouter"`, `model: "openai/whisper-large-v3-turbo"`
+  - Additional English Sample: PASS
+    - Audio: 7030 ms, 98213 bytes, MIME: audio/webm;codecs=opus
+    - Timings: `providerSttDurationMs`: 3096 ms, `serverSttDurationMs`: 3105 ms
+    - Transcript: "What is the capital of Japan?"
+  - TEST B (Second English Sample): PASS
+    - Spoken phrase: "Microsoft Power BI is a data analytics platform."
+    - Audio: 7938 ms, 114041 bytes, MIME: audio/webm;codecs=opus
+    - Timings: `providerSttDurationMs`: 2026 ms, `serverSttDurationMs`: 2036 ms
+    - Transcript: "Microsoft Power BI is a data analytics platform" (correct transcript; no substitution issue)
+  - TEST C (Urdu): PASS FOR PIPELINE
+    - Spoken: "پاور بی آئی کیا ہے؟"
+    - Audio: 5159 ms, 67170 bytes, MIME: audio/webm;codecs=opus
+    - Timings: `providerSttDurationMs`: 3757 ms, `serverSttDurationMs`: 3763 ms
+    - Transcript: "پاور بی آئی کیا ہے؟ سوے" (main phrase recognized; extra trailing text observed; testing occurred in shared/noisy environment, not classified as confirmed Whisper hallucination)
+  - TEST D (Arabic): PASS FOR PIPELINE / QUALITY VARIABILITY OBSERVED
+    - Attempt 1: Spoken "ما هو Power BI؟", Audio: 4889 ms, Timings: provider 1125 ms, server 1131 ms -> Transcript: "Má hua þá var við æ."
+    - Attempt 2: Spoken "ما هو Power BI؟", Audio: 4556 ms, Timings: provider 2981 ms, server 2986 ms -> Transcript: "ما هو فاور بي آي؟" (preserved intended meaning with Arabic script transliteration; first failure not attributed solely to Whisper/OpenRouter due to background speech)
+  - TEST E (Mixed Urdu + English): PASS FOR PIPELINE / QUALITY VARIABILITY OBSERVED
+    - Spoken: "Jarvis, مجھے Power BI dashboard open کرنا ہے."
+    - Attempt 1: Audio 6939 ms, provider 4896 ms, server 4901 ms -> Transcript: "جارویس مجھے پاور بی آئی اوپن کرنا ہے"
+    - Attempt 2: Audio 7269 ms, provider 2902 ms, server 2906 ms -> Transcript: "انجارویس مجھے پاور بی آئی ڈیش بورٹ اوپن کرنا ہے"
+    - Observed: English terms transliterated into Urdu script; wording varied between attempts; meaning generally preserved; not classified as confirmed model defects.
+  - TEST F (Full Voice Turn): PASS
+    - Spoken: "What is the capital of Japan? Answer briefly."
+    - Transcript: "What is the capital of Japan? Answer briefly."
+    - Timings: Voice Turn Total: 8994 ms (STT Client: 5682 ms, STT Provider: 5645 ms, STT Server: 5650 ms, AI: 1575 ms -> "Tokyo.", TTS: 1453 ms -> audio playback)
+    - Full pipeline verified: Microphone -> OpenRouter STT -> OpenRouter Text AI -> OpenRouter TTS -> Playback
+  - TEST G (Second Voice Turn Without Refresh): PASS
+    - New recording: 5.5 s, 72.5 KB, MIME: audio/webm;codecs=opus
+    - Spoken: "What is the capital of Germany? Answer briefly."
+    - Transcript: "What is the capital of Germany? Answer briefly."
+    - Timings: Voice Turn Total: 7058 ms (STT Client: 4317 ms, STT Provider: 4267 ms, STT Server: 4271 ms, AI: 1867 ms -> "Berlin.", TTS: 760 ms -> audio playback)
+    - Verified: new recording, fresh metadata, fresh transcript, fresh STT timing, fresh AI response, fresh TTS audio; zero Japan/Tokyo transcript/response leakage, zero stale state leakage.
+  - Latency Conclusions:
+    - Observed provider STT samples: 4556 ms, 3096 ms, 2026 ms, 3757 ms, 1125 ms, 2981 ms, 4896 ms, 2902 ms, 5645 ms, 4267 ms (range: 1125 ms – 5645 ms)
+    - Pattern: `providerSttDurationMs ≈ serverSttDurationMs ≈ clientSttDurationMs` (local server overhead was only a few ms to a few dozen ms)
+    - Primary STT latency occurred in the external OpenRouter/Whisper request path. Local JARVIS STT processing was not a significant bottleneck. (No claim of permanent performance).
+  - STT Quality Test Environment Context:
+    - Built-in laptop microphone used in a shared environment with other people speaking nearby.
+    - Classified strictly as: OBSERVED STT QUALITY VARIABILITY UNDER A NOISY / SHARED-MIC ENVIRONMENT (NOT confirmed Whisper hallucinations, NOT confirmed OpenRouter defects). Root cause not isolated.
+- Prior bricks verified:
+  - Brick 17 production text-AI migration: VERIFIED
 - Automated test & sanity verification: 382 tests across 23 suites passed offline (Exit Code: 0).
+
 - Production Providers:
   - Text AI: OpenRouter (`deepseek/deepseek-v4-flash-0731` at `POST /chat/completions`) — MIGRATED FROM CHEAPER INFERENCE
   - STT: OpenRouter (`openai/whisper-large-v3-turbo` at `POST /audio/transcriptions`) — UNCHANGED

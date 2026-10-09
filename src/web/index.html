@@ -178,6 +178,7 @@
       <audio id="audio-playback" controls style="display: none; width: 100%; margin-top: 4px;"></audio>
       <div id="voice-turn-status" class="mic-status" style="display: none;"></div>
       <div id="stt-status" class="mic-status" style="display: none;"></div>
+      <div id="stt-diag" class="mic-meta" style="display: none; margin-top: 4px;"></div>
       <div id="transcript-display" class="response-area" style="display: none; margin-top: 8px;"></div>
       <div id="jarvis-status" class="mic-status" style="display: none;"></div>
       <div id="jarvis-response" class="response-area" style="display: none; margin-top: 8px;"></div>
@@ -209,6 +210,7 @@
     const audioPlayback = document.getElementById('audio-playback');
     const voiceTurnStatus = document.getElementById('voice-turn-status');
     const sttStatus = document.getElementById('stt-status');
+    const sttDiag = document.getElementById('stt-diag');
     const transcriptDisplay = document.getElementById('transcript-display');
     const jarvisStatus = document.getElementById('jarvis-status');
     const jarvisResponse = document.getElementById('jarvis-response');
@@ -433,6 +435,9 @@
           if (voiceTurnStatus) {
             voiceTurnStatus.style.display = 'none';
           }
+          if (sttDiag) {
+            sttDiag.style.display = 'none';
+          }
         } else {
           responseArea.textContent = 'Error: ' + (data.error || 'Failed to clear conversation');
           responseArea.classList.add('error');
@@ -454,6 +459,7 @@
       audioPlayback.style.display = 'none';
       audioPlayback.src = '';
       sttStatus.style.display = 'none';
+      if (sttDiag) sttDiag.style.display = 'none';
       transcriptDisplay.style.display = 'none';
       if (jarvisStatus) jarvisStatus.style.display = 'none';
       if (jarvisResponse) jarvisResponse.style.display = 'none';
@@ -535,30 +541,60 @@
       sttStatus.textContent = 'STT: Transcribing...';
       sttStatus.className = 'mic-status';
       sttStatus.style.display = 'block';
+      if (sttDiag) sttDiag.style.display = 'none';
       transcriptDisplay.style.display = 'none';
+
+      const clientSttStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
 
       try {
         const formData = new FormData();
-        formData.append('audio', currentCapturedAudio.blob, 'recording.webm');
+        const filename = currentCapturedAudio.type && currentCapturedAudio.type.includes('ogg') ? 'recording.ogg' : 'recording.webm';
+        formData.append('audio', currentCapturedAudio.blob, filename);
+
+        const durationToSend = typeof currentCapturedAudio.durationMs === 'number'
+          ? currentCapturedAudio.durationMs
+          : null;
+
+        if (typeof durationToSend === 'number') {
+          formData.append('audioDurationMs', String(durationToSend));
+        }
+
+        const headers = {};
+        if (typeof durationToSend === 'number') {
+          headers['X-Audio-Duration-Ms'] = String(durationToSend);
+        }
 
         const res = await fetch('/api/stt', {
           method: 'POST',
+          headers,
           body: formData
         });
 
         const data = await res.json().catch(() => ({}));
+        const clientSttDurationMs = Math.max(0, Math.round(((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now()) - clientSttStartTime));
+
+        const providerSttDurationMs = data.timing?.providerSttDurationMs ?? (typeof data.providerSttDurationMs === 'number' ? data.providerSttDurationMs : null);
+        const serverSttDurationMs = data.timing?.serverSttDurationMs ?? (typeof data.serverSttDurationMs === 'number' ? data.serverSttDurationMs : null);
 
         if (res.ok && data.success) {
-          const latencyText = typeof data.durationMs === 'number' ? `STT: ${data.durationMs} ms` : 'STT: Complete';
+          const latencyText = `STT: ${clientSttDurationMs} ms`;
           sttStatus.textContent = latencyText;
           sttStatus.className = 'mic-status captured';
 
-          transcriptDisplay.textContent = 'Transcript:\n' + data.text;
+          if (sttDiag) {
+            sttDiag.textContent = `STT Provider: ${providerSttDurationMs !== null ? providerSttDurationMs + ' ms' : 'n/a'} | STT Server: ${serverSttDurationMs !== null ? serverSttDurationMs + ' ms' : 'n/a'} | STT Client: ${clientSttDurationMs} ms`;
+            sttDiag.style.display = 'block';
+          }
+
+          const rawText = data.text || data.transcript || '';
+          transcriptDisplay.textContent = 'Transcript:\n' + rawText;
           transcriptDisplay.classList.remove('error');
           transcriptDisplay.style.display = 'block';
 
-          if (typeof data.text === 'string' && data.text.trim().length > 0) {
-            currentTranscript = data.text;
+          if (typeof rawText === 'string' && rawText.trim().length > 0) {
+            currentTranscript = rawText;
             if (askJarvisBtn) askJarvisBtn.disabled = false;
           } else {
             currentTranscript = null;
@@ -571,16 +607,27 @@
           sttStatus.textContent = 'STT: Error';
           sttStatus.className = 'mic-status error';
 
+          if (sttDiag && (providerSttDurationMs !== null || serverSttDurationMs !== null)) {
+            sttDiag.textContent = `STT Provider: ${providerSttDurationMs !== null ? providerSttDurationMs + ' ms' : 'n/a'} | STT Server: ${serverSttDurationMs !== null ? serverSttDurationMs + ' ms' : 'n/a'} | STT Client: ${clientSttDurationMs} ms`;
+            sttDiag.style.display = 'block';
+          }
+
           transcriptDisplay.textContent = 'Error: ' + (data.error || 'Transcription failed');
           transcriptDisplay.classList.add('error');
           transcriptDisplay.style.display = 'block';
         }
       } catch (err) {
+        const clientSttDurationMs = Math.max(0, Math.round(((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now()) - clientSttStartTime));
         currentTranscript = null;
         if (askJarvisBtn) askJarvisBtn.disabled = true;
 
         sttStatus.textContent = 'STT: Error';
         sttStatus.className = 'mic-status error';
+
+        if (sttDiag) {
+          sttDiag.textContent = `STT Client: ${clientSttDurationMs} ms`;
+          sttDiag.style.display = 'block';
+        }
 
         transcriptDisplay.textContent = 'Error: ' + err.message;
         transcriptDisplay.classList.add('error');
@@ -785,6 +832,7 @@
         await voiceTurnRunner.execute({
           audioBlob: currentCapturedAudio.blob,
           audioSize: currentCapturedAudio.size,
+          audioDurationMs: currentCapturedAudio.durationMs,
           isRecording: micRecorder.state === 'recording',
           onStageChange: (stage, details) => {
             if (stage === VoiceTurnState.STT) {
@@ -795,12 +843,18 @@
               sttStatus.textContent = 'STT: Transcribing...';
               sttStatus.className = 'mic-status';
               sttStatus.style.display = 'block';
+              if (sttDiag) sttDiag.style.display = 'none';
             } else if (stage === VoiceTurnState.STT_ERROR) {
               voiceTurnStatus.textContent = 'Voice Turn: STT Error';
               voiceTurnStatus.className = 'mic-status error';
 
               sttStatus.textContent = 'STT: Error';
               sttStatus.className = 'mic-status error';
+
+              if (sttDiag && (details.providerSttDurationMs !== undefined || details.serverSttDurationMs !== undefined || details.clientSttDurationMs !== undefined)) {
+                sttDiag.textContent = `STT Provider: ${details.providerSttDurationMs ?? 'n/a'} ms | STT Server: ${details.serverSttDurationMs ?? 'n/a'} ms | STT Client: ${details.clientSttDurationMs ?? 'n/a'} ms`;
+                sttDiag.style.display = 'block';
+              }
 
               transcriptDisplay.textContent = 'Error: ' + (details.error || 'Transcription failed');
               transcriptDisplay.classList.add('error');
@@ -810,6 +864,11 @@
               const sttLatencyText = typeof details.durationMs === 'number' ? `STT: ${details.durationMs} ms` : 'STT: Complete';
               sttStatus.textContent = sttLatencyText;
               sttStatus.className = 'mic-status captured';
+
+              if (sttDiag) {
+                sttDiag.textContent = `STT Provider: ${details.providerSttDurationMs ?? 'n/a'} ms | STT Server: ${details.serverSttDurationMs ?? 'n/a'} ms | STT Client: ${details.clientSttDurationMs ?? details.durationMs} ms`;
+                sttDiag.style.display = 'block';
+              }
 
               transcriptDisplay.textContent = 'Transcript:\n' + details.transcript;
               transcriptDisplay.classList.remove('error');

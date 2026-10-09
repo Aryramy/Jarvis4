@@ -242,13 +242,34 @@
     - STT and TTS models, providers, and configurations unchanged.
     - ConversationSession and ConversationStore persistence logic unchanged.
 
-
-
-
-
-
-
-
-
-
-
+## ADR-0023: STT Latency and Quality Instrumentation
+- **Status**: Accepted
+- **Context**: In Brick 17, live voice turns revealed significant STT latency variability (e.g. 11416 ms in Japan turn vs 4318 ms in France turn) as well as occasional transcription noise/hallucinations (such as `*Mario plays*` prefix in Test F). However, STT latency had not been isolated into external provider network/inference time versus local server and client overheads, and audio recording metadata (duration, size, MIME type) was not tracked alongside STT requests. Optimization or correction without empirical diagnostic measurement violates core JARVIS4 development principles.
+- **Decision**:
+  1. Multi-tier High-Resolution/Monotonic STT Timing: Instrument three independent latency metrics using monotonic clocks (`performance.now()` where available):
+     - `providerSttDurationMs`: Measured inside `OpenRouterSpeechToTextProvider` immediately across external HTTP POST `/audio/transcriptions` and response parsing.
+     - `serverSttDurationMs`: Measured inside `/api/stt` from endpoint entry until response serialization.
+     - `clientSttDurationMs`: Measured in browser immediately across `fetch('/api/stt')` and response parsing.
+  2. Audio Request Metadata: Capture and expose `audioDurationMs`, `audioSizeBytes`, and `audioMimeType` with each recording request. No permanent audio storage or writing to conversation memory.
+  3. Safe Diagnostic STT Response Contract: Expose `{ timing: { providerSttDurationMs, serverSttDurationMs }, provider: "openrouter", model: "openai/whisper-large-v3-turbo", audio: { audioDurationMs, audioSizeBytes, audioMimeType } }` in the `/api/stt` response while preserving complete backward compatibility with existing `{ success, text, durationMs }` fields. All secrets and API keys are strictly redacted.
+  4. Unified Client Display: Both standalone Transcribe and automated Run Voice Turn display `STT: <clientSttDurationMs> ms` as primary latency and render secondary diagnostic breakdown (`STT Provider: <providerSttDurationMs> ms | STT Server: <serverSttDurationMs> ms | STT Client: <clientSttDurationMs> ms`).
+  5. Strict Raw Quality Preservation: Zero transcript correction, normalization, silence trimming, VAD, or translation added. Raw provider transcripts are preserved exactly for diagnostic observation.
+  6. Failure Timing & Stale Data Protection: If STT fails, elapsed `providerSttDurationMs` and `serverSttDurationMs` are recorded where technically available, controlled error is returned, AI is not called, and stale transcripts cannot propagate.
+  7. 100% Mocked Offline Tests: Automated test suite (`tests/unit/sttLatencyInstrumentation.test.js`) verifies all 49 requirements offline with zero live network calls during `npm run verify`.
+- **Consequences**:
+  - STT timing is now completely transparent and broken down across external provider, local server, and browser client layers.
+  - Zero changes were made to STT provider, Whisper model, AI provider, TTS provider, or conversation persistence.
+  - **STT Quality Test Environment Context**:
+    - Live voice tests were performed using the laptop's built-in microphone in a shared environment where other people were speaking nearby.
+    - Observed transcription anomalies (including `*Mario plays*`, `*sad music*`, trailing Urdu text "سوے", Arabic misrecognition, script transliterations, and mixed-language omissions/distortions) cannot be attributed solely to OpenRouter, Whisper, `openai/whisper-large-v3-turbo`, or JARVIS STT logic.
+    - Contributing factors include nearby speech, overlapping voices, background noise, room acoustics, laptop microphone pickup pattern, and distance from microphone.
+    - Recorded strictly as **OBSERVED STT QUALITY VARIABILITY UNDER A NOISY / SHARED-MIC ENVIRONMENT**. They are NOT classified as confirmed Whisper hallucinations or confirmed provider defects.
+    - Root cause has NOT been isolated. A future controlled quiet-environment comparison may determine whether these behaviors originate primarily from input audio quality, background speech, microphone characteristics, STT model behavior, or provider behavior.
+    - No correction or mitigation is implemented in Brick 18.
+  - **Empirical Latency Findings**:
+    - Observed provider STT samples: 4556 ms, 3096 ms, 2026 ms, 3757 ms, 1125 ms, 2981 ms, 4896 ms, 2902 ms, 5645 ms, 4267 ms (observed range: 1125 ms – 5645 ms).
+    - Timing pattern: `providerSttDurationMs ≈ serverSttDurationMs ≈ clientSttDurationMs`. Local server overhead was only a few ms to a few dozen ms.
+    - Empirical conclusion: The primary STT latency occurred in the external OpenRouter/Whisper request path. Local JARVIS STT processing was not a significant bottleneck.
+    - Full voice turn verified end-to-end (Test F: 8994 ms total, STT Client 5682 ms, AI 1575 ms -> "Tokyo.", TTS 1453 ms).
+    - Sequential turn without refresh verified (Test G: 7058 ms total, STT Client 4317 ms, AI 1867 ms -> "Berlin.", TTS 760 ms) with fresh metadata and zero stale state leakage.
+  - **Status**: BRICK-018 VERIFIED.

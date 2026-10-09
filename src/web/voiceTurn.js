@@ -63,6 +63,7 @@ export class VoiceTurnRunner {
     const {
       audioBlob,
       audioSize,
+      audioDurationMs: inputAudioDurationMs,
       isRecording = false,
       onStageChange,
       playAudioFn
@@ -132,6 +133,12 @@ export class VoiceTurnRunner {
     let stageAiResponse = null;
     let stageAudioBlob = null;
     let sttDurationMs = null;
+    let clientSttDurationMs = null;
+    let serverSttDurationMs = null;
+    let providerSttDurationMs = null;
+    let audioDurationMs = null;
+    let audioSizeBytes = null;
+    let audioMimeType = null;
     let aiDurationMs = null;
     let clientAiDurationMs = null;
     let serverAiDurationMs = null;
@@ -145,6 +152,10 @@ export class VoiceTurnRunner {
       this.state = VoiceTurnState.STT;
       onStageChange?.(VoiceTurnState.STT, { text: 'Transcribing...' });
 
+      const sttStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+
       let sttRes;
       let sttData;
       try {
@@ -152,35 +163,95 @@ export class VoiceTurnRunner {
         const filename = audioBlob.type && audioBlob.type.includes('ogg') ? 'recording.ogg' : 'recording.webm';
         formData.append('audio', audioBlob, filename);
 
+        const durationToSend = typeof inputAudioDurationMs === 'number'
+          ? inputAudioDurationMs
+          : (typeof audioBlob.durationMs === 'number' ? audioBlob.durationMs : null);
+
+        if (typeof durationToSend === 'number') {
+          formData.append('audioDurationMs', String(durationToSend));
+        }
+
+        const headers = {};
+        if (typeof durationToSend === 'number') {
+          headers['X-Audio-Duration-Ms'] = String(durationToSend);
+        }
+
         sttRes = await this.fetchFn('/api/stt', {
           method: 'POST',
+          headers,
           body: formData
         });
         sttData = await sttRes.json().catch(() => ({}));
+        clientSttDurationMs = Math.max(0, Math.round(((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now()) - sttStartTime));
       } catch (networkErr) {
+        clientSttDurationMs = Math.max(0, Math.round(((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now()) - sttStartTime));
         this.state = VoiceTurnState.STT_ERROR;
         const err = networkErr.message || 'STT network error';
-        this.lastError = { stage: 'STT', error: err };
-        onStageChange?.(VoiceTurnState.STT_ERROR, { error: err });
-        return { success: false, stage: VoiceTurnState.STT_ERROR, error: err };
+        this.lastError = { stage: 'STT', error: err, clientSttDurationMs };
+        onStageChange?.(VoiceTurnState.STT_ERROR, { error: err, clientSttDurationMs });
+        return { success: false, stage: VoiceTurnState.STT_ERROR, error: err, clientSttDurationMs };
       }
+
+      serverSttDurationMs = sttData.timing?.serverSttDurationMs ?? (typeof sttData.serverSttDurationMs === 'number' ? sttData.serverSttDurationMs : null);
+      providerSttDurationMs = sttData.timing?.providerSttDurationMs ?? (typeof sttData.providerSttDurationMs === 'number' ? sttData.providerSttDurationMs : null);
+      audioDurationMs = sttData.audioDurationMs ?? sttData.audio?.audioDurationMs ?? (typeof inputAudioDurationMs === 'number' ? inputAudioDurationMs : (typeof audioBlob.durationMs === 'number' ? audioBlob.durationMs : null));
+      audioSizeBytes = sttData.audioSizeBytes ?? sttData.audio?.audioSizeBytes ?? (typeof audioSize === 'number' ? audioSize : audioBlob.size);
+      audioMimeType = sttData.audioMimeType ?? sttData.audio?.audioMimeType ?? audioBlob.type ?? 'audio/webm';
 
       // Check turn identity
       if (this.currentTurnId !== turnId) {
         return { success: false, cancelled: true };
       }
 
-      if (!sttRes.ok || !sttData.success || typeof sttData.text !== 'string' || sttData.text.trim().length === 0) {
+      const rawTranscript = sttData.text || sttData.transcript;
+      if (!sttRes.ok || !sttData.success || typeof rawTranscript !== 'string' || rawTranscript.trim().length === 0) {
         this.state = VoiceTurnState.STT_ERROR;
         const err = sttData.error || 'Transcription failed';
-        this.lastError = { stage: 'STT', error: err };
-        onStageChange?.(VoiceTurnState.STT_ERROR, { error: err });
-        return { success: false, stage: VoiceTurnState.STT_ERROR, error: err };
+        this.lastError = {
+          stage: 'STT',
+          error: err,
+          clientSttDurationMs,
+          serverSttDurationMs,
+          providerSttDurationMs,
+          audioDurationMs,
+          audioSizeBytes,
+          audioMimeType
+        };
+        onStageChange?.(VoiceTurnState.STT_ERROR, {
+          error: err,
+          clientSttDurationMs,
+          serverSttDurationMs,
+          providerSttDurationMs,
+          audioDurationMs,
+          audioSizeBytes,
+          audioMimeType
+        });
+        return {
+          success: false,
+          stage: VoiceTurnState.STT_ERROR,
+          error: err,
+          clientSttDurationMs,
+          serverSttDurationMs,
+          providerSttDurationMs,
+          audioDurationMs,
+          audioSizeBytes,
+          audioMimeType
+        };
       }
 
-      stageTranscript = sttData.text;
-      sttDurationMs = typeof sttData.durationMs === 'number' ? sttData.durationMs : null;
-      onStageChange?.('STT_SUCCESS', { transcript: stageTranscript, durationMs: sttDurationMs });
+      stageTranscript = rawTranscript;
+      sttDurationMs = typeof sttData.durationMs === 'number' ? sttData.durationMs : clientSttDurationMs;
+      onStageChange?.('STT_SUCCESS', {
+        transcript: stageTranscript,
+        durationMs: clientSttDurationMs,
+        sttDurationMs,
+        clientSttDurationMs,
+        serverSttDurationMs,
+        providerSttDurationMs,
+        audioDurationMs,
+        audioSizeBytes,
+        audioMimeType
+      });
 
       // -----------------------------------------------------------------
       // STEP 2 — AI
@@ -313,6 +384,12 @@ export class VoiceTurnRunner {
           await playAudioFn(stageAudioBlob, {
             totalDurationMs,
             sttDurationMs,
+            clientSttDurationMs,
+            serverSttDurationMs,
+            providerSttDurationMs,
+            audioDurationMs,
+            audioSizeBytes,
+            audioMimeType,
             aiDurationMs,
             clientAiDurationMs,
             serverAiDurationMs,
@@ -330,6 +407,12 @@ export class VoiceTurnRunner {
             error: err,
             totalDurationMs,
             sttDurationMs,
+            clientSttDurationMs,
+            serverSttDurationMs,
+            providerSttDurationMs,
+            audioDurationMs,
+            audioSizeBytes,
+            audioMimeType,
             aiDurationMs,
             clientAiDurationMs,
             serverAiDurationMs,
@@ -344,6 +427,12 @@ export class VoiceTurnRunner {
       onStageChange?.(VoiceTurnState.PLAYING, {
         totalDurationMs,
         sttDurationMs,
+        clientSttDurationMs,
+        serverSttDurationMs,
+        providerSttDurationMs,
+        audioDurationMs,
+        audioSizeBytes,
+        audioMimeType,
         aiDurationMs,
         clientAiDurationMs,
         serverAiDurationMs,
@@ -360,6 +449,12 @@ export class VoiceTurnRunner {
         audioBlob: stageAudioBlob,
         totalDurationMs,
         sttDurationMs,
+        clientSttDurationMs,
+        serverSttDurationMs,
+        providerSttDurationMs,
+        audioDurationMs,
+        audioSizeBytes,
+        audioMimeType,
         aiDurationMs,
         clientAiDurationMs,
         serverAiDurationMs,

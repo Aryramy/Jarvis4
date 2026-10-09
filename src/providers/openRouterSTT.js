@@ -75,7 +75,10 @@ export class OpenRouterSpeechToTextProvider extends SpeechToTextProvider {
       return {
         success: false,
         error: 'Audio data is required',
-        durationMs: 0
+        durationMs: 0,
+        providerSttDurationMs: 0,
+        provider: 'openrouter',
+        model: this.model
       };
     }
 
@@ -91,7 +94,10 @@ export class OpenRouterSpeechToTextProvider extends SpeechToTextProvider {
       return {
         success: false,
         error: 'Audio data must be a Buffer, Uint8Array, or Blob',
-        durationMs: 0
+        durationMs: 0,
+        providerSttDurationMs: 0,
+        provider: 'openrouter',
+        model: this.model
       };
     }
 
@@ -99,7 +105,10 @@ export class OpenRouterSpeechToTextProvider extends SpeechToTextProvider {
       return {
         success: false,
         error: 'Audio data cannot be empty (0 bytes)',
-        durationMs: 0
+        durationMs: 0,
+        providerSttDurationMs: 0,
+        provider: 'openrouter',
+        model: this.model
       };
     }
 
@@ -116,7 +125,10 @@ export class OpenRouterSpeechToTextProvider extends SpeechToTextProvider {
       return {
         success: false,
         error: `Invalid audio MIME type: "${mimeType}". Must be an audio MIME type.`,
-        durationMs: 0
+        durationMs: 0,
+        providerSttDurationMs: 0,
+        provider: 'openrouter',
+        model: this.model
       };
     }
 
@@ -146,7 +158,10 @@ export class OpenRouterSpeechToTextProvider extends SpeechToTextProvider {
       return {
         success: false,
         error: configCheck.error,
-        durationMs: 0
+        durationMs: 0,
+        providerSttDurationMs: 0,
+        provider: 'openrouter',
+        model: this.model
       };
     }
 
@@ -172,6 +187,18 @@ export class OpenRouterSpeechToTextProvider extends SpeechToTextProvider {
       }, timeout);
     }
 
+    // High-resolution / monotonic start time immediately before outbound OpenRouter STT request
+    const reqStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      ? performance.now()
+      : Date.now();
+
+    const getElapsedProviderMs = () => {
+      const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+      return Math.max(0, Math.round(now - reqStartTime));
+    };
+
     try {
       const response = await this.fetchFn(endpoint, {
         method: 'POST',
@@ -181,8 +208,6 @@ export class OpenRouterSpeechToTextProvider extends SpeechToTextProvider {
         body: formData,
         signal: controller.signal
       });
-
-      const durationMs = Math.max(0, Date.now() - startTime);
 
       // 7. Handle HTTP errors
       if (!response.ok) {
@@ -198,10 +223,14 @@ export class OpenRouterSpeechToTextProvider extends SpeechToTextProvider {
           }
         }
         const safeError = this.sanitizeError(errorDetail || response.statusText);
+        const providerSttDurationMs = getElapsedProviderMs();
         return {
           success: false,
           error: `Provider HTTP ${response.status}: ${safeError || response.statusText}`,
-          durationMs
+          durationMs: providerSttDurationMs,
+          providerSttDurationMs,
+          provider: 'openrouter',
+          model: this.model
         };
       }
 
@@ -210,33 +239,49 @@ export class OpenRouterSpeechToTextProvider extends SpeechToTextProvider {
       try {
         data = await response.json();
       } catch (err) {
+        const providerSttDurationMs = getElapsedProviderMs();
         return {
           success: false,
           error: `Malformed response from provider: failed to parse JSON (${err.message})`,
-          durationMs
+          durationMs: providerSttDurationMs,
+          providerSttDurationMs,
+          provider: 'openrouter',
+          model: this.model
         };
       }
 
       if (!data || typeof data !== 'object') {
+        const providerSttDurationMs = getElapsedProviderMs();
         return {
           success: false,
           error: 'Malformed response from provider: expected JSON object',
-          durationMs
+          durationMs: providerSttDurationMs,
+          providerSttDurationMs,
+          provider: 'openrouter',
+          model: this.model
         };
       }
 
       if (typeof data.text !== 'string') {
+        const providerSttDurationMs = getElapsedProviderMs();
         return {
           success: false,
           error: 'Malformed response from provider: missing text property',
-          durationMs
+          durationMs: providerSttDurationMs,
+          providerSttDurationMs,
+          provider: 'openrouter',
+          model: this.model
         };
       }
 
+      const providerSttDurationMs = getElapsedProviderMs();
       const result = {
         success: true,
         text: data.text,
-        durationMs,
+        transcript: data.text,
+        durationMs: providerSttDurationMs,
+        providerSttDurationMs,
+        provider: 'openrouter',
         model: this.model
       };
 
@@ -246,18 +291,24 @@ export class OpenRouterSpeechToTextProvider extends SpeechToTextProvider {
 
       return result;
     } catch (err) {
-      const durationMs = Math.max(0, Date.now() - startTime);
+      const providerSttDurationMs = getElapsedProviderMs();
       if (err.name === 'AbortError' || controller.signal.aborted) {
         return {
           success: false,
           error: `Request timed out after ${timeout}ms`,
-          durationMs
+          durationMs: providerSttDurationMs,
+          providerSttDurationMs,
+          provider: 'openrouter',
+          model: this.model
         };
       }
       return {
         success: false,
         error: `Network error: ${this.sanitizeError(err.message)}`,
-        durationMs
+        durationMs: providerSttDurationMs,
+        providerSttDurationMs,
+        provider: 'openrouter',
+        model: this.model
       };
     } finally {
       if (timeoutId) {

@@ -68,6 +68,7 @@ const REQUIRED_FILES = [
   'tests/unit/aiLatencyInstrumentation.test.js',
   'tests/unit/benchmarkAiLatency.test.js',
   'tests/unit/benchmarkAiGateways.test.js',
+  'tests/unit/sttLatencyInstrumentation.test.js',
   'tests/smoke/foundation.test.js',
   'tests/regression/brick1Regression.test.js',
   'tests/integration/webServer.test.js',

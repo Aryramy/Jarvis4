@@ -502,13 +502,24 @@ export function createRequestListener(options = {}) {
       return;
     }
 
-    // Route: /api/stt (Brick 10 multilingual STT endpoint)
+    // Route: /api/stt (Brick 10 multilingual STT endpoint & Brick 18 STT Latency Instrumentation)
     if (url.pathname === '/api/stt') {
       if (req.method !== 'POST') {
         res.writeHead(405, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
         return;
       }
+
+      const requestStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+
+      const getServerSttDurationMs = () => {
+        const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+          ? performance.now()
+          : Date.now();
+        return Math.max(0, Math.round(now - requestStartTime));
+      };
 
       const contentType = req.headers['content-type'] || '';
       const chunks = [];
@@ -536,6 +547,15 @@ export function createRequestListener(options = {}) {
           let audioBuffer = null;
           let mimeType = 'audio/webm';
           let filename = 'recording.webm';
+          let clientAudioDurationMs = null;
+
+          const durationHeader = req.headers['x-audio-duration-ms'];
+          if (durationHeader) {
+            const parsed = Number(durationHeader);
+            if (!Number.isNaN(parsed) && parsed >= 0) {
+              clientAudioDurationMs = parsed;
+            }
+          }
 
           if (contentType.toLowerCase().startsWith('multipart/form-data')) {
             const stream = Readable.toWeb(Readable.from([bodyBuffer]));
@@ -550,15 +570,35 @@ export function createRequestListener(options = {}) {
             try {
               formData = await webRequest.formData();
             } catch (err) {
+              const serverSttDurationMs = getServerSttDurationMs();
               res.writeHead(400, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ success: false, error: `Malformed multipart form data: ${err.message}` }));
+              res.end(JSON.stringify({
+                success: false,
+                error: `Malformed multipart form data: ${err.message}`,
+                timing: { serverSttDurationMs },
+                serverSttDurationMs
+              }));
               return;
+            }
+
+            const durField = formData.get('audioDurationMs') || formData.get('durationMs');
+            if (durField) {
+              const parsed = Number(durField);
+              if (!Number.isNaN(parsed) && parsed >= 0) {
+                clientAudioDurationMs = parsed;
+              }
             }
 
             const file = formData.get('audio') || formData.get('file');
             if (!file || typeof file.arrayBuffer !== 'function') {
+              const serverSttDurationMs = getServerSttDurationMs();
               res.writeHead(400, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ success: false, error: 'Audio file is required in multipart upload' }));
+              res.end(JSON.stringify({
+                success: false,
+                error: 'Audio file is required in multipart upload',
+                timing: { serverSttDurationMs },
+                serverSttDurationMs
+              }));
               return;
             }
 
@@ -571,44 +611,86 @@ export function createRequestListener(options = {}) {
             mimeType = contentType.split(';')[0].trim();
             filename = 'recording.webm';
           } else {
+            const serverSttDurationMs = getServerSttDurationMs();
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
               success: false,
-              error: 'Invalid Content-Type. Expected audio/* or multipart/form-data'
+              error: 'Invalid Content-Type. Expected audio/* or multipart/form-data',
+              timing: { serverSttDurationMs },
+              serverSttDurationMs
             }));
             return;
           }
 
           if (!audioBuffer || audioBuffer.length === 0) {
+            const serverSttDurationMs = getServerSttDurationMs();
             res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: 'Audio data cannot be empty (0 bytes)' }));
+            res.end(JSON.stringify({
+              success: false,
+              error: 'Audio data cannot be empty (0 bytes)',
+              timing: { serverSttDurationMs },
+              serverSttDurationMs
+            }));
             return;
           }
 
           if (mimeType && !mimeType.toLowerCase().startsWith('audio/')) {
+            const serverSttDurationMs = getServerSttDurationMs();
             res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, error: `Invalid audio MIME type: ${mimeType}` }));
+            res.end(JSON.stringify({
+              success: false,
+              error: `Invalid audio MIME type: ${mimeType}`,
+              timing: { serverSttDurationMs },
+              serverSttDurationMs
+            }));
             return;
           }
 
           const sttProvider = options.sttProvider || new OpenRouterSpeechToTextProvider();
           const configCheck = sttProvider.validateConfig ? sttProvider.validateConfig() : { valid: true };
           if (!configCheck.valid) {
+            const serverSttDurationMs = getServerSttDurationMs();
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
               success: false,
-              error: `Configuration error: ${configCheck.error}`
+              error: `Configuration error: ${configCheck.error}`,
+              timing: { serverSttDurationMs },
+              serverSttDurationMs,
+              providerSttDurationMs: 0
             }));
             return;
           }
 
           const result = await sttProvider.transcribe(audioBuffer, { mimeType, filename });
+          const serverSttDurationMs = getServerSttDurationMs();
+          const providerSttDurationMs = typeof result.providerSttDurationMs === 'number'
+            ? result.providerSttDurationMs
+            : (typeof result.durationMs === 'number' ? result.durationMs : 0);
+
+          const timing = {
+            providerSttDurationMs,
+            serverSttDurationMs
+          };
 
           if (result.success) {
             const responsePayload = {
               success: true,
+              transcript: result.text,
               text: result.text,
-              durationMs: result.durationMs
+              provider: result.provider || 'openrouter',
+              model: result.model || sttProvider.model,
+              timing,
+              providerSttDurationMs,
+              serverSttDurationMs,
+              durationMs: result.durationMs !== undefined ? result.durationMs : providerSttDurationMs,
+              audioDurationMs: clientAudioDurationMs,
+              audioSizeBytes: audioBuffer.length,
+              audioMimeType: mimeType,
+              audio: {
+                audioDurationMs: clientAudioDurationMs,
+                audioSizeBytes: audioBuffer.length,
+                audioMimeType: mimeType
+              }
             };
             if (result.language) {
               responsePayload.language = result.language;
@@ -621,14 +703,36 @@ export function createRequestListener(options = {}) {
             if (apiKeyToRedact) {
               safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
             }
+
+            const errorTiming = {
+              serverSttDurationMs
+            };
+            if (typeof result.providerSttDurationMs === 'number') {
+              errorTiming.providerSttDurationMs = result.providerSttDurationMs;
+            }
+
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
               success: false,
               error: safeError,
-              durationMs: result.durationMs
+              provider: result.provider || 'openrouter',
+              model: result.model || sttProvider.model,
+              timing: errorTiming,
+              providerSttDurationMs: errorTiming.providerSttDurationMs ?? providerSttDurationMs,
+              serverSttDurationMs,
+              durationMs: result.durationMs !== undefined ? result.durationMs : providerSttDurationMs,
+              audioDurationMs: clientAudioDurationMs,
+              audioSizeBytes: audioBuffer?.length ?? 0,
+              audioMimeType: mimeType,
+              audio: {
+                audioDurationMs: clientAudioDurationMs,
+                audioSizeBytes: audioBuffer?.length ?? 0,
+                audioMimeType: mimeType
+              }
             }));
           }
         } catch (err) {
+          const serverSttDurationMs = getServerSttDurationMs();
           let safeError = err.message || 'Internal server error';
           const apiKeyToRedact = (options.sttProvider && options.sttProvider.apiKey) || process.env.OPENROUTER_API_KEY;
           if (apiKeyToRedact) {
@@ -637,7 +741,9 @@ export function createRequestListener(options = {}) {
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             success: false,
-            error: safeError
+            error: safeError,
+            timing: { serverSttDurationMs },
+            serverSttDurationMs
           }));
         }
       });

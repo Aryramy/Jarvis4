@@ -63,7 +63,37 @@ Currently tracked issues in JARVIS4:
      - Latency variability: Significant latency variability still exists; the Urdu prompt observed 23351 ms provider duration. Do NOT claim permanent sub-5-second performance or a permanent fixed multiplier.
      - STT noise artifact: An unwanted `*Mario plays*` prefix hallucination was observed in Whisper STT during live voice turn Test F. Recorded as another STT quality/noise observation (not fixed in Brick 17).
 
+10. **Observed STT Quality Variability Under a Noisy / Shared-Mic Environment (Brick 18 Live Diagnostic Context)**:
+    - **Important Context**: Brick 18 live voice tests were performed using the laptop's built-in microphone in a shared environment where other people were speaking nearby.
+    - **Non-Attribution**: Observed transcription anomalies cannot currently be attributed solely to OpenRouter, Whisper, `openai/whisper-large-v3-turbo`, or JARVIS STT logic.
+    - **Possible Contributing Factors**:
+      - nearby people speaking
+      - overlapping speech
+      - background noise
+      - room acoustics
+      - laptop microphone pickup pattern
+      - distance from microphone
+    - **Observed Examples**:
+      - `*Mario plays*`
+      - `*sad music*`
+      - trailing Urdu text such as "سوے"
+      - one Arabic script/language misrecognition
+      - transliteration of English terms into Urdu/Arabic script
+      - occasional omission/distortion in mixed-language speech
+    - **Classification**: Recorded strictly as **OBSERVED STT QUALITY VARIABILITY UNDER A NOISY / SHARED-MIC ENVIRONMENT**. Do NOT classify them as confirmed Whisper hallucinations or confirmed provider defects.
+    - **Status**: Root cause has NOT been isolated.
+    - **Future Quiet-Environment Comparison**: A future controlled quiet-environment comparison may determine whether these behaviors originate primarily from:
+      - input audio quality
+      - background speech
+      - microphone characteristics
+      - STT model behavior
+      - provider behavior
+    - **Scope Preservation**: No correction or mitigation is implemented in Brick 18.
 
-
-
-
+11. **STT Multi-Tier Latency Diagnostics (Brick 18 Verified)**:
+    - Live multi-tier STT latency instrumentation (`providerSttDurationMs`, `serverSttDurationMs`, `clientSttDurationMs`) was verified across multiple languages and voice turns.
+    - Empirical latency measurements (observed range: 1125 ms – 5645 ms across 10 live samples: 4556 ms, 3096 ms, 2026 ms, 3757 ms, 1125 ms, 2981 ms, 4896 ms, 2902 ms, 5645 ms, 4267 ms).
+    - Timing pattern: `providerSttDurationMs ≈ serverSttDurationMs ≈ clientSttDurationMs`. Local server overhead was consistently minimal (a few milliseconds to a few dozen milliseconds).
+    - Diagnostic finding: The primary STT latency occurred in the external OpenRouter/Whisper request path. Local JARVIS STT processing was not a significant bottleneck.
+    - Do NOT generalize these empirical measurements into permanent performance claims.
+    - Production STT provider (`openrouter`) and model (`openai/whisper-large-v3-turbo`) remain unchanged. No optimizations, silence trimming, VAD, fallbacks, or routing were implemented in Brick 18.
