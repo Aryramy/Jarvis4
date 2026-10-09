@@ -1,30 +1,35 @@
 Project: JARVIS4
-Current Brick: 16
+Current Brick: 17
 Status: VERIFIED
-Last Verified Brick: BRICK-016
-Current Feature: Cross-Gateway Same-Model Latency Benchmark
+Last Verified Brick: BRICK-017
+Current Feature: Controlled Production Text-AI Migration to OpenRouter
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
 
 - Zero-dependency Node.js ESM project foundation
 - Minimal reusable 4-level logger supporting DEBUG, INFO, WARN, ERROR
-- Environment configuration loader and validator (including Cheaper Inference, OpenRouter STT, and OpenRouter TTS settings)
+- Environment configuration loader and validator (including Cheaper Inference, OpenRouter Text, OpenRouter STT, and OpenRouter TTS settings)
 - Automated native test runner suite (`node:test`, `node:assert`)
 - Comprehensive verification suite (`scripts/verify.mjs` / `npm run verify`)
 - Deterministic text request/response core (`handleText`) with input validation and whitespace normalization
 - Terminal CLI (`npm run jarvis -- "<text>"`)
 - Local web interface (`npm run web` at `http://127.0.0.1:8080`)
-- Cheaper Inference / OmniRoute AI Provider Adapter (`CheaperInferenceProvider` in `src/providers/cheaperInference.js`)
-- Live AI CLI command (`npm run ai -- "<prompt>"`) verified against live hosted provider (`deepseek-v4-flash-0731`)
-- Real AI web endpoint (`POST /api/ai`) routing to CheaperInferenceProvider with input validation and credential protection
+- Dedicated OpenRouter production text AI adapter (`OpenRouterTextProvider` in `src/providers/openRouterText.js`) connecting to `https://openrouter.ai/api/v1/chat/completions` using target model `deepseek/deepseek-v4-flash-0731`
+- Migrated production text AI endpoints (`POST /api/ai` and `POST /api/ai/stream`) to use `OpenRouterTextProvider` as the primary production provider
+- Migrated production AI CLI (`npm run ai -- "<prompt>"`) to use `OpenRouterTextProvider`
+- Safe diagnostic identity exposed in `/api/ai` response payload: `provider: "openrouter"` and `model: "deepseek/deepseek-v4-flash-0731"`
+- Retained `CheaperInferenceProvider` (`src/providers/cheaperInference.js`) strictly for historical diagnostics and Bricks 15 & 16 benchmarks; zero Cheaper fallback in production path
+- Independent text configuration (`OPENROUTER_TEXT_BASE_URL`, `OPENROUTER_TEXT_MODEL`, `OPENROUTER_TEXT_TIMEOUT_MS`) cleanly separated from STT and TTS settings
+- Cheaper Inference / OmniRoute AI Provider Adapter (`CheaperInferenceProvider` in `src/providers/cheaperInference.js`) retained for diagnostics
+- Live AI CLI command (`npm run ai -- "<prompt>"`)
+- Real AI web endpoint (`POST /api/ai`) routing to OpenRouterTextProvider with input validation and credential protection
 - Web interface Ask AI button and visible thinking loading state (`Status: Thinking...`)
-- Cheaper Inference streaming adapter (`stream(prompt)` and `streamMessages(messages)`) parsing OpenAI-compatible Server-Sent Events (SSE)
-- Streaming AI web endpoint (`POST /api/ai/stream`) serving newline-delimited JSON deltas with connection abort tracking and conversation context integration
+- Streaming AI web endpoint (`POST /api/ai/stream`) serving newline-delimited JSON deltas via OpenRouter with connection abort tracking and conversation context integration
 - Web interface Ask AI — Stream button progressively rendering text deltas in real time without buffering
 - In-memory conversation session component (`ConversationSession` in `src/core/conversationSession.js`) managing temporary message history (FIFO bound by default 20 turns)
 - Minimal local conversation store component (`ConversationStore` in `src/core/conversationStore.js`) managing atomic JSON persistence (`runtime/conversation.json`) across server restarts
-- Message-based provider support (`generateMessages(messages)` and `streamMessages(messages)`) in `AIProvider` and `CheaperInferenceProvider` preserving turn order
+- Message-based provider support (`generateMessages(messages)` and `streamMessages(messages)`) in `AIProvider`, `OpenRouterTextProvider`, and `CheaperInferenceProvider` preserving turn order
 - Single shared conversation context preserved seamlessly across server restarts for both normal Ask AI (`POST /api/ai`) and streaming Ask AI (`POST /api/ai/stream`)
 - Deterministic rollback on provider failure or client abort preventing corruption of persisted and in-memory conversation history
 - Clear conversation endpoint (`POST /api/conversation/clear`) resetting in-memory session history and removing persisted storage file
@@ -39,7 +44,7 @@ Next Feature: NOT AUTHORIZED
 - Real STT web endpoint (`POST /api/stt`) accepting browser microphone recordings (multipart or raw audio stream) with validation (presence, >0 bytes, MIME type, max size 25MB, configuration) and in-memory forwarding
 - Web interface Transcribe button (`#transcribe-btn`), STT status indicator (`#stt-status`), latency display, and transcript output (`#transcript-display`)
 - Web interface Ask JARVIS button (`#ask-jarvis-btn`), thinking loading indicator (`#jarvis-status`), and text response display (`#jarvis-response`)
-- Compositional browser-driven architecture connecting verified Brick 10 speech-to-text transcript (`POST /api/stt`) to verified Brick 4/6 text AI pipeline (`POST /api/ai`)
+- Compositional browser-driven architecture connecting verified Brick 10 speech-to-text transcript (`POST /api/stt`) to verified Brick 4/6/17 text AI pipeline (`POST /api/ai`)
 - Human-in-the-loop explicit submission: transcript is displayed for human verification before explicit click on "Ask JARVIS" submits it to the AI
 - Full Unicode preservation for multilingual prompts across English, Urdu, Arabic, and code-switched mixed sentences without transliteration, client-side translation, or language-specific routes
 - Single shared conversation context between typed Ask AI, streaming Ask AI, and voice transcript queries across memory and disk persistence
@@ -68,35 +73,19 @@ Next Feature: NOT AUTHORIZED
 - Comprehensive automated test suite (`tests/integration/voiceTurnSequence.test.js` & `tests/unit/voiceTurn.test.js`) verifying all 53 Brick 13 requirements offline (300 tests passed, 0 failed)
 - Strict boundary adherence: zero continuous listening, zero automatic recording restarts, zero wake words, zero VAD
 - Multi-tier AI latency instrumentation (Brick 14):
-  - `providerDurationMs`: External Cheaper Inference provider HTTP round-trip timing measured directly in `CheaperInferenceProvider`
+  - `providerDurationMs`: External provider HTTP round-trip timing measured directly in `OpenRouterTextProvider` and `CheaperInferenceProvider`
   - `serverAiDurationMs`: Server-side endpoint timing measured inside `/api/ai` request handler encompassing session/store and request lifecycle
   - `clientAiDurationMs`: Browser orchestration timing measured across `/api/ai` fetch and response parsing
 - Diagnostic timing metadata contract exposed in `/api/ai` (`timing: { providerDurationMs, serverAiDurationMs }`) with credential redaction and zero prompt leakage
 - Visible diagnostic UI displays: `AI: <ms> ms` for typed Ask AI / Ask JARVIS, and full pipeline stage breakdown (`STT: <ms> ms`, `AI: <ms> ms`, `TTS: <ms> ms`, `Voice Turn Total: <ms> ms`) for automated Voice Turn
-- Safe, isolated, manually-invoked Cheaper Inference AI latency benchmark & candidate selection tool (`scripts/benchmark-ai-latency.mjs` / `npm run benchmark:ai`) (Brick 15):
-  - Strictly isolated diagnostic tool: zero automatic invocation by verify, server startup, `/api/ai`, voice turns, or test suites
-  - Production model immutability: production model remains `deepseek-v4-flash-0731` throughout; zero modification to `.env`, `process.env`, or production `/api/ai`
-  - Live model catalog discovery: dynamically queries `GET /v1/models` from configured Cheaper Inference endpoint; filters out non-text models (embeddings, audio, whisper, vision/diffusion, moderation)
-  - Strict candidate count bounds: limits benchmarking to 1 baseline (`deepseek-v4-flash-0731` labeled `CURRENT PRODUCTION BASELINE`) + up to ~3 alternative candidates (4 models maximum)
-  - Discovery-only inspection mode: `--discover` queries live catalog and displays selected candidates without making benchmark prompt calls
-  - Sequential live trials: executes 3 sequential trials per candidate (up to 12 live requests maximum) with 30000 ms timeout per trial using deterministic short prompt `"What is 2 + 2? Answer with only the number."`
-  - Correctness verification & statistical analysis: verifies semantic answer `"4"`; fast incorrect responses are never selected as winners; computes min, max, average, and median latencies
-  - Secure gitignored output: results saved to `runtime/ai-benchmark-latest.json` (and `.txt`) with zero secret/API key leakage
-- Safe, isolated, manually-invoked cross-gateway same-model AI latency benchmark tool (`scripts/benchmark-ai-gateways.mjs` / `npm run benchmark:gateways`) (Brick 16):
-  - Compares DeepSeek V4 Flash 0731 release across two distinct gateway paths: Cheaper Inference (`deepseek-v4-flash-0731`) and OpenRouter (`deepseek/deepseek-v4-flash-0731`)
-  - Strictly isolated diagnostic tool: zero automatic invocation by verify, server startup, `/api/ai`, voice turns, or test suites
-  - Production model immutability: production provider remains Cheaper Inference (`deepseek-v4-flash-0731`) throughout; zero modifications to `.env`, `process.env`, or production `/api/ai`
-  - Pre-benchmark check mode: `--check` validates credentials for both gateways and queries OpenRouter model catalog (`GET /models`) to confirm target model availability; stops cleanly without prompt requests if unavailable (silent substitution strictly prohibited)
-  - Strict request parameters: exactly 3 sequential trials per gateway (6 live requests maximum) using identical prompt `"What is 2 + 2? Answer with only the number."`, identical 30000 ms timeout, identical temperature (0.1), identical max output tokens (50), and `stream: false`
-  - Monotonic latency measurement & correctness evaluation: verifies semantic answer `"4"`; flags wrong answers, timeouts, and errors; computes min, max, avg, and median latencies
-  - Safe comparative analysis: prevents fake ratio fabrication when a gateway produces zero successful samples
-  - Secure gitignored output: results saved to `runtime/ai-gateway-benchmark-latest.json` (and `.txt`) with zero secret/API key leakage
-- Automated test suite expanded to 358 tests across 22 suites passing offline with zero live external calls (Exit Code: 0)
+- Safe, isolated, manually-invoked Cheaper Inference AI latency benchmark & candidate selection tool (`scripts/benchmark-ai-latency.mjs` / `npm run benchmark:ai`) (Brick 15)
+- Safe, isolated, manually-invoked cross-gateway same-model AI latency benchmark tool (`scripts/benchmark-ai-gateways.mjs` / `npm run benchmark:gateways`) (Brick 16)
+- Automated test suite expanded to 382 tests across 23 suites passing offline with zero live external calls (Exit Code: 0)
 
 ## External integrations
 
-- Cheaper Inference / OmniRoute hosted API (OpenAI-compatible `/chat/completions`)
-- OpenRouter hosted API (OpenAI-compatible `/audio/transcriptions` with `openai/whisper-large-v3-turbo` for STT, and `/audio/speech` with `elevenlabs/eleven-v4-turbo` with voice `george` for TTS)
+- OpenRouter hosted API (OpenAI-compatible `/chat/completions` with `deepseek/deepseek-v4-flash-0731` for production text AI, `/audio/transcriptions` with `openai/whisper-large-v3-turbo` for STT, and `/audio/speech` with `elevenlabs/eleven-v4-turbo` with voice `george` for TTS)
+- Cheaper Inference / OmniRoute hosted API (retained strictly for historical diagnostics and benchmark tools)
 
 ## Known issues
 
@@ -104,27 +93,69 @@ Next Feature: NOT AUTHORIZED
 - On corporate / office Wi-Fi networks, direct OpenRouter HTTPS connections are reset with ECONNRESET; mobile hotspot or unrestricted network bypasses this limitation and works reliably.
 - Multilingual Whisper STT observations:
   - Occasional extra trailing hallucinated words ("Thank you", "موسیقی", "شكرا", "ملتا") generated during audio silence or trailing background noise.
+  - In Brick 17 live testing, an unwanted noise prefix hallucination ("*Mario plays*") appeared during audio capture in Test F.
   - Mixed English terms in Urdu speech may be transliterated phonetically into Urdu script rather than Latin script (e.g., "ڈیشپورٹ").
   - Live STT latency varies depending on audio duration, gateway load, and routing.
-- System boundary reminders:
-  - OpenRouter is used for STT (`/audio/transcriptions`) and TTS (`/audio/speech`).
-  - Cheaper Inference remains the text AI/LLM provider (`/chat/completions`).
-  - Brick 13 is one-action sequential voice turn; automatic recording restart, continuous listening, and wake words are strictly prohibited.
-  - User explicitly clicks "Run Voice Turn" after recording.
-- Voice turn overall latency & diagnostic observation (Brick 13):
-  - STT latency is currently generally acceptable (~2.5s–3.2s).
-  - TTS latency is currently generally acceptable (~1.2s–3.0s).
-  - The complete voice turn is still significantly slower than desired (observed total elapsed times: ~18s–31s across live tests).
-  - A large portion of the total elapsed time occurs outside the measured STT and TTS stages.
-  - Brick 13 does not expose an isolated AI-stage latency measurement. The remaining elapsed time may include AI provider latency, network roundtrip delays, request/response handling, and client orchestration overhead.
-  - Future architectural principle: measure isolated AI latency first. Do not optimize or modify AI provider/model until empirical measurement identifies the actual bottleneck.
-- Cross-gateway latency diagnosis (Brick 16):
-  - Holding the model release constant (`DeepSeek V4 Flash 0731`) across gateways revealed that Cheaper Inference had 1/3 success and 2/3 timeouts (median: 25529 ms), while OpenRouter had 3/3 success and 0 timeouts (median: 674 ms, ~37.88x faster empirically).
-  - The primary bottleneck is the external Cheaper Inference request path, not the model release itself. Production remains on Cheaper Inference until a future brick authorizes migration.
+- OpenRouter Production Text AI observations (Brick 17 Verified):
+  - Migrated from Cheaper Inference; model release preserved as DeepSeek V4 Flash 0731 (`deepseek/deepseek-v4-flash-0731`).
+  - Substantially improved latency in most tested requests compared to the previous Cheaper Inference baseline.
+  - Significant latency variability still exists: observed timings include 2261 ms, 3505 ms, 3600 ms, 4204 ms, 4279 ms, 9163 ms, and 23351 ms (Urdu prompt).
+  - Do not claim permanent fixed latency or guaranteed sub-5-second performance.
+  - No fallback to Cheaper Inference exists; CheaperInferenceProvider is retained strictly for diagnostics and benchmarks.
 
 ## Last verification
 
-Status: BRICK-016 VERIFIED (Exit Code: 0)
+Status: BRICK-017 VERIFIED (Exit Code: 0)
+- Automated test & sanity verification: 382 tests across 23 suites passed offline (Exit Code: 0).
+- Production Providers:
+  - Text AI: OpenRouter (`deepseek/deepseek-v4-flash-0731` at `POST /chat/completions`) — MIGRATED FROM CHEAPER INFERENCE
+  - STT: OpenRouter (`openai/whisper-large-v3-turbo` at `POST /audio/transcriptions`) — UNCHANGED
+  - TTS: OpenRouter (`elevenlabs/eleven-v4-turbo`, voice: `george`, format: `mp3` at `POST /audio/speech`) — UNCHANGED
+- Diagnostic / Historical Providers:
+  - Cheaper Inference: `deepseek-v4-flash-0731` at `https://api.cheaperinference.com/v1` — PRESERVED FOR HISTORICAL TESTS & BENCHMARKS
+- Endpoints: `POST /api/stt`, `POST /api/ai`, `POST /api/tts`
+- Multi-tier latency instrumentation preserved: `providerDurationMs`, `serverAiDurationMs`, `clientAiDurationMs`.
+- Diagnostic identity: `/api/ai` response includes `provider: "openrouter"` and `model: "deepseek/deepseek-v4-flash-0731"`.
+- Fallback strictly prohibited: Failed OpenRouter calls return controlled 500 error; zero fallback to Cheaper Inference.
+- Brick 17 human live verification results (Operator confirmed):
+  - TEST A (Production Identity): PASS
+    - Typed prompt: "Reply with exactly: OPENROUTER PRODUCTION"
+    - Response: "OPENROUTER PRODUCTION"
+    - Diagnostics: `provider: "openrouter"`, `model: "deepseek/deepseek-v4-flash-0731"`, `providerDurationMs: 3505 ms`, `serverAiDurationMs: 3513 ms`.
+    - Proves normal production `/api/ai` uses OpenRouter with zero Cheaper production calls.
+  - TEST B (Simple Production Latency): PASS
+    - Prompt: "What is 2 + 2? Answer with only the number." -> Response: "4"
+    - Diagnostics: `provider: "openrouter"`, `model: "deepseek/deepseek-v4-flash-0731"`, `providerDurationMs: 3600 ms`, `serverAiDurationMs: 3601 ms`.
+    - Result was materially faster than Cheaper Inference 24–30s baseline (no claim of fixed permanent latency).
+  - TEST C (Multilingual Typed): PASS
+    - Urdu prompt: "پاور بی آئی کیا ہے؟ ایک مختصر جواب دو۔"
+      - Response: "Power BI مائیکروسافٹ کا ایک بزنس انٹیلی جنس (BI) پلیٹ فارم ہے، جو مختلف ڈیٹا ذرائع کو جوڑ کر انٹرایکٹو ڈیش بورڈز اور رپورٹس تیار کرتا ہے۔"
+      - Diagnostics: `provider: "openrouter"`, `model: "deepseek/deepseek-v4-flash-0731"`, `providerDurationMs: 23351 ms`, `serverAiDurationMs: 23352 ms`.
+      - Correct multilingual behavior observed; substantial latency variability recorded (~23.35s).
+    - Arabic prompt: "ما هو Power BI؟ أجب بجملة قصيرة."
+      - Response: "Power BI هو منصة ذكاء أعمال من مايكروسوفت لتحليل البيانات وإنشاء تقارير تفاعلية."
+      - Diagnostics: `provider: "openrouter"`, `model: "deepseek/deepseek-v4-flash-0731"`, `providerDurationMs: 4279 ms`, `serverAiDurationMs: 4280 ms`.
+      - Correct Arabic response without any language configuration changes.
+  - TEST D (Conversation Memory): PASS
+    - Stored: "My migration test code is ORION-617." -> Recalled: "ORION-617"
+    - Diagnostics: `provider: "openrouter"`, `model: "deepseek/deepseek-v4-flash-0731"`, `providerDurationMs: 9163 ms`, `serverAiDurationMs: 9164 ms`.
+    - `ConversationSession` and `ConversationStore` memory retention preserved across migration.
+  - TEST E (Streaming): PASS
+    - Streaming prompt: "Explain Power BI in one short sentence."
+    - Observed: waiting: 2.71s, receiving: 852ms. Deltas progressed and completed cleanly through OpenRouter with zero Cheaper fallback.
+  - TEST F (Full Voice Turn): PASS
+    - Audio prompt: "What is the capital of Japan? Answer briefly."
+    - Total elapsed: 18220 ms (STT: 11416 ms with "*Mario plays* What is the capital of Japan? Answer briefly.", AI: 4204 ms -> "Tokyo.", TTS: 2454 ms -> playback).
+    - Recorded `*Mario plays*` noise artifact in Whisper STT transcript.
+  - TEST G (Second Voice Turn Without Refresh): PASS
+    - Audio prompt: "What is the capital of France? Answer briefly."
+    - Total elapsed: 7953 ms (STT: 4318 ms, AI: 2261 ms -> "Paris.", TTS: 1257 ms -> playback).
+    - Verified clean new turn, fresh transcript, fresh AI response, fresh TTS audio, zero stale state leakage.
+  - TEST H (Failure Safety): PASS via automated regression test coverage
+    - OpenRouter failure returns controlled 500 error, zero Cheaper fallback, zero fake response, and rolls back conversation turn cleanly.
+  - Observed Live AI Latency Samples: 2261 ms, 3505 ms, 3600 ms, 4204 ms, 4279 ms, 9163 ms, 23351 ms. OpenRouter production latency improved substantially in most turns, but significant latency variability still exists (Urdu reached ~23.35s).
+- Prior bricks verified:
+  - Brick 16 cross-gateway benchmark: VERIFIED
 - Automated test & sanity verification: 358 tests across 22 suites passed offline (Exit Code: 0).
 - Providers:
   - STT: OpenRouter (`openai/whisper-large-v3-turbo` at `POST /audio/transcriptions`)

@@ -38,6 +38,9 @@ export function loadConfig(overrides = {}) {
 
   const openRouter = Object.freeze({
     apiKey: overrides.OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY ?? '',
+    textBaseUrl: (overrides.OPENROUTER_TEXT_BASE_URL ?? process.env.OPENROUTER_TEXT_BASE_URL ?? 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, ''),
+    textModel: overrides.OPENROUTER_TEXT_MODEL ?? process.env.OPENROUTER_TEXT_MODEL ?? 'deepseek/deepseek-v4-flash-0731',
+    textTimeoutMs: Number(overrides.OPENROUTER_TEXT_TIMEOUT_MS ?? process.env.OPENROUTER_TEXT_TIMEOUT_MS ?? 30000) || 30000,
     sttBaseUrl: (overrides.OPENROUTER_STT_BASE_URL ?? process.env.OPENROUTER_STT_BASE_URL ?? 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, ''),
     sttModel: overrides.OPENROUTER_STT_MODEL ?? process.env.OPENROUTER_STT_MODEL ?? 'openai/whisper-large-v3-turbo',
     timeoutMs: Number(overrides.OPENROUTER_STT_TIMEOUT_MS ?? process.env.OPENROUTER_STT_TIMEOUT_MS ?? 30000) || 30000,

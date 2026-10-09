@@ -48,3 +48,7 @@ Status: VERIFIED
 
 BRICK-016 — Cross-Gateway Same-Model Latency Benchmark
 Status: VERIFIED
+
+BRICK-017 — Controlled Production Text-AI Migration to OpenRouter
+Status: VERIFIED
+

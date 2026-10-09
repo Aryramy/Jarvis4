@@ -53,6 +53,17 @@ Currently tracked issues in JARVIS4:
    - Production provider remains unchanged: Cheaper Inference (`deepseek-v4-flash-0731`). No automatic switch, routing, or fallback was implemented.
    - Any controlled production migration to OpenRouter for text AI is deferred to a future brick after human review and safe commit of GREEN-016.
 
+9. **Controlled Production Text-AI Migration to OpenRouter (Brick 17 Verified)**:
+   - Production text AI has been successfully migrated to OpenRouter (`deepseek/deepseek-v4-flash-0731`), replacing Cheaper Inference as the primary text provider for `/api/ai`, `/api/ai/stream`, and `npm run ai`.
+   - Cheaper Inference remains available for diagnostics and benchmark scripts (`CheaperInferenceProvider`), but is strictly decoupled from the production path (no automatic fallback or routing).
+   - Human live verification confirmed:
+     - Production identity: `/api/ai` uses OpenRouter with zero Cheaper calls.
+     - Multilingual operation (English, Urdu, Arabic), memory persistence, streaming, and full sequential voice turns are all verified.
+     - Latency improvement: OpenRouter production AI latency was materially faster than the previous Cheaper Inference 24–30s baseline across most tested turns (observed samples: 2261 ms, 3505 ms, 3600 ms, 4204 ms, 4279 ms, 9163 ms).
+     - Latency variability: Significant latency variability still exists; the Urdu prompt observed 23351 ms provider duration. Do NOT claim permanent sub-5-second performance or a permanent fixed multiplier.
+     - STT noise artifact: An unwanted `*Mario plays*` prefix hallucination was observed in Whisper STT during live voice turn Test F. Recorded as another STT quality/noise observation (not fixed in Brick 17).
+
+
 
 
 

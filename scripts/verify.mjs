@@ -49,6 +49,7 @@ const REQUIRED_FILES = [
   'src/providers/openRouterSTT.js',
   'src/providers/textToSpeechBase.js',
   'src/providers/openRouterTTS.js',
+  'src/providers/openRouterText.js',
   'src/config/index.js',
   'src/utils/logger.js',
   'scripts/verify.mjs',
@@ -60,6 +61,7 @@ const REQUIRED_FILES = [
   'tests/unit/cheaperInference.test.js',
   'tests/unit/openRouterSTT.test.js',
   'tests/unit/openRouterTTS.test.js',
+  'tests/unit/openRouterText.test.js',
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
   'tests/unit/voiceTurn.test.js',
@@ -225,6 +227,27 @@ check('AI Provider Module Sanity Check', async () => {
   }
   if (typeof provider.streamMessages !== 'function') {
     throw new Error('Provider must implement streamMessages() method');
+  }
+});
+
+check('OpenRouter Text Provider Module Sanity Check', async () => {
+  const { AIProvider } = await import('../src/providers/base.js');
+  const { OpenRouterTextProvider } = await import('../src/providers/openRouterText.js');
+  const provider = new OpenRouterTextProvider({
+    apiKey: 'mock-key',
+    model: 'deepseek/deepseek-v4-flash-0731'
+  });
+  if (!(provider instanceof AIProvider)) {
+    throw new Error('OpenRouterTextProvider must inherit from AIProvider');
+  }
+  if (typeof provider.generate !== 'function') {
+    throw new Error('OpenRouterTextProvider must implement generate() method');
+  }
+  if (typeof provider.generateMessages !== 'function') {
+    throw new Error('OpenRouterTextProvider must implement generateMessages() method');
+  }
+  if (typeof provider.streamMessages !== 'function') {
+    throw new Error('OpenRouterTextProvider must implement streamMessages() method');
   }
 });
 

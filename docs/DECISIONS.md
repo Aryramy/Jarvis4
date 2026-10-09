@@ -207,6 +207,42 @@
   - Key finding: Changing gateway/path while holding the DeepSeek V4 Flash 0731 model release constant produced a dramatic latency improvement. This confirms that gateway/path selection materially affects current JARVIS AI latency. Gateways may differ in upstream provider, queueing, routing, hardware, batching, geography, network path, provider selection, and infrastructure configuration.
   - Production Immutability: Zero production migration performed in Brick 16. Production provider remains Cheaper Inference (`deepseek-v4-flash-0731` at `https://api.cheaperinference.com/v1`). No routing, fallback, or timeout changes introduced. Controlled production migration is deferred to a future brick only after GREEN-016 is safely committed.
 
+## ADR-0022: Controlled Production Text-AI Migration to OpenRouter
+- **Status**: Accepted
+- **Context**: In Brick 16, a controlled cross-gateway benchmark comparing the same model release (DeepSeek V4 Flash 0731) between Cheaper Inference and OpenRouter demonstrated that OpenRouter achieved 3/3 success with a median latency of 674 ms (0 timeouts), whereas Cheaper Inference achieved only 1/3 success with a 25529 ms median (2 timeouts). This confirmed that gateway/pathway selection was the dominant source of AI latency. A controlled production migration of the text AI transport to OpenRouter is justified to evaluate real responsiveness while preserving architectural boundaries.
+- **Decision**:
+  1. Production Text-AI Migration: Switch the active production text AI provider from Cheaper Inference to OpenRouter while retaining the same underlying model release (`deepseek/deepseek-v4-flash-0731`).
+  2. Dedicated Adapter: Implement `OpenRouterTextProvider` (`src/providers/openRouterText.js`) extending `AIProvider`. It implements `generate`, `generateMessages`, `stream`, and `streamMessages` against `https://openrouter.ai/api/v1/chat/completions`.
+  3. Production Endpoints & CLI: Wire `OpenRouterTextProvider` as the default text provider for `POST /api/ai`, `POST /api/ai/stream`, and `npm run ai` (`src/cli/ai.js`).
+  4. Diagnostic Identity: Safely return `provider: "openrouter"` and `model: "deepseek/deepseek-v4-flash-0731"` in the `/api/ai` response payload alongside existing `timing: { providerDurationMs, serverAiDurationMs }` metadata.
+  5. Strict No-Fallback Policy: If OpenRouter requests fail or time out, return a controlled HTTP error. Do NOT implement automatic fallback or routing to Cheaper Inference.
+  6. Cheaper Provider Preservation: Retain `CheaperInferenceProvider` (`src/providers/cheaperInference.js`) intact for historical tests and benchmark tooling.
+  7. Independent Configuration: Introduce `OPENROUTER_TEXT_BASE_URL` (default: `https://openrouter.ai/api/v1`), `OPENROUTER_TEXT_MODEL` (default: `deepseek/deepseek-v4-flash-0731`), and `OPENROUTER_TEXT_TIMEOUT_MS` (30000 ms), using the existing `OPENROUTER_API_KEY`. Text, STT, and TTS remain independently configurable.
+  8. Pipeline & Memory Invariants: STT (`openai/whisper-large-v3-turbo`) and TTS (`elevenlabs/eleven-v4-turbo`) remain unchanged. `ConversationSession`, `ConversationStore`, and rollback semantics remain completely preserved.
+- **Consequences**:
+  - The production text AI path now routes to OpenRouter using `deepseek/deepseek-v4-flash-0731`.
+  - All automated regression and unit tests (382 tests across 23 suites) pass completely offline with zero live network calls.
+  - Human live verification completed and VERIFIED (Tests A through H):
+    - Test A (Production Identity): PASS (`OPENROUTER PRODUCTION`, `provider: "openrouter"`, `model: "deepseek/deepseek-v4-flash-0731"`, `providerDurationMs: 3505 ms`, `serverAiDurationMs: 3513 ms`). Proves normal production `/api/ai` uses OpenRouter with zero Cheaper production calls.
+    - Test B (Simple Production Latency): PASS (`4`, `providerDurationMs: 3600 ms`, `serverAiDurationMs: 3601 ms`). Materially faster than Cheaper Inference 24–30s baseline.
+    - Test C (Multilingual Typed): PASS (Urdu: 23351 ms provider duration, correct Urdu response; Arabic: 4279 ms provider duration, correct Arabic response). Correct multilingual operation without language configuration changes. Substantial latency variability observed (Urdu reached ~23.35s).
+    - Test D (Conversation Memory): PASS (Stored "ORION-617", recalled "ORION-617", `providerDurationMs: 9163 ms`). `ConversationSession` and `ConversationStore` behavior preserved.
+    - Test E (Streaming): PASS (Waiting: 2.71s, Receiving: 852ms; clean delta progression via OpenRouter with zero Cheaper fallback).
+    - Test F (Full Voice Turn): PASS (Total: 18220 ms; STT: 11416 ms with `*Mario plays*` noise artifact prefix; AI: 4204 ms -> "Tokyo."; TTS: 2454 ms). Full production pipeline verified.
+    - Test G (Second Voice Turn Without Refresh): PASS (Total: 7953 ms; STT: 4318 ms; AI: 2261 ms -> "Paris."; TTS: 1257 ms; fresh recording, transcript, AI response, and audio; zero stale state leakage).
+    - Test H (Failure Safety): PASS via automated regression coverage (500 error, zero fallback, conversation rollback preserved).
+  - Performance findings:
+    - Observed OpenRouter AI latencies: 2261 ms, 3505 ms, 3600 ms, 4204 ms, 4279 ms, 9163 ms, 23351 ms.
+    - OpenRouter production latency improved substantially in most tested requests compared to the previous Cheaper Inference baseline.
+    - Significant latency variability still exists (e.g. Urdu request reached ~23.35s). Do not overstate future reliability or claim permanent sub-5-second performance.
+  - Boundary preservation:
+    - Zero fallback to Cheaper Inference implemented.
+    - Zero automatic routing implemented.
+    - CheaperInferenceProvider retained intact strictly for diagnostics and benchmark tools.
+    - STT and TTS models, providers, and configurations unchanged.
+    - ConversationSession and ConversationStore persistence logic unchanged.
+
+
 
 
 

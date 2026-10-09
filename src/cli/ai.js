@@ -5,7 +5,7 @@
  * Sends user prompt to the configured Cheaper Inference provider.
  */
 
-import { CheaperInferenceProvider } from '../providers/cheaperInference.js';
+import { OpenRouterTextProvider } from '../providers/openRouterText.js';
 
 const args = process.argv.slice(2);
 const prompt = args.join(' ').trim();
@@ -15,12 +15,12 @@ if (!prompt) {
   process.exit(1);
 }
 
-const provider = new CheaperInferenceProvider();
+const provider = new OpenRouterTextProvider();
 
 const configCheck = provider.validateConfig();
 if (!configCheck.valid) {
   console.error(`Error: Configuration error: ${configCheck.error}`);
-  console.error('Please configure CHEAPER_INFERENCE_API_KEY and CHEAPER_INFERENCE_MODEL in your environment.');
+  console.error('Please configure OPENROUTER_API_KEY in your environment.');
   process.exit(1);
 }
 

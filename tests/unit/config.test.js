@@ -184,4 +184,35 @@ describe('Configuration Utility', () => {
     assert.equal(envCfg.openRouter.ttsVoice, 'env-voice');
     assert.equal(envCfg.openRouter.ttsTimeoutMs, 25000);
   });
+
+  test('should load openRouter Text config defaults when environment is empty', () => {
+    const defaultCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
+    assert.equal(defaultCfg.openRouter.textBaseUrl, 'https://openrouter.ai/api/v1');
+    assert.equal(defaultCfg.openRouter.textModel, 'deepseek/deepseek-v4-flash-0731');
+    assert.equal(defaultCfg.openRouter.textTimeoutMs, 30000);
+  });
+
+  test('should load openRouter Text config overrides passed directly', () => {
+    const customCfg = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'info',
+      OPENROUTER_TEXT_BASE_URL: 'https://custom-text.openrouter.ai/v1/',
+      OPENROUTER_TEXT_MODEL: 'custom-text-model',
+      OPENROUTER_TEXT_TIMEOUT_MS: '45000'
+    });
+    assert.equal(customCfg.openRouter.textBaseUrl, 'https://custom-text.openrouter.ai/v1');
+    assert.equal(customCfg.openRouter.textModel, 'custom-text-model');
+    assert.equal(customCfg.openRouter.textTimeoutMs, 45000);
+  });
+
+  test('should load openRouter Text config from environment variables when overrides not provided', () => {
+    process.env.OPENROUTER_TEXT_BASE_URL = 'https://env-text.openrouter.ai/v1/';
+    process.env.OPENROUTER_TEXT_MODEL = 'env-text-model';
+    process.env.OPENROUTER_TEXT_TIMEOUT_MS = '20000';
+
+    const envCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
+    assert.equal(envCfg.openRouter.textBaseUrl, 'https://env-text.openrouter.ai/v1');
+    assert.equal(envCfg.openRouter.textModel, 'env-text-model');
+    assert.equal(envCfg.openRouter.textTimeoutMs, 20000);
+  });
 });

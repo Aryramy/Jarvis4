@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { handleText } from '../core/textCore.js';
 import { CheaperInferenceProvider } from '../providers/cheaperInference.js';
+import { OpenRouterTextProvider } from '../providers/openRouterText.js';
 import { OpenRouterSpeechToTextProvider } from '../providers/openRouterSTT.js';
 import { OpenRouterTextToSpeechProvider } from '../providers/openRouterTTS.js';
 import { ConversationSession } from '../core/conversationSession.js';
@@ -26,7 +27,7 @@ const DEFAULT_PORT = 8080;
 /**
  * Creates the HTTP request listener.
  * @param {Object} [options]
- * @param {import('../providers/cheaperInference.js').CheaperInferenceProvider} [options.provider]
+ * @param {import('../providers/base.js').AIProvider} [options.provider]
  * @param {import('../providers/openRouterSTT.js').OpenRouterSpeechToTextProvider} [options.sttProvider]
  * @param {import('../providers/openRouterTTS.js').OpenRouterTextToSpeechProvider} [options.ttsProvider]
  * @param {import('../core/conversationSession.js').ConversationSession} [options.session]
@@ -209,7 +210,7 @@ export function createRequestListener(options = {}) {
           return;
         }
 
-        const provider = options.provider || new CheaperInferenceProvider();
+        const provider = options.provider || new OpenRouterTextProvider();
 
         const configCheck = provider.validateConfig ? provider.validateConfig() : { valid: true };
         if (!configCheck.valid) {
@@ -292,7 +293,7 @@ export function createRequestListener(options = {}) {
 
           if (!res.writableEnded && !clientDisconnected) {
             let safeError = err.message || 'Stream request failed';
-            const apiKeyToRedact = provider.apiKey || process.env.CHEAPER_INFERENCE_API_KEY;
+            const apiKeyToRedact = provider.apiKey || process.env.OPENROUTER_API_KEY || process.env.CHEAPER_INFERENCE_API_KEY;
             if (apiKeyToRedact) {
               safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
             }
@@ -391,7 +392,7 @@ export function createRequestListener(options = {}) {
         let userTurnAdded = false;
 
         try {
-          const provider = options.provider || new CheaperInferenceProvider();
+          const provider = options.provider || new OpenRouterTextProvider();
 
           const configCheck = provider.validateConfig ? provider.validateConfig() : { valid: true };
           if (!configCheck.valid) {
@@ -442,6 +443,8 @@ export function createRequestListener(options = {}) {
             res.end(JSON.stringify({
               success: true,
               response: result.text,
+              provider: result.provider || (provider instanceof OpenRouterTextProvider ? 'openrouter' : (provider.name || 'custom')),
+              model: result.model || provider.model,
               timing,
               providerDurationMs,
               serverAiDurationMs
@@ -453,7 +456,7 @@ export function createRequestListener(options = {}) {
             }
 
             let safeError = result.error || 'Provider request failed';
-            const apiKeyToRedact = provider.apiKey || process.env.CHEAPER_INFERENCE_API_KEY;
+            const apiKeyToRedact = provider.apiKey || process.env.OPENROUTER_API_KEY || process.env.CHEAPER_INFERENCE_API_KEY;
             if (apiKeyToRedact) {
               safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
             }
@@ -482,7 +485,7 @@ export function createRequestListener(options = {}) {
 
           const serverAiDurationMs = getServerAiDurationMs();
           let safeError = err.message || 'Internal server error';
-          const apiKeyToRedact = (options.provider && options.provider.apiKey) || process.env.CHEAPER_INFERENCE_API_KEY;
+          const apiKeyToRedact = (options.provider && options.provider.apiKey) || process.env.OPENROUTER_API_KEY || process.env.CHEAPER_INFERENCE_API_KEY;
           if (apiKeyToRedact) {
             safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
           }
