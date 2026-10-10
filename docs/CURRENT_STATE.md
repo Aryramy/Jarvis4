@@ -1,15 +1,15 @@
 Project: JARVIS4
-Current Brick: 18
+Current Brick: 19
 Status: VERIFIED
-Last Verified Brick: BRICK-018
-Current Feature: STT Latency & Quality Instrumentation
+Last Verified Brick: BRICK-019
+Current Feature: Reliable Internet Search v1 (Explicit Web Search via OpenRouter)
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
 
 - Zero-dependency Node.js ESM project foundation
 - Minimal reusable 4-level logger supporting DEBUG, INFO, WARN, ERROR
-- Environment configuration loader and validator (including Cheaper Inference, OpenRouter Text, OpenRouter STT, and OpenRouter TTS settings)
+- Environment configuration loader and validator (including Cheaper Inference, OpenRouter Text, OpenRouter STT, OpenRouter TTS, and OpenRouter Search settings)
 - Automated native test runner suite (`node:test`, `node:assert`)
 - Comprehensive verification suite (`scripts/verify.mjs` / `npm run verify`)
 - Deterministic text request/response core (`handleText`) with input validation and whitespace normalization
@@ -88,11 +88,31 @@ Next Feature: NOT AUTHORIZED
   - Safe diagnostic metadata contract exposed in `/api/stt` (`timing: { providerSttDurationMs, serverSttDurationMs }`, `provider: "openrouter"`, `model: "openai/whisper-large-v3-turbo"`) with complete credential redaction
   - Consistent STT diagnostic display across both standalone Transcribe and automated Voice Turn (Primary: `STT: <clientSttDurationMs> ms`, Secondary: `STT Provider: <ms> ms | STT Server: <ms> ms | STT Client: <ms> ms`)
   - Strict preservation of raw provider transcript without automatic hallucination filtering, normalization, silence trimming, or translation
-- Automated test suite expanded to 404 tests across 27 suites passing offline with zero live external calls (Exit Code: 0)
+- Reliable Internet Search v1 — Explicit Web Search via OpenRouter (Brick 19):
+  - Status: BRICK-019 VERIFIED (Search Web v1 intentionally optimized for: single-search, fresh-fact, concise-answer)
+  - Dedicated base search contract (`SearchProvider` in `src/providers/searchBase.js`)
+  - Dedicated OpenRouter web search provider adapter (`OpenRouterSearchProvider` in `src/providers/openRouterSearch.js`) connecting to `https://openrouter.ai/api/v1/chat/completions` using the `openrouter:web_search` server tool
+  - Search-specific execution budget: Tool-level `max_uses: 1` in `openrouter:web_search` (top-level `max_tool_calls: 1` removed to prevent tool truncation)
+  - Reduced search engine payload: Pinned search engine `exa`, mode `fast`, limits `max_results: 3`, `max_total_results: 3`, and `max_characters: 1200` (exact character control without `search_context_size`)
+  - Expanded search output budget: `max_tokens: 1500` applied strictly to `/api/search` while preserving concise answer system instructions
+  - Robust final message parsing: Accepts string content and supported structured content; distinguishes controlled errors `SEARCH_OUTPUT_TRUNCATED`, `SEARCH_TOOL_LOOP_INCOMPLETE`, and `SEARCH_PROVIDER_NO_FINAL_CONTENT`
+  - Safe message diagnostics: Exposes `providerFinishReason`, `hasMessage`, `hasMessageContent`, `contentType`, `hasToolCalls`, `hasReasoning`, and `annotationCount` without exposing raw payloads, hidden reasoning, or secrets
+  - Evidence preservation on error: Preserves `searchUsed`, `searchRequests`, `searchEvidence`, and `sources` on controlled error without fabricating answer text from citations
+  - Dynamic current date awareness: Generates runtime UTC date (`YYYY-MM-DD`) and injects date-awareness and freshness honesty instructions strictly into `/api/search` system prompt
+  - Freshness honesty: Distinguishes current evidence vs older-results-only, instructing model not to call older results 'latest' and state newest publication date found
+  - Publication date extraction & preservation: Safely preserves `publishedDate` when supplied in provider `url_citation` or `citations` metadata; never scrapes dates from narrative text; `publishedDate` is `null` when unavailable
+  - Diagnostic freshness metadata: Exposes `currentDate`, `freshnessSensitive`, `newestSourceDate`, and `freshnessStatus` (`"current"`, `"older-results-only"`, `"unknown"`)
+  - Robust search-usage proof: `searchUsed: true` when either `usage.server_tool_use.web_search_requests >= 1` OR genuine `url_citation` annotations exist; `searchRequests` reports numeric count or `null` when unavailable (never defaults missing usage to 0); exposes `searchEvidence` diagnostic field (`"usage"`, `"url_citation"`, `"usage+url_citation"`, `"none"`)
+  - Strict statelessness: `/api/search` never touches `ConversationSession`, `ConversationStore`, or persistent conversation files
+  - Invariant preservation: Normal `/api/ai` and `/api/ai/stream` do NOT send tools, limits, or search options; STT, TTS, and Voice Turn pipelines remain completely unchanged
+  - Controlled 30-second timeout: Request timeout remains strictly controlled, does not reuse previous results, and does not fall back to ungrounded model prose
+  - Minimal web UI integration: Added "Search Web" button (`#search-web-btn`) near text input, and dedicated search display section (`#search-section`, `#search-status`, `#search-meta`, `#search-response`, `#search-sources`) displaying search status, search request count, freshness status, answer, and sources list with publication dates
+  - Architectural boundary enforcement: Zero browser automation, zero Playwright, zero web-fetch tool, zero fallback search engine, zero automatic search decision / routing, zero voice-search integration
+- Automated test suite expanded to 448 tests across 27 suites passing offline with zero live external calls (Exit Code: 0)
 
 ## External integrations
 
-- OpenRouter hosted API (OpenAI-compatible `/chat/completions` with `deepseek/deepseek-v4-flash-0731` for production text AI, `/audio/transcriptions` with `openai/whisper-large-v3-turbo` for STT, and `/audio/speech` with `elevenlabs/eleven-v4-turbo` with voice `george` for TTS)
+- OpenRouter hosted API (OpenAI-compatible `/chat/completions` with `deepseek/deepseek-v4-flash-0731` for production text AI, `openrouter:web_search` server tool with `exa` for live web search, `/audio/transcriptions` with `openai/whisper-large-v3-turbo` for STT, and `/audio/speech` with `elevenlabs/eleven-v4-turbo` with voice `george` for TTS)
 - Cheaper Inference / OmniRoute hosted API (retained strictly for historical diagnostics and benchmark tools)
 
 ## Known issues
@@ -125,9 +145,75 @@ Next Feature: NOT AUTHORIZED
   - Significant latency variability still exists: observed timings include 2261 ms, 3505 ms, 3600 ms, 4204 ms, 4279 ms, 9163 ms, and 23351 ms (Urdu prompt).
   - Do not claim permanent fixed latency or guaranteed sub-5-second performance.
   - No fallback to Cheaper Inference exists; CheaperInferenceProvider is retained strictly for diagnostics and benchmarks.
+- OpenRouter Web Search observations (Brick 19 Verified):
+  - In initial live testing following initial hardening, a web search request failed with "Malformed response from provider: missing message content".
+  - Root cause: Top-level `max_tool_calls: 1` and restricted `max_tokens: 800` prevented the model from completing final message synthesis after tool execution.
+  - Corrective design: Removed top-level `max_tool_calls: 1`, configured tool-specific `max_uses: 1`, pinned Exa `mode: "fast"`, expanded search output budget to `max_tokens: 1500`, added robust final message parsing for strings and structured blocks, and implemented explicit controlled diagnostics (`SEARCH_OUTPUT_TRUNCATED`, `SEARCH_TOOL_LOOP_INCOMPLETE`, `SEARCH_PROVIDER_NO_FINAL_CONTENT`) with preserved search evidence.
+  - Final live test passed with 15627 ms latency (down from ~29930 ms earlier successful search), 3 2026 sources returned, newest source date 2026-10-06, truthful freshness qualification, and complete isolation from normal AI. External latency variability remains, and search request count may be unavailable even when genuine url_citation provider evidence proves search execution.
 
 
 ## Last verification
+
+Status: BRICK-019 VERIFIED (Exit Code: 0)
+- Automated test & sanity verification: 448 tests across 27 suites passed offline (Exit Code: 0).
+- Production Providers:
+  - Text AI: OpenRouter (`deepseek/deepseek-v4-flash-0731` at `POST /chat/completions`) — UNCHANGED
+  - Search Web: OpenRouter (`deepseek/deepseek-v4-flash-0731` with `openrouter:web_search` [Exa fast mode] at `POST /api/search`) — VERIFIED
+  - STT: OpenRouter (`openai/whisper-large-v3-turbo` at `POST /audio/transcriptions`) — UNCHANGED
+  - TTS: OpenRouter (`elevenlabs/eleven-v4-turbo`, voice: `george`, format: `mp3` at `POST /audio/speech`) — UNCHANGED
+- Diagnostic / Historical Providers:
+  - Cheaper Inference: `deepseek-v4-flash-0731` at `https://api.cheaperinference.com/v1` — PRESERVED FOR HISTORICAL TESTS & BENCHMARKS
+- Endpoints: `POST /api/search`, `POST /api/stt`, `POST /api/ai`, `POST /api/ai/stream`, `POST /api/tts`
+- Brick 19 human live verification results (Operator confirmed):
+  - LIVE SEARCH WEB TEST: PASS
+    - Prompt: "What are the latest Microsoft Fabric announcements?"
+    - Result:
+      - Web Search: Executed
+      - Searches: count unavailable (`searchRequests: null`)
+      - Provider-level execution evidence: `searchEvidence: "url_citation"`, `searchUsed: true`
+      - Final answer: returned successfully
+      - Sources returned: 3
+        - Source 1: Microsoft Azure Blog — FabCon and SQLCon 2026
+        - Source 2: James Serra's Blog — Announcements from the Microsoft Fabric Community Conference — Barcelona 2026
+        - Source 3: releases.fru.dev — Table discovery in OneLake Catalog search
+    - Freshness Verification: PASS
+      - Current test date: 2026-10-10
+      - Search returned current 2026 material
+      - Newest source date reported: 2026-10-06
+      - Answer explicitly stated newest publication date found, noted lack of newer evidence in that search, and qualified conference summary as partial due to search limits
+      - Current-year retrieval: PASS
+      - Truthful freshness qualification: PASS
+      - Note: Does not claim exhaustive search coverage
+    - Latency Verification:
+      - Initial unhardened successful search: ~29930 ms (with one prior timeout at 30000 ms)
+      - Final hardened successful search: 15627 ms (observed reduction: ~14303 ms)
+      - Search latency remains dependent on external provider/tool behavior; no claim of permanent fixed latency or guaranteed sub-16s SLA
+  - NORMAL ASK JARVIS ISOLATION TEST: PASS
+    - Prompt: "What is 2 + 2? Answer with only the number."
+    - Response: "4"
+    - Diagnostics: `provider: "openrouter"`, `model: "deepseek/deepseek-v4-flash-0731"`, `providerDurationMs: 1782 ms`, `serverAiDurationMs: 1783 ms`
+    - No search metadata, no search source list, zero search tools executed
+    - Normal production AI remains completely isolated from explicit web search
+  - BOUNDARY VERIFICATION:
+    - Normal `/api/ai` changed: NO
+    - Normal `/api/ai/stream` changed: NO
+    - STT changed: NO
+    - TTS changed: NO
+    - Voice Turn changed: NO
+    - ConversationSession changed: NO
+    - ConversationStore changed: NO
+    - Persistent memory format changed: NO
+    - Search written to conversation memory: NO
+    - Automatic search routing added: NO
+    - Voice search added: NO
+    - Browser automation added: NO
+    - Playwright search added: NO
+    - Page fetching added: NO
+    - Fallback search engine added: NO
+    - Second search engine added: NO
+    - AI model changed: NO
+- Prior bricks verified:
+  - Brick 18 STT latency & quality instrumentation: VERIFIED
 
 Status: BRICK-018 VERIFIED (Exit Code: 0)
 - Automated test & sanity verification: 404 tests across 27 suites passed offline (Exit Code: 0).

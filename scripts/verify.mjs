@@ -50,6 +50,8 @@ const REQUIRED_FILES = [
   'src/providers/textToSpeechBase.js',
   'src/providers/openRouterTTS.js',
   'src/providers/openRouterText.js',
+  'src/providers/searchBase.js',
+  'src/providers/openRouterSearch.js',
   'src/config/index.js',
   'src/utils/logger.js',
   'scripts/verify.mjs',
@@ -62,6 +64,7 @@ const REQUIRED_FILES = [
   'tests/unit/openRouterSTT.test.js',
   'tests/unit/openRouterTTS.test.js',
   'tests/unit/openRouterText.test.js',
+  'tests/unit/openRouterSearch.test.js',
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
   'tests/unit/voiceTurn.test.js',
@@ -76,7 +79,8 @@ const REQUIRED_FILES = [
   'tests/integration/ttsEndpoint.test.js',
   'tests/integration/voiceAiIntegration.test.js',
   'tests/integration/voiceTurnSequence.test.js',
-  'tests/integration/aiLatencyInstrumentation.test.js'
+  'tests/integration/aiLatencyInstrumentation.test.js',
+  'tests/integration/searchEndpoint.test.js'
 ];
 
 const REQUIRED_DIRS = [
@@ -280,6 +284,21 @@ check('TTS Provider Module Sanity Check', async () => {
   }
   if (typeof provider.synthesize !== 'function') {
     throw new Error('TTS Provider must implement synthesize() method');
+  }
+});
+
+check('OpenRouter Search Provider Module Sanity Check', async () => {
+  const { SearchProvider } = await import('../src/providers/searchBase.js');
+  const { OpenRouterSearchProvider } = await import('../src/providers/openRouterSearch.js');
+  const provider = new OpenRouterSearchProvider({
+    apiKey: 'mock-key',
+    model: 'deepseek/deepseek-v4-flash-0731'
+  });
+  if (!(provider instanceof SearchProvider)) {
+    throw new Error('OpenRouterSearchProvider must inherit from SearchProvider');
+  }
+  if (typeof provider.search !== 'function') {
+    throw new Error('Search Provider must implement search() method');
   }
 });
 

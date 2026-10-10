@@ -55,3 +55,6 @@ Status: VERIFIED
 BRICK-018 — STT Latency & Quality Instrumentation
 Status: VERIFIED
 
+BRICK-019 — Reliable Internet Search v1 (Explicit Web Search via OpenRouter)
+Status: VERIFIED
+

@@ -157,11 +157,20 @@
         <button type="submit" id="send-btn" class="secondary">Deterministic Test</button>
         <button type="button" id="ask-ai-btn">Ask AI</button>
         <button type="button" id="ask-ai-stream-btn">Ask AI — Stream</button>
+        <button type="button" id="search-web-btn" class="secondary">Search Web</button>
         <button type="button" id="clear-conv-btn" class="secondary">Clear Conversation</button>
       </div>
     </form>
     <div id="response-area" class="response-area">Ready for input</div>
     <div id="status-indicator" class="status-indicator">Status: Ready</div>
+
+    <!-- Brick 19 Web Search Display Section -->
+    <div id="search-section" class="mic-section" style="display: none;">
+      <div id="search-status" class="mic-status">Web Search: Idle</div>
+      <div id="search-meta" class="mic-meta" style="display: none;"></div>
+      <div id="search-response" class="response-area" style="display: none;"></div>
+      <div id="search-sources" class="mic-meta" style="display: none;"></div>
+    </div>
 
     <!-- Brick 9 Microphone Capture Section, Brick 10 Speech-to-Text, Brick 11 Voice AI, Brick 12 TTS & Brick 13 Voice Turn -->
     <div id="mic-section" class="mic-section">
@@ -195,9 +204,16 @@
     const sendBtn = document.getElementById('send-btn');
     const askAiBtn = document.getElementById('ask-ai-btn');
     const askAiStreamBtn = document.getElementById('ask-ai-stream-btn');
+    const searchWebBtn = document.getElementById('search-web-btn');
     const clearConvBtn = document.getElementById('clear-conv-btn');
     const responseArea = document.getElementById('response-area');
     const statusIndicator = document.getElementById('status-indicator');
+
+    const searchSection = document.getElementById('search-section');
+    const searchStatus = document.getElementById('search-status');
+    const searchMeta = document.getElementById('search-meta');
+    const searchResponse = document.getElementById('search-response');
+    const searchSources = document.getElementById('search-sources');
 
     const startMicBtn = document.getElementById('start-mic-btn');
     const stopMicBtn = document.getElementById('stop-mic-btn');
@@ -229,6 +245,7 @@
       sendBtn.disabled = busy;
       askAiBtn.disabled = busy;
       askAiStreamBtn.disabled = busy;
+      if (searchWebBtn) searchWebBtn.disabled = busy;
       clearConvBtn.disabled = busy;
       if (runVoiceTurnBtn) {
         runVoiceTurnBtn.disabled = busy || voiceTurnRunner.isBusy || !currentCapturedAudio || !currentCapturedAudio.blob;
@@ -438,6 +455,21 @@
           if (sttDiag) {
             sttDiag.style.display = 'none';
           }
+          if (searchSection) {
+            searchSection.style.display = 'none';
+          }
+          if (searchStatus) {
+            searchStatus.style.display = 'none';
+          }
+          if (searchMeta) {
+            searchMeta.style.display = 'none';
+          }
+          if (searchResponse) {
+            searchResponse.style.display = 'none';
+          }
+          if (searchSources) {
+            searchSources.style.display = 'none';
+          }
         } else {
           responseArea.textContent = 'Error: ' + (data.error || 'Failed to clear conversation');
           responseArea.classList.add('error');
@@ -452,6 +484,131 @@
         input.focus();
       }
     });
+
+    // Explicit Web Search handler (Brick 19)
+    if (searchWebBtn) {
+      searchWebBtn.addEventListener('click', async () => {
+        const rawText = input.value;
+        if (!rawText || !rawText.trim()) {
+          responseArea.textContent = 'Error: Please enter a query to search';
+          responseArea.classList.add('error');
+          statusIndicator.textContent = 'Status: Error';
+          return;
+        }
+
+        setBusy(true, 'Status: Searching web...');
+        if (searchSection) searchSection.style.display = 'block';
+        if (searchStatus) {
+          searchStatus.textContent = 'Web Search: Searching...';
+          searchStatus.className = 'mic-status';
+          searchStatus.style.display = 'block';
+        }
+        if (searchMeta) searchMeta.style.display = 'none';
+        if (searchResponse) searchResponse.style.display = 'none';
+        if (searchSources) searchSources.style.display = 'none';
+
+        try {
+          const res = await fetch('/api/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: rawText.trim() })
+          });
+
+          const data = await res.json().catch(() => ({}));
+
+          if (res.ok && data.success) {
+            let searchStatusText;
+            let searchesCountText;
+
+            if (data.searchUsed) {
+              if (typeof data.searchRequests === 'number') {
+                searchStatusText = 'Web Search: Complete';
+                searchesCountText = `Searches: ${data.searchRequests}`;
+              } else {
+                searchStatusText = 'Web Search: Executed';
+                searchesCountText = 'Searches: count unavailable';
+              }
+            } else {
+              searchStatusText = 'Web Search: Not Executed';
+              searchesCountText = typeof data.searchRequests === 'number'
+                ? `Searches: ${data.searchRequests}`
+                : 'Searches: none';
+            }
+
+            if (data.freshnessStatus && data.freshnessStatus !== 'unknown') {
+              searchesCountText += ` | Freshness: ${data.freshnessStatus}`;
+              if (data.newestSourceDate) {
+                searchesCountText += ` (${data.newestSourceDate})`;
+              }
+            }
+
+            if (searchStatus) {
+              searchStatus.textContent = searchStatusText;
+              searchStatus.className = data.searchUsed ? 'mic-status captured' : 'mic-status';
+              searchStatus.style.display = 'block';
+            }
+
+            if (searchMeta) {
+              searchMeta.textContent = searchesCountText;
+              searchMeta.style.display = 'block';
+            }
+
+            if (searchResponse) {
+              searchResponse.textContent = data.response;
+              searchResponse.classList.remove('error');
+              searchResponse.style.display = 'block';
+            }
+
+            let sourcesFormatted = '';
+            if (Array.isArray(data.sources) && data.sources.length > 0) {
+              sourcesFormatted = 'Sources:\n' + data.sources.map((s, i) => {
+                const titlePart = s.title ? `${s.title} — ` : '';
+                const datePart = s.publishedDate ? ` [${s.publishedDate}]` : '';
+                return `${i + 1}. ${titlePart}${s.url}${datePart}`;
+              }).join('\n');
+
+              if (searchSources) {
+                searchSources.textContent = sourcesFormatted;
+                searchSources.style.display = 'block';
+              }
+            } else {
+              if (searchSources) searchSources.style.display = 'none';
+            }
+
+            let fullOutput = `${searchStatusText}\n${searchesCountText}\n\nAnswer:\n${data.response}`;
+            if (sourcesFormatted) {
+              fullOutput += `\n\n${sourcesFormatted}`;
+            }
+            responseArea.textContent = fullOutput;
+            responseArea.classList.remove('error');
+            const searchDurationMs = data.timing?.serverSearchDurationMs ?? data.serverSearchDurationMs ?? 0;
+            statusIndicator.textContent = `Status: Ready | Search: ${searchDurationMs} ms`;
+          } else {
+            const errorMsg = data.error || 'Failed to perform web search';
+            if (searchStatus) {
+              searchStatus.textContent = 'Web Search: Error';
+              searchStatus.className = 'mic-status error';
+              searchStatus.style.display = 'block';
+            }
+            responseArea.textContent = 'Error: ' + errorMsg;
+            responseArea.classList.add('error');
+            statusIndicator.textContent = 'Status: Error';
+          }
+        } catch (err) {
+          if (searchStatus) {
+            searchStatus.textContent = 'Web Search: Error';
+            searchStatus.className = 'mic-status error';
+            searchStatus.style.display = 'block';
+          }
+          responseArea.textContent = 'Error: ' + err.message;
+          responseArea.classList.add('error');
+          statusIndicator.textContent = 'Status: Error';
+        } finally {
+          setBusy(false);
+          input.focus();
+        }
+      });
+    }
 
     // Microphone capture handlers (Brick 9), STT handlers (Brick 10) & Ask JARVIS (Brick 11)
     startMicBtn.addEventListener('click', async () => {

@@ -13,6 +13,7 @@ import { CheaperInferenceProvider } from '../providers/cheaperInference.js';
 import { OpenRouterTextProvider } from '../providers/openRouterText.js';
 import { OpenRouterSpeechToTextProvider } from '../providers/openRouterSTT.js';
 import { OpenRouterTextToSpeechProvider } from '../providers/openRouterTTS.js';
+import { OpenRouterSearchProvider, isFreshnessSensitiveQuery } from '../providers/openRouterSearch.js';
 import { ConversationSession } from '../core/conversationSession.js';
 import { ConversationStore } from '../core/conversationStore.js';
 
@@ -30,6 +31,7 @@ const DEFAULT_PORT = 8080;
  * @param {import('../providers/base.js').AIProvider} [options.provider]
  * @param {import('../providers/openRouterSTT.js').OpenRouterSpeechToTextProvider} [options.sttProvider]
  * @param {import('../providers/openRouterTTS.js').OpenRouterTextToSpeechProvider} [options.ttsProvider]
+ * @param {import('../providers/openRouterSearch.js').OpenRouterSearchProvider} [options.searchProvider]
  * @param {import('../core/conversationSession.js').ConversationSession} [options.session]
  * @param {import('../core/conversationStore.js').ConversationStore} [options.store]
  * @returns {import('node:http').RequestListener}
@@ -495,6 +497,196 @@ export function createRequestListener(options = {}) {
             error: safeError,
             timing: { serverAiDurationMs },
             serverAiDurationMs
+          }));
+        }
+      });
+
+      return;
+    }
+
+    // Route: /api/search (Brick 19 explicit web search endpoint)
+    if (url.pathname === '/api/search') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      const requestStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+
+      const getServerSearchDurationMs = () => {
+        const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+          ? performance.now()
+          : Date.now();
+        return Math.max(0, Math.round(now - requestStartTime));
+      };
+
+      let body = '';
+      let isTooLarge = false;
+
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 1e6) {
+          isTooLarge = true;
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Payload Too Large' }));
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        if (isTooLarge) return;
+
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid JSON body' }));
+          return;
+        }
+
+        const prompt = parsedBody.prompt ?? parsedBody.input;
+        if (typeof prompt !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Prompt must be a string' }));
+          return;
+        }
+
+        const trimmedPrompt = prompt.trim();
+        if (trimmedPrompt.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Prompt cannot be empty' }));
+          return;
+        }
+
+        try {
+          const provider = options.searchProvider || new OpenRouterSearchProvider();
+
+          const configCheck = provider.validateConfig ? provider.validateConfig() : { valid: true };
+          if (!configCheck.valid) {
+            const serverSearchDurationMs = getServerSearchDurationMs();
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: false,
+              error: `Configuration error: ${configCheck.error}`,
+              searchUsed: false,
+              searchRequests: null,
+              searchEvidence: 'none',
+              sources: [],
+              currentDate: new Date().toISOString().slice(0, 10),
+              freshnessSensitive: isFreshnessSensitiveQuery(trimmedPrompt),
+              newestSourceDate: null,
+              freshnessStatus: 'unknown',
+              timing: {
+                serverSearchDurationMs,
+                providerSearchDurationMs: 0,
+                providerDurationMs: 0
+              },
+              serverSearchDurationMs,
+              providerSearchDurationMs: 0
+            }));
+            return;
+          }
+
+          const result = await provider.search(trimmedPrompt);
+
+          const serverSearchDurationMs = getServerSearchDurationMs();
+          const providerSearchDurationMs = typeof result.providerSearchDurationMs === 'number'
+            ? result.providerSearchDurationMs
+            : (typeof result.providerDurationMs === 'number' ? result.providerDurationMs : 0);
+
+          const timing = {
+            providerSearchDurationMs,
+            serverSearchDurationMs,
+            providerDurationMs: providerSearchDurationMs
+          };
+
+          if (result.success) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: true,
+              response: result.response || result.text,
+              provider: result.provider || 'openrouter',
+              model: result.model || 'deepseek/deepseek-v4-flash-0731',
+              searchUsed: Boolean(result.searchUsed),
+              searchRequests: (typeof result.searchRequests === 'number' && Number.isFinite(result.searchRequests)) ? result.searchRequests : null,
+              searchEvidence: result.searchEvidence || 'none',
+              sources: Array.isArray(result.sources) ? result.sources : [],
+              currentDate: result.currentDate || new Date().toISOString().slice(0, 10),
+              freshnessSensitive: Boolean(result.freshnessSensitive),
+              newestSourceDate: result.newestSourceDate ?? null,
+              freshnessStatus: result.freshnessStatus || 'unknown',
+              providerFinishReason: result.providerFinishReason ?? null,
+              hasMessage: Boolean(result.hasMessage),
+              hasMessageContent: Boolean(result.hasMessageContent),
+              contentType: result.contentType || 'string',
+              hasToolCalls: Boolean(result.hasToolCalls),
+              hasReasoning: Boolean(result.hasReasoning),
+              annotationCount: typeof result.annotationCount === 'number' ? result.annotationCount : 0,
+              timing,
+              providerSearchDurationMs,
+              serverSearchDurationMs
+            }));
+          } else {
+            let safeError = result.error || 'Search request failed';
+            const apiKeyToRedact = provider.apiKey || process.env.OPENROUTER_API_KEY;
+            if (apiKeyToRedact) {
+              safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
+            }
+
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: false,
+              error: safeError,
+              searchUsed: Boolean(result.searchUsed),
+              searchRequests: (typeof result.searchRequests === 'number' && Number.isFinite(result.searchRequests)) ? result.searchRequests : null,
+              searchEvidence: result.searchEvidence || 'none',
+              sources: Array.isArray(result.sources) ? result.sources : [],
+              currentDate: result.currentDate || new Date().toISOString().slice(0, 10),
+              freshnessSensitive: typeof result.freshnessSensitive === 'boolean' ? result.freshnessSensitive : isFreshnessSensitiveQuery(trimmedPrompt),
+              newestSourceDate: result.newestSourceDate ?? null,
+              freshnessStatus: result.freshnessStatus || 'unknown',
+              providerFinishReason: result.providerFinishReason ?? null,
+              hasMessage: Boolean(result.hasMessage),
+              hasMessageContent: Boolean(result.hasMessageContent),
+              contentType: result.contentType || 'none',
+              hasToolCalls: Boolean(result.hasToolCalls),
+              hasReasoning: Boolean(result.hasReasoning),
+              annotationCount: typeof result.annotationCount === 'number' ? result.annotationCount : 0,
+              timing,
+              serverSearchDurationMs,
+              providerSearchDurationMs
+            }));
+          }
+        } catch (err) {
+          const serverSearchDurationMs = getServerSearchDurationMs();
+          let safeError = err.message || 'Internal server error';
+          const apiKeyToRedact = (options.searchProvider && options.searchProvider.apiKey) || process.env.OPENROUTER_API_KEY;
+          if (apiKeyToRedact) {
+            safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
+          }
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: safeError,
+            searchUsed: false,
+            searchRequests: null,
+            searchEvidence: 'none',
+            sources: [],
+            currentDate: new Date().toISOString().slice(0, 10),
+            freshnessSensitive: typeof prompt === 'string' ? isFreshnessSensitiveQuery(prompt) : false,
+            newestSourceDate: null,
+            freshnessStatus: 'unknown',
+            timing: {
+              serverSearchDurationMs,
+              providerSearchDurationMs: 0,
+              providerDurationMs: 0
+            },
+            serverSearchDurationMs,
+            providerSearchDurationMs: 0
           }));
         }
       });

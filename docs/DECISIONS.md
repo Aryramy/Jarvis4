@@ -273,3 +273,49 @@
     - Full voice turn verified end-to-end (Test F: 8994 ms total, STT Client 5682 ms, AI 1575 ms -> "Tokyo.", TTS 1453 ms).
     - Sequential turn without refresh verified (Test G: 7058 ms total, STT Client 4317 ms, AI 1867 ms -> "Berlin.", TTS 760 ms) with fresh metadata and zero stale state leakage.
   - **Status**: BRICK-018 VERIFIED.
+
+## ADR-0024: Reliable Internet Search v1 — Explicit Web Search via OpenRouter
+- **Status**: Accepted
+- **Context**: JARVIS needs a reliable way to search the live internet for up-to-date factual queries. However, web search must not pollute normal text generation, streaming, voice loops, or conversation memory. Automatic routing or tool invocation on ordinary queries is prohibited in this foundation stage.
+- **Decision**:
+  1. Dedicated Web Search Provider: Implement `OpenRouterSearchProvider` (`src/providers/openRouterSearch.js`) extending `SearchProvider` (`src/providers/searchBase.js`).
+  2. OpenRouter Server Tool: Connect to `POST https://openrouter.ai/api/v1/chat/completions` with the `openrouter:web_search` server tool, pinned search engine `exa`, `max_results: 5`, `max_total_results: 5`, and `max_characters: 2000`. Target text model remains `deepseek/deepseek-v4-flash-0731`.
+  3. Narrow Search System Instruction: For `/api/search` only, provide the narrow instruction: `"You have access to live web search. For this request, use web search before answering. Base current factual claims on the returned search results. Do not invent sources or URLs. Clearly distinguish uncertainty when the search evidence is insufficient."` Global JARVIS prompt and normal `/api/ai` are completely untouched.
+  4. Search-Usage Proof & Instrumentation: Inspect `usage.server_tool_use.web_search_requests`. Expose `searchUsed: true` only when `searchRequests >= 1`. If `searchRequests === 0`, report `searchUsed: false`.
+  5. URL Citation Extraction & Integrity: Safely extract available `url`, `title`, and `content` from `annotations` or `citations` in the OpenRouter response. Safe URL deduplication. No URL hallucination or extraction from narrative text. If no annotations/citations are present, return empty `sources: []`.
+  6. Dedicated Server Route: Expose `POST /api/search` in `src/web/server.js`, receiving `{ prompt }`, returning `{ success, response, provider: "openrouter", model, searchUsed, searchRequests, sources, timing: { providerSearchDurationMs, serverSearchDurationMs } }`.
+  7. Strict Statelessness: Web search does NOT participate in `ConversationSession` or `ConversationStore`.
+  8. Invariant Preservation: Normal `/api/ai` and `/api/ai/stream` do NOT send tools or search options. STT, TTS, and Voice Turn remain completely unchanged.
+  9. Minimal Explicit UI: Add `#search-web-btn` near text input, and `#search-section` displaying search status, search count, answer, and sources list.
+  10. 100% Mocked Offline Tests: 29 new tests across `tests/unit/openRouterSearch.test.js` and `tests/integration/searchEndpoint.test.js`.
+- **Consequences**: Gives JARVIS a verified, reliable, grounded web search capability through OpenRouter and Exa with full source provenance, strictly isolated from production conversational memory and voice turn pipelines.
+
+## ADR-0025: Brick 19 Search Hardening — Single-Search, Fresh-Fact, Concise-Answer Optimization
+- **Status**: Accepted
+- **Context**: Live testing of Brick 19 revealed: (1) avoidable multi-round search latency pushing request times close to or beyond the 30-second timeout, (2) missing usage count metadata despite 5 real provider citation sources, and (3) a "latest" query executed in October 2026 returning older 2025 results described as "latest".
+- **Decision**:
+  1. Search Agent Budget: Enforce strict `max_tool_calls: 1` in the request body to prevent repeated multi-search agent loops.
+  2. Reduced Retrieval Payload: Lower Exa parameters to `max_results: 3`, `max_total_results: 3`, and `max_characters: 1200` without `search_context_size`.
+  3. Concise Answer Limit: Constrain `/api/search` output tokens with `max_tokens: 800` and concise formatting guidelines (3-5 bullets, brief summary, max 3 primary sources).
+  4. Dynamic Current Date Awareness: Generate runtime UTC date (`YYYY-MM-DD`) and include it in `/api/search` system prompt.
+  5. Freshness Honesty & Metadata: Require the model not to call older results 'latest' and state newest publication date found. Extract `publishedDate` from provider metadata. Expose `currentDate`, `freshnessSensitive`, `newestSourceDate`, and `freshnessStatus` (`"current"`, `"older-results-only"`, `"unknown"`).
+  6. Direct Provider Evidence: `searchUsed = true` when either `usage.server_tool_use.web_search_requests >= 1` or real `url_citation` annotations exist. Missing usage count defaults to `null` (never `0`). Expose safe diagnostic `searchEvidence`.
+  7. Status & Boundaries: Retain `BRICK-019 AWAITING LIVE VERIFICATION`. Normal `/api/ai`, streaming, STT, TTS, and Voice Turn remain completely untouched.
+- **Consequences**: Dramatically reduces search latency, prevents tool loops, provides date-grounded answers for freshness-sensitive queries, and preserves complete provider evidence provenance.
+
+## ADR-0026: Brick 19 Live Search Final Content Fix & Diagnostic Hardening
+- **Status**: Accepted
+- **Context**: In live testing following ADR-0025, OpenRouter returned "Malformed response from provider: missing message content". Top-level `max_tool_calls: 1` and a tight `max_tokens: 800` limit truncated model execution before it could produce a final synthesized message, leaving the response content empty.
+- **Decision**:
+  1. Search-Specific Tool Limit: Remove top-level `max_tool_calls: 1`. Configure the tool parameter `max_uses: 1` directly inside `openrouter:web_search` so OpenRouter limits search executions while allowing the model to generate its final message.
+  2. Pin Exa Fast Mode: Add `mode: "fast"` to `openrouter:web_search` parameters while retaining `engine: "exa"` and limits `max_results: 3`, `max_total_results: 3`, `max_characters: 1200`.
+  3. Expanded Output Budget: Increase `/api/search` maximum tokens to `max_tokens: 1500` (does not affect normal `/api/ai`).
+  4. Robust Final Content Extraction: Support plain string and structured text content blocks (`extractMessageText`).
+  5. Controlled Error Diagnostics: Instead of a generic missing content error, inspect `finish_reason` and unresolved tool calls:
+     - `finish_reason === "length"` → `SEARCH_OUTPUT_TRUNCATED`
+     - unresolved `tool_calls` → `SEARCH_TOOL_LOOP_INCOMPLETE`
+     - no usable content → `SEARCH_PROVIDER_NO_FINAL_CONTENT`
+  6. Diagnostics & Evidence Preservation: Expose safe diagnostics (`providerFinishReason`, `hasMessage`, `hasMessageContent`, `contentType`, `hasToolCalls`, `hasReasoning`, `annotationCount`) without leaking secrets or raw responses. Preserve `searchUsed`, `searchRequests`, `searchEvidence`, and `sources` on controlled error. Never fabricate an answer from citations alone.
+  7. Status: BRICK-019 VERIFIED.
+- **Consequences**: Ensures that the model has sufficient token headroom and tool execution clearance to synthesize a grounded answer, provides definitive diagnostic classification if content is missing, and preserves provider evidence integrity. Human live verification confirmed that explicit Search Web v1 completed in 15627 ms (down from ~29930 ms) with 3 current 2026 sources, provider `url_citation` execution evidence, truthful freshness qualification, and complete isolation from production text AI.
+
