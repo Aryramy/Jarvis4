@@ -98,12 +98,73 @@ export function validatePageQaQuestion(question, maxChars = 4000) {
 }
 
 /**
+ * Generates an answer strictly grounded in already-extracted webpage content.
+ * Reused by executePageQa (Brick 22) and executeResearchOne (Brick 23).
+ *
+ * @param {Object} params
+ * @param {Object} params.page - Extracted page object ({ text, truncated, title, requestedUrl, finalUrl, ... })
+ * @param {string} params.question - Valid question string
+ * @param {Object} [params.provider] - AI provider instance
+ * @param {Object} [params.options] - Optional overrides (maxOutputTokens, fetchFn, aiProvider, textProvider)
+ * @returns {Promise<{
+ *   success: boolean,
+ *   answer: string,
+ *   grounded: boolean,
+ *   model: string,
+ *   providerQaDurationMs: number,
+ *   pageTruncated: boolean
+ * }>}
+ */
+export async function answerFromPageContent({ page, question, provider, options = {} }) {
+  if (!page || typeof page.text !== 'string' || page.text.trim().length === 0) {
+    throw new PageQaError('NO_READABLE_CONTENT', 'No readable text content found on webpage', {
+      requestedUrl: page?.requestedUrl,
+      finalUrl: page?.finalUrl
+    });
+  }
+
+  // Build delimited messages
+  const messages = buildPageQaMessages({
+    pageText: page.text,
+    question,
+    truncated: Boolean(page.truncated)
+  });
+
+  // Invoke OpenRouter text provider
+  const aiProvider = provider || options.aiProvider || options.textProvider || new OpenRouterTextProvider({
+    fetchFn: options.fetchFn
+  });
+
+  const maxOutputTokens = options.maxOutputTokens ?? config.pageQa?.maxOutputTokens ?? 1000;
+  const aiResult = await aiProvider.generateMessages(messages, {
+    maxTokens: maxOutputTokens
+  });
+
+  if (!aiResult || !aiResult.success) {
+    throw new PageQaError('PROVIDER_ERROR', aiResult?.error || 'Page Q&A AI generation failed', {
+      providerDurationMs: aiResult?.providerDurationMs || 0
+    });
+  }
+
+  const model = aiResult.model || config.openRouter?.textModel || 'deepseek/deepseek-v4-flash-0731';
+  const providerQaDurationMs = aiResult.providerDurationMs ?? 0;
+
+  return {
+    success: true,
+    answer: aiResult.text,
+    grounded: true,
+    model,
+    providerQaDurationMs,
+    pageTruncated: Boolean(page.truncated)
+  };
+}
+
+/**
  * Executes a full grounded Page Q&A flow:
  * 1. Validates URL and question
  * 2. Fetches and extracts webpage content via verified Brick-21 reader
- * 3. Delimits untrusted webpage data and constructs isolated prompt
- * 4. Generates single grounded response via OpenRouter text model with max_tokens budget
- * 5. Returns structured answer and grounding metadata
+ * 3. Answers question using extracted page content via answerFromPageContent
+ * 4. Returns structured answer and grounding metadata
  *
  * @param {Object} params
  * @param {string} params.url
@@ -153,51 +214,29 @@ export async function executePageQa({ url, question, options = {} }) {
     throw new PageQaError('FETCH_FAILED', err.message || 'Page read failed');
   }
 
-  if (!readResult || typeof readResult.text !== 'string' || readResult.text.trim().length === 0) {
-    throw new PageQaError('NO_READABLE_CONTENT', 'No readable text content found on webpage', {
-      requestedUrl: cleanUrl,
-      finalUrl: readResult?.finalUrl || cleanUrl
-    });
-  }
-
-  // 3. Build delimited messages
-  const messages = buildPageQaMessages({
-    pageText: readResult.text,
+  // 3. Answer from already-extracted page content
+  const qaResult = await answerFromPageContent({
+    page: readResult,
     question: cleanQuestion,
-    truncated: Boolean(readResult.truncated)
+    provider: options.aiProvider || options.textProvider,
+    options
   });
 
-  // 4. Invoke OpenRouter text provider
-  const aiProvider = options.aiProvider || options.textProvider || new OpenRouterTextProvider({
-    fetchFn: options.fetchFn
-  });
-
-  const maxOutputTokens = options.maxOutputTokens ?? config.pageQa?.maxOutputTokens ?? 1000;
-  const aiResult = await aiProvider.generateMessages(messages, {
-    maxTokens: maxOutputTokens
-  });
-
-  if (!aiResult || !aiResult.success) {
-    throw new PageQaError('PROVIDER_ERROR', aiResult?.error || 'Page Q&A AI generation failed', {
-      providerDurationMs: aiResult?.providerDurationMs || 0
-    });
-  }
-
-  // 5. Measure server duration and build response
+  // 4. Measure server duration and build response
   const requestEndTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
     ? performance.now()
     : Date.now();
   const serverPageQaDurationMs = Math.max(0.001, Number((requestEndTime - requestStartTime).toFixed(3)));
 
   const pageReadDurationMs = readResult.serverReadDurationMs ?? Math.max(0.001, Number(((readResult.fetchDurationMs || 0) + (readResult.extractionDurationMs || 0)).toFixed(3)));
-  const providerQaDurationMs = aiResult.providerDurationMs ?? 0;
+  const providerQaDurationMs = qaResult.providerQaDurationMs;
 
   return {
     success: true,
-    answer: aiResult.text,
+    answer: qaResult.answer,
     grounded: true,
     groundingSourceCount: 1,
-    pageTruncated: Boolean(readResult.truncated),
+    pageTruncated: qaResult.pageTruncated,
     requestedUrl: readResult.requestedUrl || cleanUrl,
     finalUrl: readResult.finalUrl || cleanUrl,
     title: readResult.title ?? null,
@@ -210,7 +249,7 @@ export async function executePageQa({ url, question, options = {} }) {
       truncated: Boolean(readResult.truncated)
     },
     provider: 'openrouter',
-    model: aiResult.model || config.openRouter?.textModel || 'deepseek/deepseek-v4-flash-0731',
+    model: qaResult.model,
     pageReadDurationMs,
     providerQaDurationMs,
     serverPageQaDurationMs

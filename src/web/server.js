@@ -20,6 +20,7 @@ import { decideSearchRoute } from '../routing/searchDecision.js';
 import { readWebPage } from '../webpage/pageReader.js';
 import { PageReaderError } from '../webpage/urlSafety.js';
 import { executePageQa, PageQaError } from '../webpage/pageQa.js';
+import { executeResearchOne, ResearchOneError } from '../research/researchOne.js';
 
 const __dirname = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const HTML_FILE_PATH = join(__dirname, 'index.html');
@@ -1089,6 +1090,134 @@ export function createRequestListener(options = {}) {
             httpStatus: err.details?.httpStatus || null,
             contentType: err.details?.contentType || null,
             serverPageQaDurationMs
+          }));
+        }
+      });
+
+      return;
+    }
+
+    // Route: /api/research-one (Brick 23 Grounded Web Research v1)
+    if (url.pathname === '/api/research-one') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      const requestStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+
+      let body = '';
+      let isTooLarge = false;
+
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 1e6) {
+          isTooLarge = true;
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Payload Too Large' }));
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        if (isTooLarge) return;
+
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid JSON body' }));
+          return;
+        }
+
+        const inputQuestion = parsedBody.question ?? parsedBody.prompt;
+
+        if (typeof inputQuestion !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_QUESTION',
+            code: 'INVALID_QUESTION',
+            message: 'Question must be a non-empty string',
+            stage: 'validation',
+            serverResearchDurationMs: 0
+          }));
+          return;
+        }
+
+        const trimmedQuestion = inputQuestion.trim();
+        if (trimmedQuestion.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_QUESTION',
+            code: 'INVALID_QUESTION',
+            message: 'Question cannot be empty',
+            stage: 'validation',
+            serverResearchDurationMs: 0
+          }));
+          return;
+        }
+
+        try {
+          const runner = options.researchOneFn || ((params) => executeResearchOne({
+            question: params.question,
+            options: {
+              searchProvider: options.searchProvider,
+              pageReaderFn: options.pageReaderFn,
+              aiProvider: options.provider,
+              textProvider: options.provider,
+              fetchFn: options.fetchFn,
+              dnsLookup: options.dnsLookup
+            }
+          }));
+
+          const result = await runner({
+            question: trimmedQuestion
+          });
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const serverEndTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now();
+          const serverResearchDurationMs = Math.max(0.001, Number((serverEndTime - requestStartTime).toFixed(3)));
+
+          const errorCode = err.code || 'RESEARCH_FAILED';
+          let safeMessage = err.message || 'Research request failed';
+          const apiKeyToRedact = process.env.OPENROUTER_API_KEY;
+          if (apiKeyToRedact) {
+            safeMessage = safeMessage.replaceAll(apiKeyToRedact, '[REDACTED]');
+          }
+          const stage = err.stage || err.details?.stage || 'unknown';
+
+          let statusCode = 502;
+          if (['INVALID_QUESTION', 'QUESTION_TOO_LONG', 'INVALID_URL', 'UNSUPPORTED_PROTOCOL', 'URL_CREDENTIALS_NOT_ALLOWED', 'PORT_NOT_ALLOWED', 'LOCAL_OR_PRIVATE_HOST_BLOCKED', 'DNS_RESOLUTION_FAILED'].includes(errorCode)) {
+            statusCode = 400;
+          } else if (errorCode === 'PAGE_TOO_LARGE') {
+            statusCode = 413;
+          } else if (errorCode === 'FETCH_TIMEOUT') {
+            statusCode = 504;
+          } else if (['UNSUPPORTED_CONTENT_TYPE', 'NO_READABLE_CONTENT', 'NO_USABLE_SEARCH_SOURCE', 'SEARCH_NOT_EXECUTED'].includes(errorCode)) {
+            statusCode = 422;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage,
+            stage,
+            searchDurationMs: err.details?.searchDurationMs ?? 0,
+            pageReadDurationMs: err.details?.pageReadDurationMs ?? 0,
+            providerQaDurationMs: err.details?.providerQaDurationMs ?? 0,
+            serverResearchDurationMs
           }));
         }
       });

@@ -1,11 +1,23 @@
 Project: JARVIS4
-Current Brick: 22
-Status: BRICK-022 VERIFIED
-Last Verified Brick: BRICK-022
-Current Feature: Grounded Web Page Q&A v1
+Current Brick: 23
+Status: BRICK-023 VERIFIED
+Last Verified Brick: BRICK-023
+Current Feature: Search → Read → Grounded Answer v1
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
+
+- Research One module (`executeResearchOne`, `selectResearchSource`, `ResearchOneError` in `src/research/researchOne.js`) implementing Search → Read → Grounded Answer v1 pipeline
+- Deterministic source selection walking provider citation results in authoritative order to pick the first valid HTTP/HTTPS URL with zero LLM, embeddings, or reranking
+- Explicit search verification requiring provider-level evidence (`searchUsed = true` via usage metrics or url_citation annotations) before attempting page read
+- Web research endpoint (`POST /api/research-one`) connecting search, single-source selection, safe single page read, and grounded AI answering in a strictly linear pipeline
+- Complete exclusion of search answer prose and search snippets from final grounding prompt; only extracted static content of the selected page is passed to the grounding model
+- Strict single-source and zero-fallback invariant: exactly one search request, one selected source, one page read, and one grounded AI response; failures stop pipeline immediately without falling back to source 2, source 3, another search, or normal AI
+- Grounded Page-QA extraction helper (`answerFromPageContent` in `src/webpage/pageQa.js`) reused by both `/api/page-qa` and `/api/research-one` without duplicate page fetching
+- Dedicated Grounded Web Research UI section (`#research-one-section`), input (`#research-question-input`), button (`#research-one-btn`), status (`#research-one-status`), metadata diagnostics (`#research-one-meta`), and answer display (`#research-one-answer`)
+- Safe text rendering using `.textContent` with zero HTML injection or innerHTML parsing
+- Strict statelessness: zero writes to `ConversationSession`, `ConversationStore`, or runtime persistence files
+- Zero live network requirement in offline test verification (`npm run verify`)
 
 - Zero-dependency Node.js ESM project foundation
 - Minimal reusable 4-level logger supporting DEBUG, INFO, WARN, ERROR
@@ -496,6 +508,31 @@ Status: BRICK-018 VERIFIED (Exit Code: 0)
   - Brick 20 automatic search decision v1 (deterministic local freshness routing): VERIFIED
   - Brick 21 Web Page Read v1: VERIFIED
   - Brick 22 Grounded Web Page Q&A v1: VERIFIED
+  - Brick 23 Search → Read → Grounded Answer v1: VERIFIED
+    - Pipeline: Question -> One Search (OpenRouter / Exa fast) -> Real Provider Citation Sources -> Deterministic Provider-Order Source Selection -> One Safe Page Read (GREEN-021) -> Grounded AI Answering (GREEN-022) -> Answer grounded strictly in selected page.
+    - Live Test A (Generic Research: "What is the Example Domain intended for?"): PASS
+      - Selected Source: RFC 2606 (https://datatracker.ietf.org/doc/html/rfc2606), index 0, sources found: 3.
+      - Timings: search 7861 ms, page read 701.581 ms, AI 1393 ms, total 10003.026 ms.
+      - Result: RFC 2606 was selected strictly because it was index 0 in provider citation order (no hardcoded domain bias, no LLM reranker). Grounded answer correctly stated RFC 2606 documentation intent.
+    - Live Test B (Current Information: "What are the latest Microsoft Fabric announcements?"): PASS
+      - Selected Source: Microsoft Azure Blog FabCon and SQLCon 2026 (https://azure.microsoft.com/en-us/blog/fabcon-and-sqlcon-2026-in-barcelona-building-the-data-foundation-for-microsoft-copilot-and-agents/), index 0, sources found: 3.
+      - Timings: search 10214 ms, page read 720.470 ms, AI 13947 ms, total 24882.781 ms.
+      - Result: Substantive page-grounded answer extracted key topics (Fabric IQ, agentic app creation in Power BI Desktop, Fabric data engineering agent, Real-Time Intelligence Copilot capabilities, BigQuery mirroring, Salesforce Data 360, etc.) from the blog post.
+    - Grounding contract verified: Search answer prose and snippets were NOT passed into grounding prompt.
+    - Limitations (13 items):
+      1. Only one search-result source is selected.
+      2. Source selection follows provider citation order.
+      3. The first selected source may fail to load.
+      4. No fallback to source 2 or source 3.
+      5. The selected page may not contain the answer.
+      6. No multi-source synthesis.
+      7. No PDF support.
+      8. No JavaScript-rendered-page support.
+      9. No authenticated pages.
+      10. No crawling.
+      11. No automatic Ask JARVIS integration yet.
+      12. No Voice Turn integration.
+      13. Search and AI latency remain externally variable.
 
 
 

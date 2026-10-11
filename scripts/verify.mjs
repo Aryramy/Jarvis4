@@ -58,6 +58,7 @@ const REQUIRED_FILES = [
   'src/webpage/htmlExtractor.js',
   'src/webpage/pageReader.js',
   'src/webpage/pageQa.js',
+  'src/research/researchOne.js',
   'src/config/index.js',
   'src/utils/logger.js',
   'scripts/verify.mjs',
@@ -76,6 +77,7 @@ const REQUIRED_FILES = [
   'tests/unit/htmlExtractor.test.js',
   'tests/unit/pageReader.test.js',
   'tests/unit/pageQa.test.js',
+  'tests/unit/researchOne.test.js',
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
   'tests/unit/voiceTurn.test.js',
@@ -95,6 +97,7 @@ const REQUIRED_FILES = [
   'tests/integration/autoEndpoint.test.js',
   'tests/integration/readPageEndpoint.test.js',
   'tests/integration/pageQaEndpoint.test.js',
+  'tests/integration/researchOneEndpoint.test.js',
   'tests/fixtures/html/article.html',
   'tests/fixtures/html/noisy.html',
   'tests/fixtures/html/unicode.html',
@@ -111,6 +114,7 @@ const REQUIRED_DIRS = [
   'src/providers',
   'src/routing',
   'src/webpage',
+  'src/research',
   'src/config',
   'src/utils',
   'tests/unit',
@@ -406,6 +410,17 @@ check('Webpage Page QA Module Sanity Check', async () => {
   }
   if (validatePageQaQuestion('  What is this?  ') !== 'What is this?') {
     throw new Error('validatePageQaQuestion failed trimming check');
+  }
+});
+
+check('Research One Module Sanity Check', async () => {
+  const { executeResearchOne, selectResearchSource, ResearchOneError } = await import('../src/research/researchOne.js');
+  if (typeof executeResearchOne !== 'function' || typeof selectResearchSource !== 'function' || typeof ResearchOneError !== 'function') {
+    throw new Error('researchOne module failed to export required functions or classes');
+  }
+  const selected = selectResearchSource([{ title: 'Doc', url: 'https://example.com/one' }]);
+  if (selected.index !== 0 || selected.url !== 'https://example.com/one') {
+    throw new Error('selectResearchSource sanity check failed');
   }
 });
 

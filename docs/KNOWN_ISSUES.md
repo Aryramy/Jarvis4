@@ -148,3 +148,21 @@ Currently tracked issues in JARVIS4:
     - **No Automatic Ask JARVIS Routing**: Ask JARVIS does not automatically detect URLs or call Page Q&A.
     - **Instruction-Based Grounding**: Grounding is enforced through isolated prompt/data separation and tested behavior; do not claim mathematical proof that an LLM can never violate an instruction.
     - **Stateless Isolation**: Neither webpage contents nor questions/answers are recorded in `ConversationSession`, `ConversationStore`, or runtime persistence.
+
+16. **Search → Read → Grounded Answer v1 Observations & Limitations (Brick 23 Verified)**:
+    - **Single Search & Single Source Only**: Exactly one search request and exactly one selected citation source are processed per workflow.
+    - **Deterministic Source Selection**: Source selection strictly follows provider result order, selecting the first valid HTTP/HTTPS citation URL. No LLM, embeddings, or keyword reranking is used.
+    - **First Selected Source May Fail**: The first selected source may fail to load (e.g., DNS error, private IP block, HTTP error, timeout, or page too large).
+    - **No Automatic Fallback**: If reading the selected source fails, the workflow immediately fails with a controlled error; it does NOT fall back to source 2, source 3, another search, or normal AI.
+    - **Selected Page May Not Contain the Answer**: If the selected page lacks the necessary information, the model states that the answer was not found in the selected webpage; no secondary search or fallback is attempted.
+    - **No Multi-Source Synthesis**: Does not merge or synthesize information from multiple search results.
+    - **Search Answer Not Used as Final Evidence**: Search answer prose and search snippets are never passed into the grounded QA prompt. Only extracted static content of the selected page grounds the final answer.
+    - **No PDF Reading**: PDFs returned in search citations are rejected with `UNSUPPORTED_CONTENT_TYPE`.
+    - **No JavaScript Rendering**: Dynamic SPAs rendered via client JavaScript are not executed.
+    - **No Authenticated Access**: Authenticated or paywalled sources cannot be accessed.
+    - **No Crawling or Link Traversal**: Does not crawl or follow links from the selected page.
+    - **No Automatic Ask JARVIS Routing**: `/api/auto` does not invoke `/api/research-one`.
+    - **No Voice Turn Integration**: Voice Turn, STT, and TTS are not connected to Research-One.
+    - **Latency Variability**: Search and AI latency remain externally variable (e.g. search 7.8s-10.2s, AI 1.4s-13.9s observed live); page reading stage was fast (~700ms-720ms).
+    - **Stateless Isolation**: Workflow is strictly stateless and does NOT write questions, answers, URLs, or page text to `ConversationSession`, `ConversationStore`, or runtime persistence.
+
