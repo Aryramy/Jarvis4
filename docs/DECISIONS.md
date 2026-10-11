@@ -351,4 +351,42 @@
   4. Eliminate divergent hardcoded keyword lists across routing and search layers.
 - **Consequences**: Guarantees consistent freshness semantics between router (`routeReason`) and search engine (`freshnessSensitive`) across all authorized languages without adding language detection or query translation.
 
+## ADR-0029: Web Page Read v1 with Strict SSRF, Redirect, and Size Boundaries
+- **Status**: Accepted (BRICK-021 VERIFIED)
+- **Context**: Grounded live internet awareness requires the ability to inspect the textual content of a single specific webpage. However, arbitrary fetching poses severe security risks (Server-Side Request Forgery / SSRF, intranet scanning, cloud metadata access), resource risks (unbounded payloads, slow loris timeouts, infinite redirect loops), and data corruption risks (leaking page text into AI conversation memory).
+- **Decision**:
+  1. **Modular Architecture**: Separate responsibilities cleanly across three modules in `src/webpage/`:
+     - `urlSafety.js`: URL parsing, protocol validation (http/https only), credentials blocking, port restrictions (80/443 only), hostname checks, and comprehensive IP/DNS SSRF validation.
+     - `htmlExtractor.js`: Cheerio-based static DOM parsing, noise stripping, container preference (`main` -> `article` -> `body`), Unicode preservation, whitespace normalization, and deterministic character truncation.
+     - `pageReader.js`: Coordinates safe GET fetching, manual redirect following with revalidation, streaming byte limit enforcement, and execution timing.
+  2. **Mandatory SSRF Protection**:
+     - Local hostnames (`localhost`, `*.local`, `*.internal`, `*.lan`, `*.home.arpa`) are immediately rejected.
+     - Before making network requests, all IPv4 (A) and IPv6 (AAAA) addresses are resolved via Node DNS.
+     - If ANY resolved IP is private or reserved (loopback `127.0.0.0/8`, `::1`; private `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`; link-local `169.254.0.0/16`, `fe80::/10`; carrier-grade NAT `100.64.0.0/10`; documentation; multicast; IPv4-mapped IPv6), the request is rejected with `LOCAL_OR_PRIVATE_HOST_BLOCKED`.
+     - DNS resolver dependency is injectable so unit tests run fully offline without live DNS queries.
+  3. **Strict Port Restriction**: Only standard web ports (HTTP 80, HTTPS 443, or omitted default port) are allowed. Explicit ports such as 22, 3000, 5432, 6379, 8080, 9200 are rejected with `PORT_NOT_ALLOWED`.
+  4. **Redirect Safety & Downgrade Prevention**:
+     - Standard `fetch` automatic redirect following is disabled (`redirect: 'manual'`).
+     - Manual redirect limit capped at 3 hops (`WEB_READ_MAX_REDIRECTS=3`).
+     - Every redirect destination is revalidated from scratch through the full URL and SSRF validation pipeline before any connection is made.
+     - Downgrade from HTTPS to HTTP is explicitly blocked with `INSECURE_REDIRECT_DOWNGRADE`.
+  5. **Resource Bounds**:
+     - Strict 12-second fetch timeout (`WEB_READ_TIMEOUT_MS=12000`).
+     - 1.5 MB raw response limit (`WEB_READ_MAX_BYTES=1500000`) enforced streamingly (`PAGE_TOO_LARGE`).
+     - 30,000 character extracted text limit (`WEB_READ_MAX_TEXT_CHARS=30000`) with deterministic truncation and boolean `truncated` flag.
+     - Content-Type strictly limited to `text/html` and `application/xhtml+xml` (`UNSUPPORTED_CONTENT_TYPE`). Non-HTML formats (PDF, JSON, images, audio, video) are rejected.
+  6. **Lightweight Parsing**: Cheerio added as the sole new parsing dependency (`package.json`). Zero heavy browser automation (Playwright, Puppeteer, Selenium, jsdom).
+  7. **Stateless Invariant**: Web Page Read is completely stateless. Extracted text is never stored in `ConversationSession`, `ConversationStore`, or conversation persistence files.
+  8. **Clean Boundary Enforcement**: No automatic calling from `/api/auto`, no search-to-read chaining, no AI summarization, no voice turn integration.
+- **Human Live Verification (Verified)**:
+  - Live Test A (Public HTML Page: `https://example.com/`): PASS (`status: Complete`, `title: "Example Domain"`, `finalUrl: "https://example.com/"`, `httpStatus: 200`, `contentType: "text/html"`, `redirectCount: 0`, `rawBytes: 577`, `extractedCharacters: 156`, `truncated: false`, `fetchDurationMs: 178.852 ms`, `extractionDurationMs: 41.956 ms`, `serverReadDurationMs: 342.02 ms`).
+  - Live Test B (Direct Loopback Block: `http://127.0.0.1/`): PASS (`status: Error`, `code: LOCAL_OR_PRIVATE_HOST_BLOCKED`, `message: "Access to private or non-routable IP address blocked: \"127.0.0.1\""`).
+  - Live Test C (Safe HTTPS Redirect: `https://httpbin.org/redirect-to?url=https%3A%2F%2Fexample.com%2F`): PASS (`status: Complete`, `finalUrl: "https://example.com/"`, `redirectCount: 1`, `title: "Example Domain"`).
+  - Live Test D (Redirect to Private Destination: `https://httpbin.org/redirect-to?url=https%3A%2F%2F127.0.0.1%2F`): PASS (`status: Error`, `code: LOCAL_OR_PRIVATE_HOST_BLOCKED`, `message: "Access to private or non-routable IP address blocked: \"127.0.0.1\""`).
+  - Live Test E (HTTPS Downgrade: `https://httpbin.org/redirect-to?url=http%3A%2F%2Fexample.com%2F`): PASS (`status: Error`, `code: INSECURE_REDIRECT_DOWNGRADE`, `message: "Insecure redirect downgrade from HTTPS to HTTP blocked: \"http://example.com/\""`).
+  - Live Test F (Unsupported PDF: `https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf`): PASS (`status: Error`, `code: UNSUPPORTED_CONTENT_TYPE`, `message: "Unsupported content type: \"application/pdf\". Only HTML is supported."`).
+- **Consequences**: Provides JARVIS with a secure, hardened, bounded foundation for inspecting static web pages without exposing local infrastructure or degrading conversational memory.
+
+
+
 

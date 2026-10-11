@@ -54,6 +54,9 @@ const REQUIRED_FILES = [
   'src/providers/openRouterSearch.js',
   'src/routing/freshnessSignals.js',
   'src/routing/searchDecision.js',
+  'src/webpage/urlSafety.js',
+  'src/webpage/htmlExtractor.js',
+  'src/webpage/pageReader.js',
   'src/config/index.js',
   'src/utils/logger.js',
   'scripts/verify.mjs',
@@ -68,6 +71,9 @@ const REQUIRED_FILES = [
   'tests/unit/openRouterText.test.js',
   'tests/unit/openRouterSearch.test.js',
   'tests/unit/searchDecision.test.js',
+  'tests/unit/urlSafety.test.js',
+  'tests/unit/htmlExtractor.test.js',
+  'tests/unit/pageReader.test.js',
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
   'tests/unit/voiceTurn.test.js',
@@ -84,7 +90,13 @@ const REQUIRED_FILES = [
   'tests/integration/voiceTurnSequence.test.js',
   'tests/integration/aiLatencyInstrumentation.test.js',
   'tests/integration/searchEndpoint.test.js',
-  'tests/integration/autoEndpoint.test.js'
+  'tests/integration/autoEndpoint.test.js',
+  'tests/integration/readPageEndpoint.test.js',
+  'tests/fixtures/html/article.html',
+  'tests/fixtures/html/noisy.html',
+  'tests/fixtures/html/unicode.html',
+  'tests/fixtures/html/oversized.html',
+  'tests/fixtures/html/empty.html'
 ];
 
 const REQUIRED_DIRS = [
@@ -94,6 +106,7 @@ const REQUIRED_DIRS = [
   'src/web',
   'src/providers',
   'src/routing',
+  'src/webpage',
   'src/config',
   'src/utils',
   'tests/unit',
@@ -101,6 +114,7 @@ const REQUIRED_DIRS = [
   'tests/contract',
   'tests/regression',
   'tests/smoke',
+  'tests/fixtures/html',
   'scripts'
 ];
 
@@ -197,6 +211,7 @@ check('Config & Logger Module Sanity Check', async () => {
   if (testConfig.nodeEnv !== 'test') throw new Error('Config failed to parse nodeEnv');
   if (!testConfig.cheaperInference) throw new Error('Config missing cheaperInference settings');
   if (!testConfig.openRouter) throw new Error('Config missing openRouter settings');
+  if (!testConfig.webRead) throw new Error('Config missing webRead settings');
 
   const { Logger, LogLevel } = await import('../src/utils/logger.js');
   const testLogger = new Logger({ level: LogLevel.ERROR, destination: { error: () => {} } });
@@ -346,6 +361,37 @@ check('Shared Freshness Signals Module Sanity Check', async () => {
   }
   if (isFreshnessSensitiveQuery('ما هو Power BI؟')) {
     throw new Error('isFreshnessSensitiveQuery sanity check failed for Arabic ordinary prompt');
+  }
+});
+
+check('Webpage URL Safety Module Sanity Check', async () => {
+  const { validateUrlSafety, isPublicIP } = await import('../src/webpage/urlSafety.js');
+  if (typeof validateUrlSafety !== 'function' || typeof isPublicIP !== 'function') {
+    throw new Error('urlSafety module failed to export required functions');
+  }
+  if (isPublicIP('127.0.0.1')) {
+    throw new Error('urlSafety isPublicIP sanity check failed for loopback address');
+  }
+  if (!isPublicIP('93.184.216.34')) {
+    throw new Error('urlSafety isPublicIP sanity check failed for public address');
+  }
+});
+
+check('Webpage HTML Extractor Module Sanity Check', async () => {
+  const { extractHtmlContent } = await import('../src/webpage/htmlExtractor.js');
+  if (typeof extractHtmlContent !== 'function') {
+    throw new Error('extractHtmlContent must be an exported function');
+  }
+  const result = extractHtmlContent('<html><head><title>Sanity Title</title></head><body><main><p>Sanity Body</p></main></body></html>');
+  if (result.title !== 'Sanity Title' || !result.text.includes('Sanity Body')) {
+    throw new Error('htmlExtractor sanity check failed');
+  }
+});
+
+check('Webpage Page Reader Module Sanity Check', async () => {
+  const { readWebPage } = await import('../src/webpage/pageReader.js');
+  if (typeof readWebPage !== 'function') {
+    throw new Error('readWebPage must be an exported function');
   }
 });
 

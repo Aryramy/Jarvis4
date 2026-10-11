@@ -1,8 +1,8 @@
 Project: JARVIS4
-Current Brick: 20
-Status: BRICK-020 VERIFIED
-Last Verified Brick: BRICK-020
-Current Feature: Automatic Search Decision v1 (Deterministic Local Freshness Routing)
+Current Brick: 21
+Status: BRICK-021 VERIFIED
+Last Verified Brick: BRICK-021
+Current Feature: Web Page Read v1
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
@@ -138,7 +138,42 @@ Next Feature: NOT AUTHORIZED
     7. Search latency remains dependent on external provider behavior.
     8. Search source publication dates may be unavailable in citation metadata, resulting in: `newestSourceDate = null`, `freshnessStatus = "unknown"`.
     9. Automatic routing currently covers only high-confidence V1 freshness patterns.
-- Automated test suite expanded to 489 tests across 28 suites passing offline with zero live external calls (Exit Code: 0)
+- Web Page Read v1 (Brick 21):
+  - Status: BRICK-021 VERIFIED
+  - Endpoint: `POST /api/read-page` accepting `{ "url": "..." }`, returning metadata (`requestedUrl`, `finalUrl`, `title`, `contentType`, `httpStatus`, `redirectCount`, `rawBytes`, `extractedCharacters`, `truncated`, `fetchDurationMs`, `extractionDurationMs`, `serverReadDurationMs`) and clean `text`.
+  - Server-Side Execution: Fetches pages strictly from server backend, preventing browser CORS issues and centralizing SSRF enforcement. Zero remote fetching in browser client JS.
+  - SSRF Protection: Mandatory pre-flight URL and DNS validation. Rejects local hostnames (`localhost`, `*.local`, `*.internal`, `*.lan`, `*.home.arpa`) and checks all resolved IPv4 (A) and IPv6 (AAAA) addresses against private, loopback, link-local, carrier-grade NAT, multicast, and documentation ranges (`LOCAL_OR_PRIVATE_HOST_BLOCKED`). DNS resolver is injectable for 100% offline unit testing.
+  - Port Restriction: Allows only standard web ports (HTTP: 80, HTTPS: 443, or omitted default port). Arbitrary explicit ports rejected (`PORT_NOT_ALLOWED`).
+  - Redirect Revalidation: Manual redirect handling (`redirect: 'manual'`) up to 3 hops (`WEB_READ_MAX_REDIRECTS=3`). Every redirect hop revalidates URL and DNS safety. HTTPS-to-HTTP downgrade is blocked (`INSECURE_REDIRECT_DOWNGRADE`).
+  - Resource Bounds: 12-second timeout (`WEB_READ_TIMEOUT_MS=12000`, `FETCH_TIMEOUT`), 1.5 MB maximum raw response body (`WEB_READ_MAX_BYTES=1500000`, `PAGE_TOO_LARGE`), 30,000 character maximum extracted text (`WEB_READ_MAX_TEXT_CHARS=30000`) with deterministic truncation and boolean `truncated` flag.
+  - HTML Only: Strictly supports `text/html` and `application/xhtml+xml`. Non-HTML formats (PDFs, Word docs, JSON, images, binary) rejected (`UNSUPPORTED_CONTENT_TYPE`).
+  - Lightweight DOM Parser: Single authorized parser dependency `cheerio`. Noise removal (`script, style, noscript, svg, canvas, iframe, nav, footer, form`), container preference (`main` -> `article` -> `body`), Unicode preservation for Arabic, Urdu, English without transliteration or translation.
+  - Statelessness Invariant: Page read is strictly stateless and does NOT write page contents to `ConversationSession`, `ConversationStore`, or runtime conversation persistence files.
+  - UI Integration: Dedicated "Web Page Read" section (`#page-read-section`) with URL input, "Read Page" button, metadata display, and safe text rendering (`textContent`).
+  - Boundary Enforcement: Zero browser automation (Playwright/Puppeteer), zero JavaScript execution, zero crawling, zero AI summarization, zero voice turn integration, zero automatic calling from `/api/auto`.
+  - Human Live Verification (Verified):
+    - Live Test A (Public HTML Page: `https://example.com/`): PASS (`status: Complete`, `title: "Example Domain"`, `finalUrl: "https://example.com/"`, `httpStatus: 200`, `contentType: "text/html"`, `redirectCount: 0`, `rawBytes: 577`, `extractedCharacters: 156`, `truncated: false`, `fetchDurationMs: 178.852 ms`, `extractionDurationMs: 41.956 ms`, `serverReadDurationMs: 342.02 ms`).
+    - Live Test B (Direct Loopback Block: `http://127.0.0.1/`): PASS (`status: Error`, `code: LOCAL_OR_PRIVATE_HOST_BLOCKED`, `message: "Access to private or non-routable IP address blocked: \"127.0.0.1\""`).
+    - Live Test C (Safe HTTPS Redirect: `https://httpbin.org/redirect-to?url=https%3A%2F%2Fexample.com%2F`): PASS (`status: Complete`, `finalUrl: "https://example.com/"`, `redirectCount: 1`, `title: "Example Domain"`).
+    - Live Test D (Redirect to Private Destination: `https://httpbin.org/redirect-to?url=https%3A%2F%2F127.0.0.1%2F`): PASS (`status: Error`, `code: LOCAL_OR_PRIVATE_HOST_BLOCKED`, `message: "Access to private or non-routable IP address blocked: \"127.0.0.1\""`).
+    - Live Test E (HTTPS Downgrade: `https://httpbin.org/redirect-to?url=http%3A%2F%2Fexample.com%2F`): PASS (`status: Error`, `code: INSECURE_REDIRECT_DOWNGRADE`, `message: "Insecure redirect downgrade from HTTPS to HTTP blocked: \"http://example.com/\""`).
+    - Live Test F (Unsupported PDF: `https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf`): PASS (`status: Error`, `code: UNSUPPORTED_CONTENT_TYPE`, `message: "Unsupported content type: \"application/pdf\". Only HTML is supported."`).
+  - Known Limitations (Recorded):
+    1. Web Page Read v1 reads one explicit URL only.
+    2. It reads static server-returned HTML only.
+    3. It does not execute JavaScript.
+    4. JavaScript-only applications may return little or no readable content.
+    5. It does not crawl links.
+    6. It does not automatically open search-result URLs.
+    7. It does not summarize or answer questions from page content yet.
+    8. It does not support PDF or Office documents.
+    9. It does not support authenticated/private pages.
+    10. It does not send browser cookies or credentials.
+    11. Raw page size is capped at 1,500,000 bytes.
+    12. Extracted text is capped at 30,000 characters.
+    13. Redirects are limited to 3.
+    14. Only ports 80 and 443 are allowed.
+- Automated test suite expanded to 556 tests across 32 suites passing offline with zero live external calls (Exit Code: 0)
 
 ## External integrations
 
@@ -424,6 +459,7 @@ Status: BRICK-018 VERIFIED (Exit Code: 0)
   - Brick 18 OpenRouter STT production migration & latency instrumentation: VERIFIED
   - Brick 19 explicit grounded live web search: VERIFIED
   - Brick 20 automatic search decision v1 (deterministic local freshness routing): VERIFIED
+  - Brick 21 Web Page Read v1: VERIFIED
 
 
 

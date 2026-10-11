@@ -114,3 +114,20 @@ Currently tracked issues in JARVIS4:
     - **Stateless Search**: Search queries handled via automatic decision remain strictly stateless and do not write to `ConversationSession` or `ConversationStore`.
     - **Search Source Publication Dates**: Upstream search results may omit publication dates, resulting in `newestSourceDate = null` and `freshnessStatus = 'unknown'`.
     - **Search Latency**: When search is triggered, latency is governed by the external provider search path (observed range: ~9.6s to ~20.8s across live English, Urdu, and Arabic tests), while local routing decision overhead is negligible (~0.04 ms to ~22.7 ms).
+
+14. **Web Page Read v1 Observations & Limitations (Brick 21 Verified)**:
+    - **Single Explicit URL Only**: Web Page Read v1 reads one explicit URL only per request.
+    - **Static Server-Returned HTML Only**: It reads static server-returned HTML only (`text/html` and `application/xhtml+xml`).
+    - **No JavaScript Execution**: It does not execute JavaScript.
+    - **JavaScript-Rendered Pages**: JavaScript-only applications (SPAs, dynamic client apps) may return little or no readable content; pages with no static text yield `NO_READABLE_CONTENT`.
+    - **No Link Crawling**: It does not crawl or follow links on the page (except HTTP redirects).
+    - **No Autonomous Search-to-Read Chaining**: It does not automatically open or fetch search-result URLs.
+    - **No AI Summarization or Q&A**: It does not summarize or answer questions from page content yet.
+    - **No PDF or Office Documents**: It does not support PDF or Office documents; rejected with `UNSUPPORTED_CONTENT_TYPE`.
+    - **No Authenticated or Private Pages**: It does not support authenticated/private pages; embedded URL credentials are rejected with `URL_CREDENTIALS_NOT_ALLOWED`.
+    - **No Cookies or Saved Credentials**: It does not send browser cookies, session tokens, or credentials.
+    - **Raw Size Cap**: Raw page response size is capped at 1,500,000 bytes (`WEB_READ_MAX_BYTES=1500000`, `PAGE_TOO_LARGE`).
+    - **Extracted Text Cap**: Extracted plain text is capped at 30,000 characters (`WEB_READ_MAX_TEXT_CHARS=30000`), truncated deterministically with boolean `truncated: true`.
+    - **Redirect Cap**: Redirects are strictly limited to 3 hops (`WEB_READ_MAX_REDIRECTS=3`, `TOO_MANY_REDIRECTS`), each revalidated against SSRF rules, and HTTPS-to-HTTP downgrades are rejected (`INSECURE_REDIRECT_DOWNGRADE`).
+    - **Port Restrictions**: Only ports 80 and 443 (or default omitted ports) are permitted; arbitrary explicit ports are blocked (`PORT_NOT_ALLOWED`).
+    - **Stateless Isolation**: Web Page Read is strictly stateless and does NOT write page contents to `ConversationSession`, `ConversationStore`, or runtime conversation persistence files.

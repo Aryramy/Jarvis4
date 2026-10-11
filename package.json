@@ -22,5 +22,8 @@
   "license": "ISC",
   "engines": {
     "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0"
   }
 }

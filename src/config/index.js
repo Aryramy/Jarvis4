@@ -53,13 +53,21 @@ export function loadConfig(overrides = {}) {
     ttsTimeoutMs: Number(overrides.OPENROUTER_TTS_TIMEOUT_MS ?? process.env.OPENROUTER_TTS_TIMEOUT_MS ?? 30000) || 30000
   });
 
+  const webRead = Object.freeze({
+    timeoutMs: Math.max(1, Number(overrides.WEB_READ_TIMEOUT_MS ?? process.env.WEB_READ_TIMEOUT_MS ?? 12000)) || 12000,
+    maxBytes: Math.max(1, Number(overrides.WEB_READ_MAX_BYTES ?? process.env.WEB_READ_MAX_BYTES ?? 1500000)) || 1500000,
+    maxTextChars: Math.max(1, Number(overrides.WEB_READ_MAX_TEXT_CHARS ?? process.env.WEB_READ_MAX_TEXT_CHARS ?? 30000)) || 30000,
+    maxRedirects: Math.max(0, Number(overrides.WEB_READ_MAX_REDIRECTS ?? process.env.WEB_READ_MAX_REDIRECTS ?? 3))
+  });
+
   return Object.freeze({
     nodeEnv,
     logLevel,
     isProduction: nodeEnv === 'production',
     isTest: nodeEnv === 'test',
     cheaperInference,
-    openRouter
+    openRouter,
+    webRead
   });
 }
 

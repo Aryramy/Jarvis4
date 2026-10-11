@@ -17,6 +17,8 @@ import { OpenRouterSearchProvider, isFreshnessSensitiveQuery } from '../provider
 import { ConversationSession } from '../core/conversationSession.js';
 import { ConversationStore } from '../core/conversationStore.js';
 import { decideSearchRoute } from '../routing/searchDecision.js';
+import { readWebPage } from '../webpage/pageReader.js';
+import { PageReaderError } from '../webpage/urlSafety.js';
 
 const __dirname = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const HTML_FILE_PATH = join(__dirname, 'index.html');
@@ -825,6 +827,116 @@ export function createRequestListener(options = {}) {
           };
           res.writeHead(result.statusCode, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(responseBody));
+        }
+      });
+
+      return;
+    }
+
+    // Route: /api/read-page (Brick 21 Web Page Read v1)
+    if (url.pathname === '/api/read-page') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      const requestStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+
+      let body = '';
+      let isTooLarge = false;
+
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 1e6) {
+          isTooLarge = true;
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Payload Too Large' }));
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        if (isTooLarge) return;
+
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid JSON body' }));
+          return;
+        }
+
+        const inputUrl = parsedBody.url ?? parsedBody.targetUrl;
+        if (typeof inputUrl !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_URL',
+            code: 'INVALID_URL',
+            message: 'URL must be a non-empty string',
+            serverReadDurationMs: 0
+          }));
+          return;
+        }
+
+        const trimmedUrl = inputUrl.trim();
+        if (trimmedUrl.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_URL',
+            code: 'INVALID_URL',
+            message: 'URL cannot be empty',
+            serverReadDurationMs: 0
+          }));
+          return;
+        }
+
+        try {
+          const reader = options.pageReaderFn || ((u) => readWebPage(u, {
+            fetchFn: options.fetchFn,
+            dnsLookup: options.dnsLookup
+          }));
+
+          const result = await reader(trimmedUrl);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const serverEndTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now()
+            : Date.now();
+          const serverReadDurationMs = Math.max(0.001, Number((serverEndTime - requestStartTime).toFixed(3)));
+
+          const errorCode = err.code || 'FETCH_FAILED';
+          const safeMessage = err.message || 'Page read failed';
+
+          let statusCode = 502;
+          if (['INVALID_URL', 'UNSUPPORTED_PROTOCOL', 'URL_CREDENTIALS_NOT_ALLOWED', 'PORT_NOT_ALLOWED', 'LOCAL_OR_PRIVATE_HOST_BLOCKED', 'DNS_RESOLUTION_FAILED'].includes(errorCode)) {
+            statusCode = 400;
+          } else if (errorCode === 'PAGE_TOO_LARGE') {
+            statusCode = 413;
+          } else if (errorCode === 'FETCH_TIMEOUT') {
+            statusCode = 504;
+          } else if (['UNSUPPORTED_CONTENT_TYPE', 'NO_READABLE_CONTENT'].includes(errorCode)) {
+            statusCode = 422;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage,
+            requestedUrl: trimmedUrl,
+            finalUrl: err.details?.finalUrl || null,
+            httpStatus: err.details?.httpStatus || null,
+            contentType: err.details?.contentType || null,
+            serverReadDurationMs
+          }));
         }
       });
 

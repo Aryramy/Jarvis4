@@ -195,6 +195,20 @@
       <div id="tts-status" class="mic-status" style="display: none;"></div>
       <audio id="tts-playback" controls style="display: none; width: 100%; margin-top: 4px;"></audio>
     </div>
+
+    <!-- Brick 21 Web Page Read Section -->
+    <div id="page-read-section" class="mic-section">
+      <div style="font-size: 0.95rem; font-weight: 600; color: #38bdf8; text-align: left; margin-bottom: 4px;">Web Page Read</div>
+      <div class="input-group" style="margin-bottom: 8px;">
+        <input type="text" id="page-url-input" placeholder="https://example.com/article" autocomplete="off" />
+        <div class="button-group">
+          <button type="button" id="read-page-btn">Read Page</button>
+        </div>
+      </div>
+      <div id="page-read-status" class="mic-status">Web Page Read: Idle</div>
+      <div id="page-read-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
+      <div id="page-read-content" class="response-area" style="display: none; max-height: 240px; overflow-y: auto;"></div>
+    </div>
   </div>
 
   <script type="module">
@@ -234,6 +248,12 @@
     const jarvisResponse = document.getElementById('jarvis-response');
     const ttsStatus = document.getElementById('tts-status');
     const ttsPlayback = document.getElementById('tts-playback');
+
+    const pageUrlInput = document.getElementById('page-url-input');
+    const readPageBtn = document.getElementById('read-page-btn');
+    const pageReadStatus = document.getElementById('page-read-status');
+    const pageReadMeta = document.getElementById('page-read-meta');
+    const pageReadContent = document.getElementById('page-read-content');
 
     const micRecorder = new MicrophoneRecorder();
     const voiceTurnRunner = new VoiceTurnRunner();
@@ -1224,6 +1244,67 @@
         stopMicBtn.disabled = true;
       }
     });
+
+    // Brick 21 Web Page Read Button Handler
+    if (readPageBtn) {
+      readPageBtn.addEventListener('click', async () => {
+        const rawUrl = pageUrlInput ? pageUrlInput.value.trim() : '';
+        if (!rawUrl) {
+          pageReadStatus.textContent = 'Status: Error';
+          pageReadMeta.style.display = 'block';
+          pageReadMeta.textContent = 'Code: INVALID_URL\nMessage: Please enter a URL to read.';
+          pageReadContent.style.display = 'none';
+          return;
+        }
+
+        readPageBtn.disabled = true;
+        pageReadStatus.textContent = 'Status: Reading page...';
+        pageReadMeta.style.display = 'none';
+        pageReadContent.style.display = 'none';
+
+        try {
+          const res = await fetch('/api/read-page', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: rawUrl })
+          });
+
+          const data = await res.json();
+
+          if (res.ok && data.success) {
+            pageReadStatus.textContent = 'Status: Complete';
+            pageReadMeta.style.display = 'block';
+            pageReadMeta.textContent = [
+              `Title: ${data.title ?? 'None'}`,
+              `Final URL: ${data.finalUrl}`,
+              `HTTP Status: ${data.httpStatus}`,
+              `Content Type: ${data.contentType}`,
+              `Redirect Count: ${data.redirectCount}`,
+              `Raw Bytes: ${data.rawBytes}`,
+              `Extracted Characters: ${data.extractedCharacters}`,
+              `Truncated: ${data.truncated ? 'Yes' : 'No'}`,
+              `Fetch Duration: ${data.fetchDurationMs} ms`,
+              `Extraction Duration: ${data.extractionDurationMs} ms`,
+              `Total Server Duration: ${data.serverReadDurationMs} ms`
+            ].join('\n');
+            pageReadContent.style.display = 'block';
+            pageReadContent.textContent = data.text;
+          } else {
+            pageReadStatus.textContent = 'Status: Error';
+            pageReadMeta.style.display = 'block';
+            pageReadMeta.textContent = `Error Code: ${data.code || data.error || 'FETCH_FAILED'}\nMessage: ${data.message || 'Page read failed'}`;
+            pageReadContent.style.display = 'none';
+          }
+        } catch (err) {
+          pageReadStatus.textContent = 'Status: Error';
+          pageReadMeta.style.display = 'block';
+          pageReadMeta.textContent = `Error Code: FETCH_FAILED\nMessage: ${err.message || 'Network request failed'}`;
+          pageReadContent.style.display = 'none';
+        } finally {
+          readPageBtn.disabled = false;
+        }
+      });
+    }
   </script>
 </body>
 </html>

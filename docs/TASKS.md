@@ -61,3 +61,7 @@ Status: VERIFIED
 BRICK-020 — Automatic Search Decision v1 (Deterministic Local Freshness Routing)
 Status: VERIFIED
 
+BRICK-021 — Web Page Read v1
+Status: VERIFIED
+
+

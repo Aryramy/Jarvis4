@@ -15,7 +15,11 @@ describe('Configuration Utility', () => {
     'OPENROUTER_TTS_BASE_URL',
     'OPENROUTER_TTS_MODEL',
     'OPENROUTER_TTS_VOICE',
-    'OPENROUTER_TTS_TIMEOUT_MS'
+    'OPENROUTER_TTS_TIMEOUT_MS',
+    'WEB_READ_TIMEOUT_MS',
+    'WEB_READ_MAX_BYTES',
+    'WEB_READ_MAX_TEXT_CHARS',
+    'WEB_READ_MAX_REDIRECTS'
   ];
 
   let originalEnv = {};
@@ -215,4 +219,28 @@ describe('Configuration Utility', () => {
     assert.equal(envCfg.openRouter.textModel, 'env-text-model');
     assert.equal(envCfg.openRouter.textTimeoutMs, 20000);
   });
+
+  test('should load webRead config defaults when environment is empty', () => {
+    const defaultCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
+    assert.equal(defaultCfg.webRead.timeoutMs, 12000);
+    assert.equal(defaultCfg.webRead.maxBytes, 1500000);
+    assert.equal(defaultCfg.webRead.maxTextChars, 30000);
+    assert.equal(defaultCfg.webRead.maxRedirects, 3);
+  });
+
+  test('should load webRead config overrides passed directly', () => {
+    const customCfg = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'info',
+      WEB_READ_TIMEOUT_MS: '5000',
+      WEB_READ_MAX_BYTES: '200000',
+      WEB_READ_MAX_TEXT_CHARS: '1000',
+      WEB_READ_MAX_REDIRECTS: '1'
+    });
+    assert.equal(customCfg.webRead.timeoutMs, 5000);
+    assert.equal(customCfg.webRead.maxBytes, 200000);
+    assert.equal(customCfg.webRead.maxTextChars, 1000);
+    assert.equal(customCfg.webRead.maxRedirects, 1);
+  });
 });
+
