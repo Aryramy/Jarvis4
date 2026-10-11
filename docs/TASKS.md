@@ -64,4 +64,7 @@ Status: VERIFIED
 BRICK-021 — Web Page Read v1
 Status: VERIFIED
 
+BRICK-022 — Grounded Web Page Q&A v1
+Status: VERIFIED
+
 

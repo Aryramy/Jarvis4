@@ -60,6 +60,11 @@ export function loadConfig(overrides = {}) {
     maxRedirects: Math.max(0, Number(overrides.WEB_READ_MAX_REDIRECTS ?? process.env.WEB_READ_MAX_REDIRECTS ?? 3))
   });
 
+  const pageQa = Object.freeze({
+    maxQuestionChars: Math.max(1, Number(overrides.PAGE_QA_MAX_QUESTION_CHARS ?? process.env.PAGE_QA_MAX_QUESTION_CHARS ?? 4000)) || 4000,
+    maxOutputTokens: Math.max(1, Number(overrides.PAGE_QA_MAX_OUTPUT_TOKENS ?? process.env.PAGE_QA_MAX_OUTPUT_TOKENS ?? 1000)) || 1000
+  });
+
   return Object.freeze({
     nodeEnv,
     logLevel,
@@ -67,7 +72,8 @@ export function loadConfig(overrides = {}) {
     isTest: nodeEnv === 'test',
     cheaperInference,
     openRouter,
-    webRead
+    webRead,
+    pageQa
   });
 }
 

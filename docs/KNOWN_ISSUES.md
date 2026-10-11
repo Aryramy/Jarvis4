@@ -131,3 +131,20 @@ Currently tracked issues in JARVIS4:
     - **Redirect Cap**: Redirects are strictly limited to 3 hops (`WEB_READ_MAX_REDIRECTS=3`, `TOO_MANY_REDIRECTS`), each revalidated against SSRF rules, and HTTPS-to-HTTP downgrades are rejected (`INSECURE_REDIRECT_DOWNGRADE`).
     - **Port Restrictions**: Only ports 80 and 443 (or default omitted ports) are permitted; arbitrary explicit ports are blocked (`PORT_NOT_ALLOWED`).
     - **Stateless Isolation**: Web Page Read is strictly stateless and does NOT write page contents to `ConversationSession`, `ConversationStore`, or runtime conversation persistence files.
+
+15. **Grounded Web Page Q&A v1 Observations & Limitations (Brick 22 Verified)**:
+    - **One Explicit Webpage Only**: Grounded Q&A operates on one explicit user-provided webpage URL only.
+    - **Static HTML/XHTML Only**: Reads static server-returned HTML only; JavaScript-rendered page content is not supported (client-only SPAs may yield empty or incomplete text).
+    - **Page Text Cap**: Extracted plain text remains capped at 30,000 characters from Brick 21.
+    - **Truncated Pages**: Page-QA may operate on truncated page content; `pageTruncated` must remain visible and model is warned content may be incomplete.
+    - **No Search Fallback**: If the page does not contain the answer, Page Q&A does not fall back to web search or normal AI; it reports that the information was not found in the supplied page.
+    - **No Multi-Page Research**: Does not crawl links, open citations, or perform multi-hop browsing.
+    - **No Link Traversal**: Does not follow links found on the page.
+    - **No Authenticated Page Access**: Does not support login or protected pages.
+    - **No Browser Cookies or Credentials**: Requests send no browser cookies or credentials.
+    - **No PDF Q&A**: Non-HTML documents remain unsupported.
+    - **No Browser Automation**: Does not use Playwright, Puppeteer, or headless browsers.
+    - **No Voice Turn Integration**: Page Q&A is not connected to voice turn or audio pipelines.
+    - **No Automatic Ask JARVIS Routing**: Ask JARVIS does not automatically detect URLs or call Page Q&A.
+    - **Instruction-Based Grounding**: Grounding is enforced through isolated prompt/data separation and tested behavior; do not claim mathematical proof that an LLM can never violate an instruction.
+    - **Stateless Isolation**: Neither webpage contents nor questions/answers are recorded in `ConversationSession`, `ConversationStore`, or runtime persistence.

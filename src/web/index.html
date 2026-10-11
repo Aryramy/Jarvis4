@@ -209,6 +209,21 @@
       <div id="page-read-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
       <div id="page-read-content" class="response-area" style="display: none; max-height: 240px; overflow-y: auto;"></div>
     </div>
+
+    <!-- Brick 22 Web Page Q&A Section -->
+    <div id="page-qa-section" class="mic-section">
+      <div style="font-size: 0.95rem; font-weight: 600; color: #38bdf8; text-align: left; margin-bottom: 4px;">Web Page Q&A</div>
+      <div class="input-group" style="margin-bottom: 8px;">
+        <input type="text" id="page-qa-url-input" placeholder="https://example.com/article" autocomplete="off" style="margin-bottom: 6px;" />
+        <input type="text" id="page-qa-question-input" placeholder="Question about this webpage" autocomplete="off" />
+        <div class="button-group" style="margin-top: 6px;">
+          <button type="button" id="page-qa-btn">Ask About Page</button>
+        </div>
+      </div>
+      <div id="page-qa-status" class="mic-status">Web Page Q&A: Idle</div>
+      <div id="page-qa-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
+      <div id="page-qa-answer" class="response-area" style="display: none; max-height: 240px; overflow-y: auto;"></div>
+    </div>
   </div>
 
   <script type="module">
@@ -254,6 +269,13 @@
     const pageReadStatus = document.getElementById('page-read-status');
     const pageReadMeta = document.getElementById('page-read-meta');
     const pageReadContent = document.getElementById('page-read-content');
+
+    const pageQaUrlInput = document.getElementById('page-qa-url-input');
+    const pageQaQuestionInput = document.getElementById('page-qa-question-input');
+    const pageQaBtn = document.getElementById('page-qa-btn');
+    const pageQaStatus = document.getElementById('page-qa-status');
+    const pageQaMeta = document.getElementById('page-qa-meta');
+    const pageQaAnswer = document.getElementById('page-qa-answer');
 
     const micRecorder = new MicrophoneRecorder();
     const voiceTurnRunner = new VoiceTurnRunner();
@@ -1302,6 +1324,73 @@
           pageReadContent.style.display = 'none';
         } finally {
           readPageBtn.disabled = false;
+        }
+      });
+    }
+
+    if (pageQaBtn) {
+      pageQaBtn.addEventListener('click', async () => {
+        const rawUrl = pageQaUrlInput ? pageQaUrlInput.value.trim() : '';
+        const rawQuestion = pageQaQuestionInput ? pageQaQuestionInput.value.trim() : '';
+
+        if (!rawUrl) {
+          pageQaStatus.textContent = 'Status: Error';
+          pageQaMeta.style.display = 'block';
+          pageQaMeta.textContent = 'Error Code: INVALID_URL\nMessage: Please enter a page URL.';
+          pageQaAnswer.style.display = 'none';
+          return;
+        }
+
+        if (!rawQuestion) {
+          pageQaStatus.textContent = 'Status: Error';
+          pageQaMeta.style.display = 'block';
+          pageQaMeta.textContent = 'Error Code: INVALID_QUESTION\nMessage: Please enter a question about the webpage.';
+          pageQaAnswer.style.display = 'none';
+          return;
+        }
+
+        pageQaBtn.disabled = true;
+        pageQaStatus.textContent = 'Status: Reading page and answering...';
+        pageQaMeta.style.display = 'none';
+        pageQaAnswer.style.display = 'none';
+
+        try {
+          const res = await fetch('/api/page-qa', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: rawUrl, question: rawQuestion })
+          });
+
+          const data = await res.json();
+
+          if (res.ok && data.success) {
+            pageQaStatus.textContent = 'Status: Complete';
+            pageQaMeta.style.display = 'block';
+            pageQaMeta.textContent = [
+              `Source Title: ${data.source?.title ?? data.title ?? 'None'}`,
+              `Final URL: ${data.source?.finalUrl ?? data.finalUrl}`,
+              `Page Truncated: ${(data.pageTruncated ?? data.source?.truncated) ? 'Yes' : 'No'}`,
+              `Provider: ${data.provider ?? 'openrouter'}`,
+              `Model: ${data.model ?? 'deepseek/deepseek-v4-flash-0731'}`,
+              `Page Read Duration: ${data.pageReadDurationMs ?? 0} ms`,
+              `AI Duration: ${data.providerQaDurationMs ?? 0} ms`,
+              `Total Server Duration: ${data.serverPageQaDurationMs ?? 0} ms`
+            ].join('\n');
+            pageQaAnswer.style.display = 'block';
+            pageQaAnswer.textContent = data.answer;
+          } else {
+            pageQaStatus.textContent = 'Status: Error';
+            pageQaMeta.style.display = 'block';
+            pageQaMeta.textContent = `Error Code: ${data.code || data.error || 'PAGE_QA_FAILED'}\nMessage: ${data.message || 'Page Q&A failed'}`;
+            pageQaAnswer.style.display = 'none';
+          }
+        } catch (err) {
+          pageQaStatus.textContent = 'Status: Error';
+          pageQaMeta.style.display = 'block';
+          pageQaMeta.textContent = `Error Code: PAGE_QA_FAILED\nMessage: ${err.message || 'Network request failed'}`;
+          pageQaAnswer.style.display = 'none';
+        } finally {
+          pageQaBtn.disabled = false;
         }
       });
     }

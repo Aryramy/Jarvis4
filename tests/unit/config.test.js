@@ -19,7 +19,9 @@ describe('Configuration Utility', () => {
     'WEB_READ_TIMEOUT_MS',
     'WEB_READ_MAX_BYTES',
     'WEB_READ_MAX_TEXT_CHARS',
-    'WEB_READ_MAX_REDIRECTS'
+    'WEB_READ_MAX_REDIRECTS',
+    'PAGE_QA_MAX_QUESTION_CHARS',
+    'PAGE_QA_MAX_OUTPUT_TOKENS'
   ];
 
   let originalEnv = {};
@@ -241,6 +243,23 @@ describe('Configuration Utility', () => {
     assert.equal(customCfg.webRead.maxBytes, 200000);
     assert.equal(customCfg.webRead.maxTextChars, 1000);
     assert.equal(customCfg.webRead.maxRedirects, 1);
+  });
+
+  test('should load pageQa config defaults when environment is empty', () => {
+    const defaultCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
+    assert.equal(defaultCfg.pageQa.maxQuestionChars, 4000);
+    assert.equal(defaultCfg.pageQa.maxOutputTokens, 1000);
+  });
+
+  test('should load pageQa config overrides passed directly', () => {
+    const customCfg = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'info',
+      PAGE_QA_MAX_QUESTION_CHARS: '2000',
+      PAGE_QA_MAX_OUTPUT_TOKENS: '500'
+    });
+    assert.equal(customCfg.pageQa.maxQuestionChars, 2000);
+    assert.equal(customCfg.pageQa.maxOutputTokens, 500);
   });
 });
 

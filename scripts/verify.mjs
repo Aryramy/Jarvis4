@@ -57,6 +57,7 @@ const REQUIRED_FILES = [
   'src/webpage/urlSafety.js',
   'src/webpage/htmlExtractor.js',
   'src/webpage/pageReader.js',
+  'src/webpage/pageQa.js',
   'src/config/index.js',
   'src/utils/logger.js',
   'scripts/verify.mjs',
@@ -74,6 +75,7 @@ const REQUIRED_FILES = [
   'tests/unit/urlSafety.test.js',
   'tests/unit/htmlExtractor.test.js',
   'tests/unit/pageReader.test.js',
+  'tests/unit/pageQa.test.js',
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
   'tests/unit/voiceTurn.test.js',
@@ -92,11 +94,13 @@ const REQUIRED_FILES = [
   'tests/integration/searchEndpoint.test.js',
   'tests/integration/autoEndpoint.test.js',
   'tests/integration/readPageEndpoint.test.js',
+  'tests/integration/pageQaEndpoint.test.js',
   'tests/fixtures/html/article.html',
   'tests/fixtures/html/noisy.html',
   'tests/fixtures/html/unicode.html',
   'tests/fixtures/html/oversized.html',
-  'tests/fixtures/html/empty.html'
+  'tests/fixtures/html/empty.html',
+  'tests/fixtures/html/injection.html'
 ];
 
 const REQUIRED_DIRS = [
@@ -392,6 +396,16 @@ check('Webpage Page Reader Module Sanity Check', async () => {
   const { readWebPage } = await import('../src/webpage/pageReader.js');
   if (typeof readWebPage !== 'function') {
     throw new Error('readWebPage must be an exported function');
+  }
+});
+
+check('Webpage Page QA Module Sanity Check', async () => {
+  const { executePageQa, validatePageQaQuestion, buildPageQaMessages } = await import('../src/webpage/pageQa.js');
+  if (typeof executePageQa !== 'function' || typeof validatePageQaQuestion !== 'function' || typeof buildPageQaMessages !== 'function') {
+    throw new Error('pageQa module failed to export required functions');
+  }
+  if (validatePageQaQuestion('  What is this?  ') !== 'What is this?') {
+    throw new Error('validatePageQaQuestion failed trimming check');
   }
 });
 

@@ -115,16 +115,24 @@ export class OpenRouterTextProvider extends AIProvider {
     };
 
     try {
+      const requestPayload = {
+        model: this.model,
+        messages: formattedMessages
+      };
+
+      if (typeof options.maxTokens === 'number') {
+        requestPayload.max_tokens = options.maxTokens;
+      } else if (typeof options.max_tokens === 'number') {
+        requestPayload.max_tokens = options.max_tokens;
+      }
+
       const response = await this.fetchFn(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.apiKey}`
         },
-        body: JSON.stringify({
-          model: this.model,
-          messages: formattedMessages
-        }),
+        body: JSON.stringify(requestPayload),
         signal: controller.signal
       });
 
