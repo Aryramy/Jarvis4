@@ -52,6 +52,8 @@ const REQUIRED_FILES = [
   'src/providers/openRouterText.js',
   'src/providers/searchBase.js',
   'src/providers/openRouterSearch.js',
+  'src/routing/freshnessSignals.js',
+  'src/routing/searchDecision.js',
   'src/config/index.js',
   'src/utils/logger.js',
   'scripts/verify.mjs',
@@ -65,6 +67,7 @@ const REQUIRED_FILES = [
   'tests/unit/openRouterTTS.test.js',
   'tests/unit/openRouterText.test.js',
   'tests/unit/openRouterSearch.test.js',
+  'tests/unit/searchDecision.test.js',
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
   'tests/unit/voiceTurn.test.js',
@@ -80,7 +83,8 @@ const REQUIRED_FILES = [
   'tests/integration/voiceAiIntegration.test.js',
   'tests/integration/voiceTurnSequence.test.js',
   'tests/integration/aiLatencyInstrumentation.test.js',
-  'tests/integration/searchEndpoint.test.js'
+  'tests/integration/searchEndpoint.test.js',
+  'tests/integration/autoEndpoint.test.js'
 ];
 
 const REQUIRED_DIRS = [
@@ -89,6 +93,7 @@ const REQUIRED_DIRS = [
   'src/cli',
   'src/web',
   'src/providers',
+  'src/routing',
   'src/config',
   'src/utils',
   'tests/unit',
@@ -299,6 +304,48 @@ check('OpenRouter Search Provider Module Sanity Check', async () => {
   }
   if (typeof provider.search !== 'function') {
     throw new Error('Search Provider must implement search() method');
+  }
+});
+
+check('Search Decision Classifier Module Sanity Check', async () => {
+  const { decideSearchRoute } = await import('../src/routing/searchDecision.js');
+  if (typeof decideSearchRoute !== 'function') {
+    throw new Error('decideSearchRoute must be an exported function');
+  }
+  const aiResult = decideSearchRoute('What is Power BI?');
+  if (aiResult.route !== 'ai') {
+    throw new Error('decideSearchRoute sanity check failed for AI route');
+  }
+  const searchResult = decideSearchRoute('What are the latest announcements?');
+  if (searchResult.route !== 'search') {
+    throw new Error('decideSearchRoute sanity check failed for search route');
+  }
+});
+
+check('Shared Freshness Signals Module Sanity Check', async () => {
+  const {
+    isFreshnessSensitiveQuery,
+    URDU_FRESHNESS_SIGNALS,
+    ARABIC_FRESHNESS_SIGNALS,
+    ENGLISH_FRESHNESS_SIGNALS
+  } = await import('../src/routing/freshnessSignals.js');
+  if (typeof isFreshnessSensitiveQuery !== 'function') {
+    throw new Error('isFreshnessSensitiveQuery must be an exported function');
+  }
+  if (!Array.isArray(URDU_FRESHNESS_SIGNALS) || !Array.isArray(ARABIC_FRESHNESS_SIGNALS) || !Array.isArray(ENGLISH_FRESHNESS_SIGNALS)) {
+    throw new Error('Freshness signals arrays must be exported');
+  }
+  if (!isFreshnessSensitiveQuery('آج Microsoft Fabric کی تازہ ترین خبریں کیا ہیں؟')) {
+    throw new Error('isFreshnessSensitiveQuery sanity check failed for Urdu freshness prompt');
+  }
+  if (!isFreshnessSensitiveQuery('ما هي أحدث أخبار Microsoft Fabric اليوم؟')) {
+    throw new Error('isFreshnessSensitiveQuery sanity check failed for Arabic freshness prompt');
+  }
+  if (isFreshnessSensitiveQuery('Power BI کیا ہے؟')) {
+    throw new Error('isFreshnessSensitiveQuery sanity check failed for Urdu ordinary prompt');
+  }
+  if (isFreshnessSensitiveQuery('ما هو Power BI؟')) {
+    throw new Error('isFreshnessSensitiveQuery sanity check failed for Arabic ordinary prompt');
   }
 });
 

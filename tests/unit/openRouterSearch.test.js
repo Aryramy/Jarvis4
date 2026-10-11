@@ -403,6 +403,7 @@ test('OpenRouter Search Provider - Brick 19 Unit Tests', async (t) => {
   });
 
   await t.test('8 & 9. freshness-sensitive query detection works and does not false-positive on ordinary queries', () => {
+    // English freshness queries
     assert.equal(isFreshnessSensitiveQuery('What are the latest announcements?'), true);
     assert.equal(isFreshnessSensitiveQuery('Tell me recent news about AI'), true);
     assert.equal(isFreshnessSensitiveQuery('What is the current stock price?'), true);
@@ -412,10 +413,24 @@ test('OpenRouter Search Provider - Brick 19 Unit Tests', async (t) => {
     assert.equal(isFreshnessSensitiveQuery('What is the newest smartphone?'), true);
     assert.equal(isFreshnessSensitiveQuery('What was recently announced by OpenAI?'), true);
 
+    // Multilingual freshness queries (Urdu & Arabic)
+    assert.equal(isFreshnessSensitiveQuery('آج Microsoft Fabric کی تازہ ترین خبریں کیا ہیں؟'), true);
+    assert.equal(isFreshnessSensitiveQuery('ما هي أحدث أخبار Microsoft Fabric اليوم؟'), true);
+
+    // Ordinary queries across languages (not freshness-sensitive)
+    assert.equal(isFreshnessSensitiveQuery('Power BI کیا ہے؟'), false);
+    assert.equal(isFreshnessSensitiveQuery('ما هو Power BI؟'), false);
+    assert.equal(isFreshnessSensitiveQuery('What is Power BI?'), false);
     assert.equal(isFreshnessSensitiveQuery('What is the capital of France?'), false);
     assert.equal(isFreshnessSensitiveQuery('Explain the quicksort algorithm in Python'), false);
     assert.equal(isFreshnessSensitiveQuery('How does cellular respiration work?'), false);
     assert.equal(isFreshnessSensitiveQuery('Write a poem about the sea'), false);
+
+    // False-positive guards remain intact
+    assert.equal(isFreshnessSensitiveQuery('What is electric current?'), false);
+    assert.equal(isFreshnessSensitiveQuery('What does recent mean?'), false);
+    assert.equal(isFreshnessSensitiveQuery('Define current.'), false);
+    assert.equal(isFreshnessSensitiveQuery('Meaning of latest.'), false);
   });
 
   await t.test('system instruction instructs model not to call old results latest and states newest publication date', () => {

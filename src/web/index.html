@@ -155,7 +155,7 @@
       <input type="text" id="text-input" placeholder="Enter text for JARVIS..." autocomplete="off" />
       <div class="button-group">
         <button type="submit" id="send-btn" class="secondary">Deterministic Test</button>
-        <button type="button" id="ask-ai-btn">Ask AI</button>
+        <button type="button" id="ask-ai-btn">Ask JARVIS</button>
         <button type="button" id="ask-ai-stream-btn">Ask AI — Stream</button>
         <button type="button" id="search-web-btn" class="secondary">Search Web</button>
         <button type="button" id="clear-conv-btn" class="secondary">Clear Conversation</button>
@@ -163,6 +163,7 @@
     </form>
     <div id="response-area" class="response-area">Ready for input</div>
     <div id="status-indicator" class="status-indicator">Status: Ready</div>
+    <div id="route-indicator" class="mic-meta" style="display: none; margin-top: 8px;"></div>
 
     <!-- Brick 19 Web Search Display Section -->
     <div id="search-section" class="mic-section" style="display: none;">
@@ -208,6 +209,7 @@
     const clearConvBtn = document.getElementById('clear-conv-btn');
     const responseArea = document.getElementById('response-area');
     const statusIndicator = document.getElementById('status-indicator');
+    const routeIndicator = document.getElementById('route-indicator');
 
     const searchSection = document.getElementById('search-section');
     const searchStatus = document.getElementById('search-status');
@@ -299,34 +301,132 @@
       }
     });
 
-    // Real AI Brick 4 handler (non-streaming)
+    // Automatic Decision Ask JARVIS handler (Brick 20: routes via /api/auto)
     askAiBtn.addEventListener('click', async () => {
       const rawText = input.value;
+      if (!rawText || !rawText.trim()) {
+        responseArea.textContent = 'Error: Please enter text for JARVIS';
+        responseArea.classList.add('error');
+        statusIndicator.textContent = 'Status: Error';
+        return;
+      }
 
       setBusy(true, 'Status: Thinking...');
+      if (routeIndicator) routeIndicator.style.display = 'none';
 
-      const clientAiStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      const clientStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
         ? performance.now()
         : Date.now();
 
       try {
-        const res = await fetch('/api/ai', {
+        const res = await fetch('/api/auto', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ input: rawText })
+          body: JSON.stringify({ text: rawText.trim() })
         });
 
-        const data = await res.json();
-        const clientAiDurationMs = Math.max(0, Math.round(((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now()) - clientAiStartTime));
+        const data = await res.json().catch(() => ({}));
+        const clientDurationMs = Math.max(0, Math.round(((typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now()) - clientStartTime));
 
         if (res.ok && data.success) {
-          responseArea.textContent = 'AI:\n' + data.response;
-          responseArea.classList.remove('error');
-          statusIndicator.textContent = `Status: Ready | AI: ${clientAiDurationMs} ms`;
-          currentAssistantResponse = data.response;
-          if (speakResponseBtn) speakResponseBtn.disabled = false;
+          if (data.route === 'search') {
+            if (routeIndicator) {
+              routeIndicator.textContent = `Route: Web Search${data.routeReason ? ' | Reason: ' + data.routeReason : ''}`;
+              routeIndicator.style.display = 'block';
+            }
+
+            let searchStatusText;
+            let searchesCountText;
+            if (data.searchUsed) {
+              if (typeof data.searchRequests === 'number') {
+                searchStatusText = 'Web Search: Complete';
+                searchesCountText = `Searches: ${data.searchRequests}`;
+              } else {
+                searchStatusText = 'Web Search: Executed';
+                searchesCountText = 'Searches: count unavailable';
+              }
+            } else {
+              searchStatusText = 'Web Search: Not Executed';
+              searchesCountText = typeof data.searchRequests === 'number'
+                ? `Searches: ${data.searchRequests}`
+                : 'Searches: none';
+            }
+
+            if (data.freshnessStatus && data.freshnessStatus !== 'unknown') {
+              searchesCountText += ` | Freshness: ${data.freshnessStatus}`;
+              if (data.newestSourceDate) {
+                searchesCountText += ` (${data.newestSourceDate})`;
+              }
+            }
+
+            let sourcesFormatted = '';
+            if (Array.isArray(data.sources) && data.sources.length > 0) {
+              sourcesFormatted = 'Sources:\n' + data.sources.map((s, i) => {
+                const titlePart = s.title ? `${s.title} — ` : '';
+                const datePart = s.publishedDate ? ` [${s.publishedDate}]` : '';
+                return `${i + 1}. ${titlePart}${s.url}${datePart}`;
+              }).join('\n');
+            }
+
+            if (searchSection) searchSection.style.display = 'block';
+            if (searchStatus) {
+              searchStatus.textContent = searchStatusText;
+              searchStatus.className = data.searchUsed ? 'mic-status captured' : 'mic-status';
+              searchStatus.style.display = 'block';
+            }
+            if (searchMeta) {
+              searchMeta.textContent = searchesCountText;
+              searchMeta.style.display = 'block';
+            }
+            if (searchResponse) {
+              searchResponse.textContent = data.response;
+              searchResponse.classList.remove('error');
+              searchResponse.style.display = 'block';
+            }
+            if (searchSources) {
+              if (sourcesFormatted) {
+                searchSources.textContent = sourcesFormatted;
+                searchSources.style.display = 'block';
+              } else {
+                searchSources.style.display = 'none';
+              }
+            }
+
+            let fullOutput = `${searchStatusText}\n${searchesCountText}\n\nAnswer:\n${data.response}`;
+            if (sourcesFormatted) {
+              fullOutput += `\n\n${sourcesFormatted}`;
+            }
+            responseArea.textContent = fullOutput;
+            responseArea.classList.remove('error');
+
+            const searchDurationMs = data.timing?.serverSearchDurationMs ?? data.serverSearchDurationMs ?? clientDurationMs;
+            statusIndicator.textContent = `Status: Ready | Route: Web Search | Search: ${searchDurationMs} ms`;
+
+            currentAssistantResponse = null;
+            if (speakResponseBtn) speakResponseBtn.disabled = true;
+          } else {
+            // Normal AI Route
+            if (routeIndicator) {
+              routeIndicator.textContent = `Route: Normal AI${data.routeReason ? ' | Reason: ' + data.routeReason : ''}`;
+              routeIndicator.style.display = 'block';
+            }
+            if (searchSection) searchSection.style.display = 'none';
+
+            responseArea.textContent = 'AI:\n' + data.response;
+            responseArea.classList.remove('error');
+            statusIndicator.textContent = `Status: Ready | Route: Normal AI | AI: ${clientDurationMs} ms`;
+
+            currentAssistantResponse = data.response;
+            if (speakResponseBtn) speakResponseBtn.disabled = false;
+          }
         } else {
-          responseArea.textContent = 'Error: ' + (data.error || 'Failed to process AI request');
+          const errorMsg = data.error || 'Failed to process request';
+          if (routeIndicator && data.route) {
+            const routeName = data.route === 'search' ? 'Web Search' : 'Normal AI';
+            routeIndicator.textContent = `Route: ${routeName} (Error)${data.routeReason ? ' | Reason: ' + data.routeReason : ''}`;
+            routeIndicator.style.display = 'block';
+          }
+          responseArea.textContent = 'Error: ' + errorMsg;
           responseArea.classList.add('error');
           statusIndicator.textContent = 'Status: Error';
         }
@@ -469,6 +569,9 @@
           }
           if (searchSources) {
             searchSources.style.display = 'none';
+          }
+          if (routeIndicator) {
+            routeIndicator.style.display = 'none';
           }
         } else {
           responseArea.textContent = 'Error: ' + (data.error || 'Failed to clear conversation');

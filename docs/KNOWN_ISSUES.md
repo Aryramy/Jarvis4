@@ -105,3 +105,12 @@ Currently tracked issues in JARVIS4:
     - **Search Result Freshness**: Freshness depends on provider retrieval and ranking. A non-hardened search executed in October 2026 returned primarily 2025 results. Hardened prompt dynamic date awareness and honesty instructions ensure the assistant explicitly qualifies results (reporting newest source date found, noting lack of newer evidence). Exhaustive live web coverage is NOT guaranteed.
     - **Architectural Scope**: Search is explicit (`POST /api/search` via "Search Web" button), stateless, isolated from `ConversationSession` and `ConversationStore`, isolated from normal `/api/ai` and `/api/ai/stream`, and not connected to Voice Turn.
     - **No Autonomous Routing or Fallbacks**: No automatic decision engine, no tool loop, no second search engine, and no page fetching/deep browsing are implemented.
+
+13. **Automatic Search Decision v1 Observations & Limitations (Brick 20 Verified)**:
+    - **Conservative Decision Classifier**: Automatic routing is intentionally conservative to prevent unintended web queries, latency increases, and search API quota consumption.
+    - **Ambiguous Freshness Intent**: Ambiguous or implicit temporal queries lacking explicit high-confidence markers (e.g. general questions that could benefit from live information but lack explicit freshness signals) default to normal AI.
+    - **Manual Override Preserved**: The dedicated "Search Web" button (`POST /api/search`) remains available as an explicit manual override when users specifically require grounded live web search.
+    - **Streaming & Voice Turn Not Auto-Routed**: Automatic decision routing applies exclusively to typed "Ask JARVIS" (`POST /api/auto`). Streaming AI (`POST /api/ai/stream`) and Voice Turn (`voiceTurn.js`) remain normal AI only.
+    - **Stateless Search**: Search queries handled via automatic decision remain strictly stateless and do not write to `ConversationSession` or `ConversationStore`.
+    - **Search Source Publication Dates**: Upstream search results may omit publication dates, resulting in `newestSourceDate = null` and `freshnessStatus = 'unknown'`.
+    - **Search Latency**: When search is triggered, latency is governed by the external provider search path (observed range: ~9.6s to ~20.8s across live English, Urdu, and Arabic tests), while local routing decision overhead is negligible (~0.04 ms to ~22.7 ms).

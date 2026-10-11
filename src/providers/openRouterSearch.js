@@ -5,6 +5,7 @@
 
 import { SearchProvider } from './searchBase.js';
 import { config } from '../config/index.js';
+import { isFreshnessSensitiveQuery } from '../routing/freshnessSignals.js';
 
 /**
  * Builds the isolated search system instruction with dynamic current date awareness,
@@ -49,15 +50,9 @@ export const PINNED_SEARCH_TOOL = Object.freeze({
 
 /**
  * Detects whether a search query is freshness-sensitive.
- *
- * @param {string} query
- * @returns {boolean}
+ * Re-exports the shared deterministic freshness detection helper (Brick 20 consistency fix).
  */
-export function isFreshnessSensitiveQuery(query) {
-  if (typeof query !== 'string') return false;
-  const pattern = /\b(latest|recent|recently|current|currently|today|this\s+week|this\s+month|newest|recently\s+announced)\b/i;
-  return pattern.test(query);
-}
+export { isFreshnessSensitiveQuery };
 
 /**
  * Safely extracts text from assistant message content.

@@ -16,6 +16,7 @@ import { OpenRouterTextToSpeechProvider } from '../providers/openRouterTTS.js';
 import { OpenRouterSearchProvider, isFreshnessSensitiveQuery } from '../providers/openRouterSearch.js';
 import { ConversationSession } from '../core/conversationSession.js';
 import { ConversationStore } from '../core/conversationStore.js';
+import { decideSearchRoute } from '../routing/searchDecision.js';
 
 const __dirname = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const HTML_FILE_PATH = join(__dirname, 'index.html');
@@ -333,18 +334,11 @@ export function createRequestListener(options = {}) {
       return;
     }
 
-    // Route: /api/ai (Brick 4 real AI endpoint & Brick 6 conversation context)
-    if (url.pathname === '/api/ai') {
-      if (req.method !== 'POST') {
-        res.writeHead(405, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
-        return;
-      }
-
-      const requestStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
-        ? performance.now()
-        : Date.now();
-
+    /**
+     * Executes internal AI request logic.
+     * Reused by /api/ai and /api/auto.
+     */
+    async function executeAiRequest({ input, provider, session, store, requestStartTime }) {
       const getServerAiDurationMs = () => {
         const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
           ? performance.now()
@@ -352,97 +346,51 @@ export function createRequestListener(options = {}) {
         return Math.max(0, Math.round(now - requestStartTime));
       };
 
-      let body = '';
-      let isTooLarge = false;
-
-      req.on('data', (chunk) => {
-        body += chunk;
-        if (body.length > 1e6) {
-          isTooLarge = true;
-          res.writeHead(413, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: 'Payload Too Large' }));
-          req.destroy();
-        }
-      });
-
-      req.on('end', async () => {
-        if (isTooLarge) return;
-
-        let parsedBody;
-        try {
-          parsedBody = body ? JSON.parse(body) : {};
-        } catch {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: 'Invalid JSON body' }));
-          return;
-        }
-
-        const input = parsedBody.input;
-        if (typeof input !== 'string') {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: 'Input must be a string' }));
-          return;
-        }
-
-        const trimmedInput = input.trim();
-        if (trimmedInput.length === 0) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: 'Input cannot be empty' }));
-          return;
-        }
-
-        let userTurnAdded = false;
-
-        try {
-          const provider = options.provider || new OpenRouterTextProvider();
-
-          const configCheck = provider.validateConfig ? provider.validateConfig() : { valid: true };
-          if (!configCheck.valid) {
-            const serverAiDurationMs = getServerAiDurationMs();
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
-              success: false,
-              error: `Configuration error: ${configCheck.error}`,
-              timing: { serverAiDurationMs },
-              serverAiDurationMs
-            }));
-            return;
+      const configCheck = provider.validateConfig ? provider.validateConfig() : { valid: true };
+      if (!configCheck.valid) {
+        const serverAiDurationMs = getServerAiDurationMs();
+        return {
+          statusCode: 500,
+          body: {
+            success: false,
+            error: `Configuration error: ${configCheck.error}`,
+            timing: { serverAiDurationMs },
+            serverAiDurationMs
           }
+        };
+      }
 
-          // Add user message to session context
-          session.addUserMessage(trimmedInput);
-          userTurnAdded = true;
+      let userTurnAdded = false;
+      try {
+        session.addUserMessage(input);
+        userTurnAdded = true;
 
-          const messages = session.getMessages();
+        const messages = session.getMessages();
+        const result = typeof provider.generateMessages === 'function'
+          ? await provider.generateMessages(messages)
+          : await provider.generate(input);
 
-          const result = typeof provider.generateMessages === 'function'
-            ? await provider.generateMessages(messages)
-            : await provider.generate(trimmedInput);
+        const serverAiDurationMs = getServerAiDurationMs();
+        const providerDurationMs = typeof result.providerDurationMs === 'number'
+          ? result.providerDurationMs
+          : (typeof result.durationMs === 'number' ? result.durationMs : 0);
 
-          const serverAiDurationMs = getServerAiDurationMs();
-          const providerDurationMs = typeof result.providerDurationMs === 'number'
-            ? result.providerDurationMs
-            : (typeof result.durationMs === 'number' ? result.durationMs : 0);
-
-          if (result.success) {
-            // Store assistant response in session context
-            session.addAssistantMessage(result.text);
-
-            if (store) {
-              try {
-                store.save(session.getMessages());
-              } catch {
-                // Safe fallback
-              }
+        if (result.success) {
+          session.addAssistantMessage(result.text);
+          if (store) {
+            try {
+              store.save(session.getMessages());
+            } catch {
+              // Safe fallback
             }
-
-            const timing = {
-              providerDurationMs,
-              serverAiDurationMs
-            };
-
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
+          }
+          const timing = {
+            providerDurationMs,
+            serverAiDurationMs
+          };
+          return {
+            statusCode: 200,
+            body: {
               success: true,
               response: result.text,
               provider: result.provider || (provider instanceof OpenRouterTextProvider ? 'openrouter' : (provider.name || 'custom')),
@@ -450,72 +398,61 @@ export function createRequestListener(options = {}) {
               timing,
               providerDurationMs,
               serverAiDurationMs
-            }));
-          } else {
-            // Provider failed: roll back user turn so context remains clean and uncorrupted
-            if (userTurnAdded) {
-              session.pop();
             }
-
-            let safeError = result.error || 'Provider request failed';
-            const apiKeyToRedact = provider.apiKey || process.env.OPENROUTER_API_KEY || process.env.CHEAPER_INFERENCE_API_KEY;
-            if (apiKeyToRedact) {
-              safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
-            }
-
-            const timing = {
-              serverAiDurationMs
-            };
-            if (typeof result.providerDurationMs === 'number') {
-              timing.providerDurationMs = result.providerDurationMs;
-            }
-
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
+          };
+        } else {
+          if (userTurnAdded) {
+            session.pop();
+          }
+          let safeError = result.error || 'Provider request failed';
+          const apiKeyToRedact = provider.apiKey || process.env.OPENROUTER_API_KEY || process.env.CHEAPER_INFERENCE_API_KEY;
+          if (apiKeyToRedact) {
+            safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
+          }
+          const timing = {
+            serverAiDurationMs
+          };
+          if (typeof result.providerDurationMs === 'number') {
+            timing.providerDurationMs = result.providerDurationMs;
+          }
+          return {
+            statusCode: 500,
+            body: {
               success: false,
               error: safeError,
               timing,
               providerDurationMs: timing.providerDurationMs,
               serverAiDurationMs
-            }));
-          }
-        } catch (err) {
-          // Exception occurred: roll back user turn so context remains clean and uncorrupted
-          if (userTurnAdded) {
-            session.pop();
-          }
-
-          const serverAiDurationMs = getServerAiDurationMs();
-          let safeError = err.message || 'Internal server error';
-          const apiKeyToRedact = (options.provider && options.provider.apiKey) || process.env.OPENROUTER_API_KEY || process.env.CHEAPER_INFERENCE_API_KEY;
-          if (apiKeyToRedact) {
-            safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
-          }
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
+            }
+          };
+        }
+      } catch (err) {
+        if (userTurnAdded) {
+          session.pop();
+        }
+        const serverAiDurationMs = getServerAiDurationMs();
+        let safeError = err.message || 'Internal server error';
+        const apiKeyToRedact = provider.apiKey || process.env.OPENROUTER_API_KEY || process.env.CHEAPER_INFERENCE_API_KEY;
+        if (apiKeyToRedact) {
+          safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
+        }
+        return {
+          statusCode: 500,
+          body: {
             success: false,
             error: safeError,
             timing: { serverAiDurationMs },
             serverAiDurationMs
-          }));
-        }
-      });
-
-      return;
+          }
+        };
+      }
     }
 
-    // Route: /api/search (Brick 19 explicit web search endpoint)
-    if (url.pathname === '/api/search') {
-      if (req.method !== 'POST') {
-        res.writeHead(405, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
-        return;
-      }
-
-      const requestStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
-        ? performance.now()
-        : Date.now();
-
+    /**
+     * Executes internal search request logic.
+     * Reused by /api/search and /api/auto.
+     */
+    async function executeSearchRequest({ prompt, searchProvider, requestStartTime }) {
       const getServerSearchDurationMs = () => {
         const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
           ? performance.now()
@@ -523,90 +460,50 @@ export function createRequestListener(options = {}) {
         return Math.max(0, Math.round(now - requestStartTime));
       };
 
-      let body = '';
-      let isTooLarge = false;
-
-      req.on('data', (chunk) => {
-        body += chunk;
-        if (body.length > 1e6) {
-          isTooLarge = true;
-          res.writeHead(413, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: 'Payload Too Large' }));
-          req.destroy();
-        }
-      });
-
-      req.on('end', async () => {
-        if (isTooLarge) return;
-
-        let parsedBody;
-        try {
-          parsedBody = body ? JSON.parse(body) : {};
-        } catch {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: 'Invalid JSON body' }));
-          return;
-        }
-
-        const prompt = parsedBody.prompt ?? parsedBody.input;
-        if (typeof prompt !== 'string') {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: 'Prompt must be a string' }));
-          return;
-        }
-
-        const trimmedPrompt = prompt.trim();
-        if (trimmedPrompt.length === 0) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: 'Prompt cannot be empty' }));
-          return;
-        }
-
-        try {
-          const provider = options.searchProvider || new OpenRouterSearchProvider();
-
-          const configCheck = provider.validateConfig ? provider.validateConfig() : { valid: true };
-          if (!configCheck.valid) {
-            const serverSearchDurationMs = getServerSearchDurationMs();
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
-              success: false,
-              error: `Configuration error: ${configCheck.error}`,
-              searchUsed: false,
-              searchRequests: null,
-              searchEvidence: 'none',
-              sources: [],
-              currentDate: new Date().toISOString().slice(0, 10),
-              freshnessSensitive: isFreshnessSensitiveQuery(trimmedPrompt),
-              newestSourceDate: null,
-              freshnessStatus: 'unknown',
-              timing: {
-                serverSearchDurationMs,
-                providerSearchDurationMs: 0,
-                providerDurationMs: 0
-              },
+      const configCheck = searchProvider.validateConfig ? searchProvider.validateConfig() : { valid: true };
+      if (!configCheck.valid) {
+        const serverSearchDurationMs = getServerSearchDurationMs();
+        return {
+          statusCode: 500,
+          body: {
+            success: false,
+            error: `Configuration error: ${configCheck.error}`,
+            searchUsed: false,
+            searchRequests: null,
+            searchEvidence: 'none',
+            sources: [],
+            currentDate: new Date().toISOString().slice(0, 10),
+            freshnessSensitive: isFreshnessSensitiveQuery(prompt),
+            newestSourceDate: null,
+            freshnessStatus: 'unknown',
+            timing: {
               serverSearchDurationMs,
-              providerSearchDurationMs: 0
-            }));
-            return;
-          }
-
-          const result = await provider.search(trimmedPrompt);
-
-          const serverSearchDurationMs = getServerSearchDurationMs();
-          const providerSearchDurationMs = typeof result.providerSearchDurationMs === 'number'
-            ? result.providerSearchDurationMs
-            : (typeof result.providerDurationMs === 'number' ? result.providerDurationMs : 0);
-
-          const timing = {
-            providerSearchDurationMs,
+              providerSearchDurationMs: 0,
+              providerDurationMs: 0
+            },
             serverSearchDurationMs,
-            providerDurationMs: providerSearchDurationMs
-          };
+            providerSearchDurationMs: 0
+          }
+        };
+      }
 
-          if (result.success) {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
+      try {
+        const result = await searchProvider.search(prompt);
+        const serverSearchDurationMs = getServerSearchDurationMs();
+        const providerSearchDurationMs = typeof result.providerSearchDurationMs === 'number'
+          ? result.providerSearchDurationMs
+          : (typeof result.providerDurationMs === 'number' ? result.providerDurationMs : 0);
+
+        const timing = {
+          providerSearchDurationMs,
+          serverSearchDurationMs,
+          providerDurationMs: providerSearchDurationMs
+        };
+
+        if (result.success) {
+          return {
+            statusCode: 200,
+            body: {
               success: true,
               response: result.response || result.text,
               provider: result.provider || 'openrouter',
@@ -629,16 +526,17 @@ export function createRequestListener(options = {}) {
               timing,
               providerSearchDurationMs,
               serverSearchDurationMs
-            }));
-          } else {
-            let safeError = result.error || 'Search request failed';
-            const apiKeyToRedact = provider.apiKey || process.env.OPENROUTER_API_KEY;
-            if (apiKeyToRedact) {
-              safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
             }
-
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
+          };
+        } else {
+          let safeError = result.error || 'Search request failed';
+          const apiKeyToRedact = searchProvider.apiKey || process.env.OPENROUTER_API_KEY;
+          if (apiKeyToRedact) {
+            safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
+          }
+          return {
+            statusCode: 500,
+            body: {
               success: false,
               error: safeError,
               searchUsed: Boolean(result.searchUsed),
@@ -646,7 +544,7 @@ export function createRequestListener(options = {}) {
               searchEvidence: result.searchEvidence || 'none',
               sources: Array.isArray(result.sources) ? result.sources : [],
               currentDate: result.currentDate || new Date().toISOString().slice(0, 10),
-              freshnessSensitive: typeof result.freshnessSensitive === 'boolean' ? result.freshnessSensitive : isFreshnessSensitiveQuery(trimmedPrompt),
+              freshnessSensitive: typeof result.freshnessSensitive === 'boolean' ? result.freshnessSensitive : isFreshnessSensitiveQuery(prompt),
               newestSourceDate: result.newestSourceDate ?? null,
               freshnessStatus: result.freshnessStatus || 'unknown',
               providerFinishReason: result.providerFinishReason ?? null,
@@ -659,17 +557,19 @@ export function createRequestListener(options = {}) {
               timing,
               serverSearchDurationMs,
               providerSearchDurationMs
-            }));
-          }
-        } catch (err) {
-          const serverSearchDurationMs = getServerSearchDurationMs();
-          let safeError = err.message || 'Internal server error';
-          const apiKeyToRedact = (options.searchProvider && options.searchProvider.apiKey) || process.env.OPENROUTER_API_KEY;
-          if (apiKeyToRedact) {
-            safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
-          }
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
+            }
+          };
+        }
+      } catch (err) {
+        const serverSearchDurationMs = getServerSearchDurationMs();
+        let safeError = err.message || 'Internal server error';
+        const apiKeyToRedact = searchProvider.apiKey || process.env.OPENROUTER_API_KEY;
+        if (apiKeyToRedact) {
+          safeError = safeError.replaceAll(apiKeyToRedact, '[REDACTED]');
+        }
+        return {
+          statusCode: 500,
+          body: {
             success: false,
             error: safeError,
             searchUsed: false,
@@ -687,7 +587,244 @@ export function createRequestListener(options = {}) {
             },
             serverSearchDurationMs,
             providerSearchDurationMs: 0
-          }));
+          }
+        };
+      }
+    }
+
+    // Route: /api/ai (Brick 4 real AI endpoint & Brick 6 conversation context)
+    if (url.pathname === '/api/ai') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      const requestStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+
+      let body = '';
+      let isTooLarge = false;
+
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 1e6) {
+          isTooLarge = true;
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Payload Too Large' }));
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        if (isTooLarge) return;
+
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid JSON body' }));
+          return;
+        }
+
+        const input = parsedBody.input ?? parsedBody.text;
+        if (typeof input !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Input must be a string' }));
+          return;
+        }
+
+        const trimmedInput = input.trim();
+        if (trimmedInput.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Input cannot be empty' }));
+          return;
+        }
+
+        const provider = options.provider || new OpenRouterTextProvider();
+        const result = await executeAiRequest({
+          input: trimmedInput,
+          provider,
+          session,
+          store,
+          requestStartTime
+        });
+
+        res.writeHead(result.statusCode, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result.body));
+      });
+
+      return;
+    }
+
+    // Route: /api/search (Brick 19 explicit web search endpoint)
+    if (url.pathname === '/api/search') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      const requestStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+
+      let body = '';
+      let isTooLarge = false;
+
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 1e6) {
+          isTooLarge = true;
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Payload Too Large' }));
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        if (isTooLarge) return;
+
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid JSON body' }));
+          return;
+        }
+
+        const prompt = parsedBody.prompt ?? parsedBody.input ?? parsedBody.text;
+        if (typeof prompt !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Prompt must be a string' }));
+          return;
+        }
+
+        const trimmedPrompt = prompt.trim();
+        if (trimmedPrompt.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Prompt cannot be empty' }));
+          return;
+        }
+
+        const searchProvider = options.searchProvider || new OpenRouterSearchProvider();
+        const result = await executeSearchRequest({
+          prompt: trimmedPrompt,
+          searchProvider,
+          requestStartTime
+        });
+
+        res.writeHead(result.statusCode, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result.body));
+      });
+
+      return;
+    }
+
+    // Route: /api/auto (Brick 20 automatic search decision endpoint)
+    if (url.pathname === '/api/auto') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      const requestStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+
+      let body = '';
+      let isTooLarge = false;
+
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 1e6) {
+          isTooLarge = true;
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Payload Too Large' }));
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        if (isTooLarge) return;
+
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid JSON body' }));
+          return;
+        }
+
+        const text = parsedBody.text ?? parsedBody.input ?? parsedBody.prompt;
+        if (typeof text !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Input must be a string' }));
+          return;
+        }
+
+        const trimmedText = text.trim();
+        if (trimmedText.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Input cannot be empty' }));
+          return;
+        }
+
+        const routeStartTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+          ? performance.now()
+          : Date.now();
+        const decisionFn = options.searchDecisionFn || decideSearchRoute;
+        const decision = decisionFn(trimmedText);
+        const routeEndTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+          ? performance.now()
+          : Date.now();
+        const routeDecisionMs = Math.max(0.001, Number((routeEndTime - routeStartTime).toFixed(3)));
+
+        if (decision.route === 'search') {
+          const searchProvider = options.searchProvider || new OpenRouterSearchProvider();
+          const result = await executeSearchRequest({
+            prompt: trimmedText,
+            searchProvider,
+            requestStartTime
+          });
+          const responseBody = {
+            ...result.body,
+            route: 'search',
+            routeReason: decision.reason,
+            routeDecisionMs,
+            timing: {
+              ...(result.body.timing || {}),
+              routeDecisionMs
+            }
+          };
+          res.writeHead(result.statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(responseBody));
+        } else {
+          const provider = options.provider || new OpenRouterTextProvider();
+          const result = await executeAiRequest({
+            input: trimmedText,
+            provider,
+            session,
+            store,
+            requestStartTime
+          });
+          const responseBody = {
+            ...result.body,
+            route: 'ai',
+            routeReason: decision.reason,
+            routeDecisionMs,
+            timing: {
+              ...(result.body.timing || {}),
+              routeDecisionMs
+            }
+          };
+          res.writeHead(result.statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(responseBody));
         }
       });
 

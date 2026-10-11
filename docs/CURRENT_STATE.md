@@ -1,8 +1,8 @@
 Project: JARVIS4
-Current Brick: 19
-Status: VERIFIED
-Last Verified Brick: BRICK-019
-Current Feature: Reliable Internet Search v1 (Explicit Web Search via OpenRouter)
+Current Brick: 20
+Status: BRICK-020 VERIFIED
+Last Verified Brick: BRICK-020
+Current Feature: Automatic Search Decision v1 (Deterministic Local Freshness Routing)
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
@@ -108,7 +108,37 @@ Next Feature: NOT AUTHORIZED
   - Controlled 30-second timeout: Request timeout remains strictly controlled, does not reuse previous results, and does not fall back to ungrounded model prose
   - Minimal web UI integration: Added "Search Web" button (`#search-web-btn`) near text input, and dedicated search display section (`#search-section`, `#search-status`, `#search-meta`, `#search-response`, `#search-sources`) displaying search status, search request count, freshness status, answer, and sources list with publication dates
   - Architectural boundary enforcement: Zero browser automation, zero Playwright, zero web-fetch tool, zero fallback search engine, zero automatic search decision / routing, zero voice-search integration
-- Automated test suite expanded to 448 tests across 27 suites passing offline with zero live external calls (Exit Code: 0)
+- Automatic Search Decision v1 — Deterministic Local Freshness Routing (Brick 20):
+  - Status: BRICK-020 VERIFIED
+  - Shared Freshness Helper: `src/routing/freshnessSignals.js` provides a single shared source of truth for both Brick-20 routing (`searchDecision.js`) and Brick-19 search freshness detection (`openRouterSearch.js`), guaranteeing strict consistency across English, Urdu, and Arabic.
+  - Pure Local Decision Module: `decideSearchRoute(text)` in `src/routing/searchDecision.js` evaluates queries deterministically with zero network calls, zero LLMs, zero embeddings, zero global state mutations, and zero remote classifiers.
+  - Guard Rails & False-Positive Protection: Lexical definition queries (`what does ... mean`, `define ...`, `meaning of ...`) and conceptual explanations (`how does ... work`, `explain how ... works`, `electric current`, `explain weather forecasting`, `what is a news article`, `how do i update`) route to normal AI with safe diagnostic reasons (`guard:definition`, `guard:explanation`) and return `freshnessSensitive: false`.
+  - High-Confidence Freshness Triggers: Explicit English freshness terms (`latest`, `newest`, `recent`, `recently`, `breaking`, `today`, `tonight`, `right now`, `currently`, `this week`, `this month`, `this year`, `as of today`, `as of now`, `news`, `what's new`).
+  - Current + Time-Sensitive Entity Patterns: Time-sensitive entity modifications of "current" (`current CEO`, `current president`, `current price`, `current rate`, `current version`, etc.) route to search, while standalone uses ("What is electric current?") route to normal AI.
+  - Live-Data Patterns: Weather (`weather in/for <place>`, `forecast in/for <place>`, `what is the weather`), financial/crypto (`exchange rate`, `stock price`, `bitcoin price`), sports (`score of`, `scores for`, `standings for`), and service status (`is <service> down`).
+  - Direct Unicode Multilingual Freshness Signals: Unified classifier detects Urdu (`تازہ ترین`, `حالیہ`, `آج`, `ابھی`, `اس ہفتے`, `اس مہینے`, `اس سال`, `خبریں`) and Arabic (`أحدث`, `الأحدث`, `اليوم`, `الآن`, `حاليًا`, `هذا الأسبوع`, `هذا الشهر`, `هذا العام`, `أخبار`, `الأخبار`) without separate pipelines, language selectors, or transliteration. Both router and search layer return consistent `route: search` and `freshnessSensitive: true`.
+  - Orchestration Route: `POST /api/auto` receives user text, normalizes whitespace for classification, records local decision latency `routeDecisionMs`, and invokes exactly ONE existing provider path (`executeAiRequest` or `executeSearchRequest`).
+  - Single Execution Path & Failure Safety: Search failure returns controlled Brick-19 error diagnostics without falling back to model-only prose; AI failure never invokes search.
+  - Conversation & Statelessness Invariants: Search route remains strictly stateless (never written to `ConversationSession` or `ConversationStore`); normal AI preserves full conversation continuity and atomic disk persistence.
+  - UI Integration: "Ask JARVIS" button (`#ask-ai-btn`) now submits to `POST /api/auto`, displays non-intrusive `#route-indicator` (`Route: Normal AI` or `Route: Web Search | Reason: <reason>`), and displays search sources when search is selected. Explicit "Search Web" (`#search-web-btn`) remains an independent manual override calling `POST /api/search`.
+  - Strict Boundary Enforcement: Streaming AI (`/api/ai/stream`), Voice Turn (`voiceTurn.js`), STT, and TTS remain completely untouched.
+  - Human Live Verification (Verified):
+    - Live Test A (Normal AI: "What is Power BI?"): PASS (`route: ai`, `routeReason: default:no-live-signal`, `routeDecisionMs: 19.065 ms`, `provider: openrouter`, `model: deepseek/deepseek-v4-flash-0731`)
+    - Live Test B (English Automatic Search: "What are the latest Microsoft Fabric announcements?"): PASS (`route: search`, `routeReason: freshness:latest`, `routeDecisionMs: 0.127 ms`, `searchUsed: true`, `sources: 3`, `currentDate: 2026-10-11`, `freshnessSensitive: true`)
+    - Live Test C (False-Positive Protection: "What is electric current?"): PASS (`route: ai`, `routeReason: guard:explanation`, `routeDecisionMs: 0.04 ms`, no search invoked)
+    - Live Test D (Urdu Automatic Search: "آج Microsoft Fabric کی تازہ ترین خبریں کیا ہیں؟"): PASS (`route: search`, `routeReason: multilingual:urdu:تازہ ترین`, `routeDecisionMs: 20.24 ms`, `searchUsed: true`, `sources: 3`, `currentDate: 2026-10-11`, `freshnessSensitive: true`)
+    - Live Test E (Arabic Automatic Search: "ما هي أحدث أخبار Microsoft Fabric اليوم؟"): PASS (`route: search`, `routeReason: multilingual:arabic:أحدث`, `routeDecisionMs: 22.724 ms`, `searchUsed: true`, `sources: 3`, `currentDate: 2026-10-11`, `freshnessSensitive: true`)
+  - Known Limitations (Recorded):
+    1. Automatic routing is intentionally conservative.
+    2. Ambiguous freshness intent may still route to normal AI.
+    3. Explicit Search Web remains available as manual override.
+    4. Streaming AI is not automatically routed.
+    5. Voice Turn is not automatically routed.
+    6. Search remains stateless.
+    7. Search latency remains dependent on external provider behavior.
+    8. Search source publication dates may be unavailable in citation metadata, resulting in: `newestSourceDate = null`, `freshnessStatus = "unknown"`.
+    9. Automatic routing currently covers only high-confidence V1 freshness patterns.
+- Automated test suite expanded to 489 tests across 28 suites passing offline with zero live external calls (Exit Code: 0)
 
 ## External integrations
 
@@ -389,6 +419,11 @@ Status: BRICK-018 VERIFIED (Exit Code: 0)
   - Brick 13 browser live voice turn test: VERIFIED
   - Brick 14 live AI latency instrumentation test: VERIFIED
   - Brick 15 live AI latency benchmark & candidate selection: VERIFIED
+  - Brick 16 live benchmark confirmation & selection: VERIFIED
+  - Brick 17 OpenRouter text AI production migration: VERIFIED
+  - Brick 18 OpenRouter STT production migration & latency instrumentation: VERIFIED
+  - Brick 19 explicit grounded live web search: VERIFIED
+  - Brick 20 automatic search decision v1 (deterministic local freshness routing): VERIFIED
 
 
 

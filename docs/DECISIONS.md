@@ -319,3 +319,36 @@
   7. Status: BRICK-019 VERIFIED.
 - **Consequences**: Ensures that the model has sufficient token headroom and tool execution clearance to synthesize a grounded answer, provides definitive diagnostic classification if content is missing, and preserves provider evidence integrity. Human live verification confirmed that explicit Search Web v1 completed in 15627 ms (down from ~29930 ms) with 3 current 2026 sources, provider `url_citation` execution evidence, truthful freshness qualification, and complete isolation from production text AI.
 
+## ADR-0027: Automatic Search Decision v1 via Local Deterministic Freshness Routing
+- **Status**: Accepted
+- **Context**: Prior to Brick 20, JARVIS had two verified independent pathways: normal AI (`POST /api/ai`) and explicit grounded search (`POST /api/search`). Users had to decide manually whether to click "Ask JARVIS" or "Search Web". Brick 20 requires normal "Ask JARVIS" to make an automatic, zero-cost, deterministic local decision on whether a query requires live web search.
+- **Decision**:
+  1. Pure Deterministic Classifier: Implement `decideSearchRoute(text)` in `src/routing/searchDecision.js` with zero network calls, zero LLMs, zero embeddings, zero global state mutations, and zero remote classifiers.
+  2. Guard Rails: Apply lexical definition guards (`what does ... mean`, `define ...`, `meaning of ...`) and conceptual explanation guards (`how does ... work`, `explain how ... works`, `electric current`, `explain weather forecasting`, `what is a news article`, `how do i update`) to prevent false-positive search routing.
+  3. High-Confidence Triggers: Trigger search on explicit freshness words/phrases (`latest`, `newest`, `recent`, `recently`, `breaking`, `today`, `tonight`, `right now`, `currently`, `this week`, `this month`, `this year`, `as of today`, `as of now`, `news`, `what's new`), time-sensitive entity modifications of "current" (`current CEO`, `current president`, `current price`, `current rate`, etc.), live-data patterns (`weather in`, `stock price`, `bitcoin price`, etc.), and direct Unicode multilingual freshness terms in Urdu (`تازہ ترین`, `حالیہ`, `آج`, `ابھی`, `اس ہفتے`, `اس مہینے`, `اس سال`, `خبریں`) and Arabic (`أحدث`, `الأحدث`, `اليوم`, `الآن`, `حاليًا`, `هذا الأسبوع`, `هذا الشهر`, `هذا العام`, `أخبار`, `الأخبار`).
+  4. Orchestration Endpoint: Add `POST /api/auto` in `src/web/server.js` that evaluates text locally, measures `routeDecisionMs`, and invokes exactly ONE existing internal execution path (`executeAiRequest` or `executeSearchRequest`).
+  5. Error & Failure Safety: If search fails, propagate controlled Brick-19 search errors; never silently fall back to model-only AI. If AI fails, never automatically route to search.
+  6. Memory & Boundaries: Search remains strictly stateless; normal AI participates in `ConversationSession` and `ConversationStore`. Streaming AI, voice turn, STT, and TTS remain completely untouched.
+  7. UI Integration: Connect typed "Ask JARVIS" (`#ask-ai-btn`) to `POST /api/auto`, display a non-intrusive `#route-indicator` (e.g. `Route: Web Search | Reason: freshness:latest` or `Route: Normal AI`), and render search sources when automatically routed to search. Retain explicit "Search Web" button (`#search-web-btn`) as a manual override.
+- **Why**: A remote LLM classifier would add network latency (hundreds to thousands of ms), add API cost, introduce another external failure point, and is completely unnecessary for obvious V1 freshness signals.
+- **Limitations**:
+  - Classifier is intentionally conservative.
+  - Classifier does not fully understand arbitrary complex temporal intent.
+  - Ambiguous questions remain on normal AI.
+  - Explicit Search Web remains available as override.
+  - Automatic routing applies to text Ask JARVIS only.
+  - Streaming is not auto-routed.
+  - Voice Turn is not auto-routed.
+  - Search remains stateless.
+
+## ADR-0028: Unified Shared Deterministic Freshness Signals across Routing and Search Layers
+- **Status**: Accepted
+- **Context**: During live testing of Brick 20, the Urdu prompt `آج Microsoft Fabric کی تازہ ترین خبریں کیا ہیں؟` was correctly routed to search (`route: search`, `routeReason: multilingual:urdu:تازہ ترین`), but the search provider returned `freshnessSensitive: false`. This divergence occurred because Brick-19 search used an ASCII-only regex (`/\b(latest|recent|...)\b/i`) while Brick-20 routing used Unicode-aware patterns.
+- **Decision**:
+  1. Extract a single shared helper module `src/routing/freshnessSignals.js` containing canonical authorized freshness signals for English, Urdu, and Arabic.
+  2. Share identical false-positive guard rails (definition guards and conceptual explanation guards) and time-sensitive entity/rate patterns.
+  3. Re-export `isFreshnessSensitiveQuery` from `src/providers/openRouterSearch.js` referencing the shared module.
+  4. Eliminate divergent hardcoded keyword lists across routing and search layers.
+- **Consequences**: Guarantees consistent freshness semantics between router (`routeReason`) and search engine (`freshnessSensitive`) across all authorized languages without adding language detection or query translation.
+
+

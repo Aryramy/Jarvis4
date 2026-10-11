@@ -58,3 +58,6 @@ Status: VERIFIED
 BRICK-019 — Reliable Internet Search v1 (Explicit Web Search via OpenRouter)
 Status: VERIFIED
 
+BRICK-020 — Automatic Search Decision v1 (Deterministic Local Freshness Routing)
+Status: VERIFIED
+
