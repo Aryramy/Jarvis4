@@ -84,3 +84,7 @@ Status: VERIFIED
 
 BRICK-028 — Page Understanding v1 (Visible Page + Element Inventory)
 Status: VERIFIED
+
+BRICK-029 — Reliable Element Targeting v1 (Semantic Target Resolution Without Interaction)
+Status: VERIFIED
+

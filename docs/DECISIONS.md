@@ -624,6 +624,61 @@
   - Transient document replacement after unstable navigations is recovered safely without crashing or exposing raw browser internals.
   - No element targeting, clicking, typing, or auto-decision connections implemented; Brick 29 not started.
 
+## ADR-0030: Reliable Element Targeting v1 (Brick 29)
+- **Status**: Accepted
+- **Context**:
+  - Green-028 page understanding answers "What is on this page?", but does not resolve user target descriptions to a specific candidate element.
+  - Brick 29 answers: "Which exact visible element does this target description refer to?" without performing any interaction.
+  - Future bricks (Brick 30 interaction, Brick 33 forms, Brick 40 multi-step browser agent) require reliable, resilient element targeting without brittle assumptions (such as generated CSS classes, full DOM paths, nth-child, or coordinate matching).
+  - Target resolution must strictly remain read-only: zero clicking, typing, filling, pressing, scrolling, focusing, hovering, form submitting, navigating, or tab opening.
+  - Public contract must NOT expose CSS selectors, XPath, Playwright locator expressions, ElementHandles, or internal node IDs.
+  - Privacy must be strictly preserved: never return input values, passwords, textarea contents, file paths, or hidden/CSRF tokens.
+  - Zero AI / LLM calls; untrusted webpage text must be handled deterministically.
+- **Decision**:
+  1. **Read-Only Semantic Resolution**: Answers target queries against visible elements without executing any interaction. Zero clicking, typing, form submission, or navigation.
+  2. **Deterministic Exact-Match-First Policy**: Queries evaluate exact normalized matches before attempting weaker partial matches.
+  3. **Strict Semantic Signal Priority**:
+     - Kind / ARIA role (score 100)
+     - Accessible Name (`aria-label`, `aria-labelledby`, element text for buttons/links/headings) (score 100)
+     - Associated Label for form controls (score 90)
+     - Exact Visible Text (score 80)
+     - Placeholder attribute (score 70)
+     - Name attribute (score 60)
+     - Href attribute (score 50)
+     - Bounded Partial Match (score 30-15) as controlled fallback only when exact matches yield 0 candidates.
+  4. **Controlled Ambiguity Contract**: When two or more candidates tie on highest score, returns `TARGET_AMBIGUOUS` with `candidateCount` and safe candidate summaries. Strictly prohibits choosing the first DOM candidate arbitrarily.
+  5. **Disambiguation Context**: Supports structural parent form context (`formAction`, `formMethod`, `formName`) and role/type constraints to break ties deterministically.
+  6. **Controlled Not Found Contract**: Returns `TARGET_NOT_FOUND` with `candidateCount: 0` when no elements match. Prohibits guessing, searching the web, navigating, or falling back to AI.
+  7. **Multilingual Unicode Normalization**: Conservative NFC normalization, whitespace collapsing, and case-insensitivity without stripping punctuation or requiring language-specific configuration. Fully supports Arabic, Urdu, English, etc.
+  8. **Snapshot Staleness Protection**: Each resolution is tagged with an opaque page `snapshotToken` (`snap_v{version}_{salt}`) tied to document lifecycle. Tokens are invalidated upon URL changes, navigation, back, forward, refresh, reload, page close, or browser restart.
+  9. **No Long-Lived ElementHandle**: Raw Playwright ElementHandles, JSHandles, and node IDs are never persisted or returned, enabling future bricks to re-resolve elements immediately prior to interaction.
+  10. **Zero Actionable Selectors Exposed**: Public API strictly refuses and omits CSS selectors, XPath expressions, and Playwright locators.
+  11. **Strict Input Privacy**: Field values, passwords, textareas, file inputs, hidden inputs, CSRF tokens, cookies, and local/session storage are never extracted or returned.
+  12. **Zero AI**: 0 OpenRouter calls, 0 LLM calls, 0 Exa / web search calls.
+  13. **Mandatory Running Browser**: Browser must be already running; returns controlled `BROWSER_NOT_RUNNING` without auto-launching.
+  14. **New Endpoint**: `POST /api/browser/resolve-target` accepting structured `{ target: { kind, name, ... } }`. Rejects non-POST with 405; rejects arbitrary CSS/XPath selectors and unsupported kinds with 400.
+  15. **Target Resolver UI**: Dedicated "Target Resolver" panel in `src/web/index.html` with Kind dropdown, Target Name input, and Resolve Target button. Output rendered safely strictly via `.textContent`. Zero execute/click/type buttons.
+  16. **100% Mocked Offline Tests**: Test suite executes completely offline during `npm run verify` (974 tests passing across 90 suites, 0 failures).
+- **Live Verification**:
+  - **Live Test A (Selenium Submit button)**: PASS. URL `https://www.selenium.dev/selenium/web/web-form.html`, target `{ kind: "button", name: "Submit" }`. Resolution: `unique`, Confidence: `high`, Matched By: `["kind", "accessibleName"]`, Candidate Count: 1; resolved element: `kind: "button"`, `accessibleName: "Submit"`, `text: "Submit"`, `formAction: "submitted-form.html"`, `formMethod: "GET"`, snapshot token & opaque targetId present; zero CSS/XPath exposed, zero interaction.
+  - **Live Test B (Selenium Password input)**: PASS. Target `{ kind: "input", name: "Password" }`. Resolution: `unique`, Confidence: `high`, Matched By: `["kind", "accessibleName"]`, Candidate Count: 1; resolved: `kind: "input"`, `accessibleName: "Password"`, `label: "Password"`, `inputType: "password"`, `name: "my-password"`; password and input values strictly omitted; zero interaction.
+  - **Live Test C (Wikipedia search input)**: PASS. URL `https://www.wikipedia.org/`, target `{ kind: "input", name: "Search Wikipedia" }`. Resolution: `unique`, Confidence: `high`, Matched By: `["kind", "accessibleName"]`, Candidate Count: 1; resolved: `kind: "input"`, `accessibleName: "Search Wikipedia"`, `label: "Search Wikipedia"`, `inputType: "search"`, `name: "search"`; form metadata observed safely; input value exposed: NO, typing: NO.
+  - **Live Test D (Wikipedia partial semantic link match)**: PASS. Target `{ kind: "link", name: "English" }` against actual accessible text `English 7,249,000+ articles`. Resolution: `unique`, Confidence: `medium`, Matched By: `["kind", "accessibleName"]`, Candidate Count: 1, `href: "//en.wikipedia.org/"`; correctly assigned medium confidence for partial match without false high-confidence claims.
+  - **Live Test E (Snapshot stability)**: PASS. Unchanged Wikipedia page resolved twice without navigation, refresh, or interaction; both returned identical snapshot token (`snap_v4_mv58qhxy_4`) and identical opaque target identity. Unchanged document retains snapshot identity: PASS.
+  - **Live Test F (Navigation snapshot invalidation)**: PASS. Navigated from Wikipedia (`snap_v4_mv58qhxy_4`) to Selenium web form; resolving Submit returned fresh snapshot (`snap_v2_mv58xz0o_6`); old snapshot strictly invalidated: PASS.
+  - **Important Target-ID Contract**: Opaque `targetId` values may repeat structurally across documents. TargetId MUST NEVER be treated as globally valid by itself. Future Brick 30 interaction must bind target identity to the current page/document snapshot and must verify/re-resolve before performing any action. A targetId without matching current snapshot context must not authorize an action.
+  - **Live Test G (Ambiguity protection)**: PASS. Selenium form containing two checkbox inputs with `name="my-check"`; target `{ kind: "input", name: "my-check" }` returned `TARGET_AMBIGUOUS` (`resolution: "ambiguous"`, Candidate Count: 2) with safe candidate summaries for Candidate 1 (`Checked checkbox`, `checked: true`) and Candidate 2 (`Default checkbox`, `checked: false`); first DOM candidate was NOT arbitrarily selected: PASS.
+  - **Live Test H (Semantic disambiguation)**: PASS. Target `{ kind: "input", name: "Checked checkbox" }` resolved uniquely with high confidence (`inputType: "checkbox"`, `label: "Checked checkbox"`, `checked: true`); additional semantic evidence disambiguates correctly: PASS.
+  - **Live Test I (Not found protection)**: PASS. Target `{ kind: "button", name: "Definitely Does Not Exist" }` returned `TARGET_NOT_FOUND` (`resolution: "not_found"`, Candidate Count: 0, Message: "No matching element found on the current page"); zero guessing, zero web search, zero navigation, zero AI fallback: PASS.
+  - **Live Test J (Non-Latin Unicode / Japanese)**: PASS. Wikipedia target `{ kind: "link", name: "日本語" }` against actual accessible text `日本語 1,521,000+ 記事` resolved uniquely with medium confidence (`href: "//ja.wikipedia.org/"`); zero translation service or language configuration used: PASS.
+  - **Arabic Discovery Test & Live Test K (Arabic semantic targeting)**: PASS. Real page `https://ar.wikipedia.org/` inspected (12000 chars, 100 returned elements) discovering visible search button `[button] <button> : "بحث"`; targeted `{ kind: "button", name: "بحث" }` resolved uniquely with high confidence (`accessibleName: "بحث"`, `formAction: "/w/index.php"`, `formMethod: "GET"`, `formName: "searchform"`, snapshot `snap_v2_mv59azn7_9`, opaque targetId present); real Arabic targeting: PASS, Unicode-safe: PASS, no translation dependency: PASS.
+- **Consequences**:
+  - Semantic element targeting is fully operational and verified live across multiple real websites and Unicode scripts.
+  - TargetId contract explicitly documented for Brick 30: must be bound to current snapshot and re-resolved before action.
+  - Zero interactions, zero clicks, zero typing, and zero AI calls.
+  - BRICK-029 verified; Brick 30 interaction not started.
+
+
 
 
 

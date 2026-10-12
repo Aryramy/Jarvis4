@@ -23,6 +23,7 @@ import { executePageQa, PageQaError } from '../webpage/pageQa.js';
 import { executeResearchOne, ResearchOneError } from '../research/researchOne.js';
 import { decideBrowserEscalation, BrowserEscalationError } from '../routing/browserEscalation.js';
 import { defaultBrowserManager, BrowserManager, BrowserManagerError } from '../browser/browserManager.js';
+import { TargetResolutionError, SUPPORTED_KINDS } from '../browser/targetResolver.js';
 
 const __dirname = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const HTML_FILE_PATH = join(__dirname, 'index.html');
@@ -1649,6 +1650,139 @@ export function createRequestListener(options = {}) {
           }));
         }
       })();
+
+      return;
+    }
+
+    // Route: POST /api/browser/resolve-target (Brick 29 Reliable Element Targeting v1)
+    if (url.pathname === '/api/browser/resolve-target') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) {
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_REQUEST',
+            code: 'INVALID_REQUEST',
+            message: 'Invalid JSON request body'
+          }));
+          return;
+        }
+
+        if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_TARGET_QUERY',
+            code: 'INVALID_TARGET_QUERY',
+            message: 'Request body must be an object'
+          }));
+          return;
+        }
+
+        const targetQuery = (parsedBody.target && typeof parsedBody.target === 'object' && !Array.isArray(parsedBody.target))
+          ? parsedBody.target
+          : (parsedBody.target !== undefined ? null : parsedBody);
+
+        if (!targetQuery || typeof targetQuery !== 'object' || Array.isArray(targetQuery)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_TARGET_QUERY',
+            code: 'INVALID_TARGET_QUERY',
+            message: 'Target query must be an object'
+          }));
+          return;
+        }
+
+        // Reject forbidden selector types
+        if (targetQuery.selector || targetQuery.css || targetQuery.xpath || targetQuery.locator || targetQuery.js) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_TARGET_QUERY',
+            code: 'INVALID_TARGET_QUERY',
+            message: 'CSS selectors, XPath, and locator expressions are not accepted.'
+          }));
+          return;
+        }
+
+        // Validate supported kind if supplied
+        if (targetQuery.kind !== undefined && targetQuery.kind !== null) {
+          if (typeof targetQuery.kind !== 'string' || targetQuery.kind.trim().length === 0) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: false,
+              error: 'INVALID_TARGET_QUERY',
+              code: 'INVALID_TARGET_QUERY',
+              message: 'Target kind must be a non-empty string'
+            }));
+            return;
+          }
+          const normKind = targetQuery.kind.trim().toLowerCase();
+          if (!SUPPORTED_KINDS.includes(normKind)) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: false,
+              error: 'UNSUPPORTED_TARGET_KIND',
+              code: 'UNSUPPORTED_TARGET_KIND',
+              message: `Unsupported target kind: ${targetQuery.kind}`
+            }));
+            return;
+          }
+        }
+
+        try {
+          const result = await browserManager.resolveTarget(targetQuery);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'TARGET_RESOLUTION_FAILED';
+          let statusCode = 500;
+          if (errorCode === 'BROWSER_NOT_RUNNING' || errorCode === 'BROWSER_PAGE_NOT_AVAILABLE') {
+            statusCode = 400;
+          } else if (errorCode === 'INVALID_TARGET_QUERY' || errorCode === 'UNSUPPORTED_TARGET_KIND') {
+            statusCode = 400;
+          } else if (errorCode === 'BROWSER_PAGE_BUSY') {
+            statusCode = 503;
+          }
+
+          let safeMessage = 'Target resolution failed.';
+          if (errorCode === 'BROWSER_NOT_RUNNING') {
+            safeMessage = 'Browser is not running. Please launch the browser first.';
+          } else if (errorCode === 'BROWSER_PAGE_BUSY') {
+            safeMessage = 'The page is still changing or loading. Try inspection again shortly.';
+          } else if (err instanceof TargetResolutionError || err instanceof BrowserManagerError) {
+            safeMessage = (typeof err.message === 'string')
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage
+          }));
+        }
+      });
 
       return;
     }

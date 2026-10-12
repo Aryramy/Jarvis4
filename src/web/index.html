@@ -303,6 +303,29 @@
       <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; display: none;" id="browser-inspect-elements-label">Elements Inventory:</div>
       <div id="browser-inspect-elements" class="response-area" style="display: none; max-height: 260px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
     </div>
+
+    <!-- Brick 29 Reliable Element Targeting Section (Resolve Target) -->
+    <div id="browser-target-section" class="mic-section">
+      <div style="font-size: 0.95rem; font-weight: 600; color: #38bdf8; text-align: left; margin-bottom: 4px;">Target Resolver</div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <select id="browser-target-kind" style="padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;">
+          <option value="">(Any Kind)</option>
+          <option value="button">Button</option>
+          <option value="input">Input</option>
+          <option value="link">Link</option>
+          <option value="heading">Heading</option>
+          <option value="textarea">Textarea</option>
+          <option value="select">Select</option>
+          <option value="form">Form</option>
+        </select>
+        <input type="text" id="browser-target-query" placeholder="Name / Label / Text / Target description" style="flex: 1; min-width: 180px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <button type="button" id="browser-target-btn">Resolve Target</button>
+      </div>
+      <div id="browser-target-status" class="mic-status">Resolution: Idle</div>
+      <div id="browser-target-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
+      <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; display: none;" id="browser-target-result-label">Resolution Result:</div>
+      <div id="browser-target-result" class="response-area" style="display: none; max-height: 240px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
+    </div>
   </div>
 
   <script type="module">
@@ -2051,6 +2074,115 @@
           }
         } finally {
           browserInspectBtn.disabled = false;
+        }
+      });
+    }
+
+    // Brick 29 Reliable Element Targeting
+    const browserTargetKind = document.getElementById('browser-target-kind');
+    const browserTargetQuery = document.getElementById('browser-target-query');
+    const browserTargetBtn = document.getElementById('browser-target-btn');
+    const browserTargetStatus = document.getElementById('browser-target-status');
+    const browserTargetMeta = document.getElementById('browser-target-meta');
+    const browserTargetResultLabel = document.getElementById('browser-target-result-label');
+    const browserTargetResult = document.getElementById('browser-target-result');
+
+    if (browserTargetBtn) {
+      browserTargetBtn.addEventListener('click', async () => {
+        const queryText = (browserTargetQuery ? browserTargetQuery.value : '').trim();
+        const kind = (browserTargetKind ? browserTargetKind.value : '').trim();
+
+        if (!queryText && !kind) {
+          if (browserTargetStatus) browserTargetStatus.textContent = 'Resolution: Please enter target name or select kind';
+          return;
+        }
+
+        browserTargetBtn.disabled = true;
+        if (browserTargetStatus) browserTargetStatus.textContent = 'Resolution: Resolving...';
+        if (browserTargetMeta) browserTargetMeta.style.display = 'none';
+        if (browserTargetResultLabel) browserTargetResultLabel.style.display = 'none';
+        if (browserTargetResult) browserTargetResult.style.display = 'none';
+
+        const payload = { target: {} };
+        if (kind) payload.target.kind = kind;
+        if (queryText) payload.target.name = queryText;
+
+        try {
+          const res = await fetch('/api/browser/resolve-target', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+
+          if (res.ok && data.success && data.resolution === 'unique') {
+            if (browserTargetStatus) browserTargetStatus.textContent = `Resolution: Unique match found (${data.confidence || 'high'})`;
+            if (browserTargetMeta) {
+              browserTargetMeta.style.display = 'block';
+              browserTargetMeta.textContent = [
+                `Resolution: ${data.resolution}`,
+                `Confidence: ${data.confidence}`,
+                `Matched By: ${(data.matchedBy || []).join(', ')}`,
+                `Candidate Count: ${data.candidateCount}`,
+                `Snapshot Token: ${data.snapshotToken || 'none'}`,
+                `Duration: ${data.resolutionDurationMs} ms`
+              ].join('\n');
+            }
+            if (browserTargetResultLabel) browserTargetResultLabel.style.display = 'block';
+            if (browserTargetResult) {
+              browserTargetResult.style.display = 'block';
+              browserTargetResult.textContent = JSON.stringify(data.match, null, 2);
+            }
+          } else if (data.resolution === 'ambiguous') {
+            if (browserTargetStatus) browserTargetStatus.textContent = `Resolution: Ambiguous (${data.candidateCount} matches)`;
+            if (browserTargetMeta) {
+              browserTargetMeta.style.display = 'block';
+              browserTargetMeta.textContent = [
+                `Resolution: ${data.resolution}`,
+                `Candidate Count: ${data.candidateCount}`,
+                `Snapshot Token: ${data.snapshotToken || 'none'}`,
+                `Duration: ${data.resolutionDurationMs} ms`
+              ].join('\n');
+            }
+            if (browserTargetResultLabel) browserTargetResultLabel.style.display = 'block';
+            if (browserTargetResult) {
+              browserTargetResult.style.display = 'block';
+              browserTargetResult.textContent = JSON.stringify(data.candidates || [], null, 2);
+            }
+          } else if (data.resolution === 'not_found') {
+            if (browserTargetStatus) browserTargetStatus.textContent = 'Resolution: Target not found';
+            if (browserTargetMeta) {
+              browserTargetMeta.style.display = 'block';
+              browserTargetMeta.textContent = [
+                `Resolution: ${data.resolution}`,
+                `Candidate Count: 0`,
+                `Snapshot Token: ${data.snapshotToken || 'none'}`,
+                `Duration: ${data.resolutionDurationMs} ms`
+              ].join('\n');
+            }
+            if (browserTargetResultLabel) browserTargetResultLabel.style.display = 'block';
+            if (browserTargetResult) {
+              browserTargetResult.style.display = 'block';
+              browserTargetResult.textContent = 'No matching element found on the current page.';
+            }
+          } else {
+            if (browserTargetStatus) browserTargetStatus.textContent = 'Resolution: Error';
+            if (browserTargetMeta) {
+              browserTargetMeta.style.display = 'block';
+              browserTargetMeta.textContent = [
+                `Error Code: ${data.code || data.error || 'TARGET_RESOLUTION_FAILED'}`,
+                `Message: ${data.message || 'Target resolution failed'}`
+              ].join('\n');
+            }
+          }
+        } catch (err) {
+          if (browserTargetStatus) browserTargetStatus.textContent = 'Resolution: Error';
+          if (browserTargetMeta) {
+            browserTargetMeta.style.display = 'block';
+            browserTargetMeta.textContent = `Error Code: TARGET_RESOLUTION_FAILED\nMessage: ${err.message || 'Network request failed'}`;
+          }
+        } finally {
+          browserTargetBtn.disabled = false;
         }
       });
     }

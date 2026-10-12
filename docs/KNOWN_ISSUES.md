@@ -267,6 +267,38 @@ Currently tracked issues in JARVIS4:
     - **Browser Lifecycle Required**: Browser must already be running; auto-launch is strictly forbidden (`BROWSER_NOT_RUNNING`). If the managed page was manually closed, lifecycle reconciles to stopped.
     - **Subsystem Decoupling**: `/api/auto`, `/api/browser-decision`, STT, TTS, and Voice Turn remain completely disconnected from page inspection.
 
+22. **Reliable Element Targeting v1 Observations & Limitations (Brick 29 Verified)**:
+    - **Live Verification on Real Webpages**:
+      - `https://www.selenium.dev/selenium/web/web-form.html`: Submit button resolved uniquely with high confidence (`matchedBy: ["kind", "accessibleName"]`, `formAction: "submitted-form.html"`); zero interaction.
+      - Selenium Password input resolved uniquely with high confidence (`inputType: "password"`, `name: "my-password"`); password value and input value strictly omitted.
+      - `https://www.wikipedia.org/`: Search input resolved uniquely with high confidence (`inputType: "search"`); form metadata observed safely; input value omitted; typing: NO.
+      - Partial semantic link matching verified on Wikipedia English link (`English 7,249,000+ articles`), returning medium confidence and correct href without false high-confidence claims.
+      - Snapshot Stability verified: Unchanged page resolved twice yielded identical snapshot token (`snap_v4_mv58qhxy_4`) and identical opaque targetId.
+      - Snapshot Invalidation verified: Navigation from Wikipedia to Selenium form produced fresh snapshot (`snap_v2_mv58xz0o_6`), cleanly invalidating prior snapshot.
+      - Ambiguity Protection verified: Two Selenium checkbox inputs with `name="my-check"` returned controlled `TARGET_AMBIGUOUS` with candidate count 2; first DOM element was NOT arbitrarily chosen.
+      - Semantic Disambiguation verified: Specific target `{ kind: "input", name: "Checked checkbox" }` resolved uniquely with high confidence (`checked: true`).
+      - Target Not Found verified: Non-existent target returned controlled `TARGET_NOT_FOUND` with candidate count 0, message "No matching element found on the current page"; zero guessing, zero web search, zero AI fallback.
+      - Non-Latin Unicode verified: Japanese link `日本語` on Wikipedia resolved uniquely with medium confidence (`href: "//ja.wikipedia.org/"`) without translation services.
+      - Arabic Discovery & Targeting verified: Inspected Arabic Wikipedia (`https://ar.wikipedia.org/`), discovered visible search button `[button] <button> : "بحث"`, and resolved it uniquely with high confidence (`accessibleName: "بحث"`, form `searchform`, snapshot `snap_v2_mv59azn7_9`); real Arabic targeting verified with zero translation dependencies.
+    - **Important Target-ID Contract for Future Brick 30**:
+      - Opaque `targetId` values may repeat structurally across documents.
+      - TargetId MUST NEVER be treated as globally valid by itself.
+      - Future Brick 30 interaction must couple target identity with the current document snapshot and/or perform immediate semantic re-resolution immediately before acting.
+      - A targetId without matching current snapshot context must not authorize an action.
+    - **Read-Only Semantic Resolution**: Brick 29 resolves targets against the active managed page observationally but performs NO interaction.
+    - **Zero Clicking**: `click`, `dblclick`, `tap` are strictly prohibited and not implemented.
+    - **Zero Typing & Filling**: `fill`, `type`, `press`, `setInputFiles` are strictly prohibited and not implemented.
+    - **Zero Form Execution**: Submitting forms, selecting options, or executing controls is deferred to future bricks (Brick 30 & Brick 33).
+    - **Zero Tabs & Popups**: Operates strictly on the single managed page. No tab opening or popup management.
+    - **Zero Authentication**: No session management, credential handling, or login automation.
+    - **Main Document Scope**: No cross-origin iframe orchestration or shadow DOM piercing.
+    - **Zero AI / Planner**: Makes 0 OpenRouter calls, 0 LLM calls, 0 Exa calls, and 0 search calls. No semantic LLM target choice.
+    - **Bespoke / Custom Controls Limitation**: Unconventional custom widgets (e.g., canvas-rendered UI or unstandardized controls without semantic HTML/ARIA markup) may remain unresolved until later bricks.
+    - **Snapshot Staleness & Invalidation**: Resolved targets and opaque target IDs are tied to document snapshot tokens and are immediately invalidated on navigation, back, forward, refresh, document re-render, page close, or browser restart.
+    - **Decoupled from Existing Subsystems**: `/api/auto`, `/api/browser-decision`, STT, TTS, and Voice Turn remain completely disconnected from target resolution.
+
+
+
 
 
 

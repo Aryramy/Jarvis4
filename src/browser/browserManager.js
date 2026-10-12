@@ -17,6 +17,7 @@ import { config } from '../config/index.js';
 import { defaultPlaywrightLauncher } from './playwrightBrowser.js';
 import { validateUrlSafety, PageReaderError } from '../webpage/urlSafety.js';
 import { extractDomSnapshot } from './pageInspection.js';
+import { generateSnapshotToken, resolveTargetFromElements, TargetResolutionError } from './targetResolver.js';
 
 export class BrowserManagerError extends Error {
   /**
@@ -65,6 +66,9 @@ export class BrowserManager {
     this._page = null;
     this._lastError = null;
 
+    this._snapshotVersion = 0;
+    this._snapshotToken = null;
+
     this._launchPromise = null;
     this._closePromise = null;
     this._cleanupPromise = null;
@@ -96,6 +100,33 @@ export class BrowserManager {
 
   get lastError() {
     return this._lastError;
+  }
+
+  get snapshotToken() {
+    return this._snapshotToken;
+  }
+
+  get snapshotVersion() {
+    return this._snapshotVersion;
+  }
+
+  getSnapshotToken() {
+    return this._snapshotToken;
+  }
+
+  isSnapshotTokenValid(token) {
+    return Boolean(this._snapshotToken && token === this._snapshotToken);
+  }
+
+  _invalidateSnapshot() {
+    this._snapshotVersion++;
+    this._snapshotToken = generateSnapshotToken(this._snapshotVersion);
+    return this._snapshotToken;
+  }
+
+  _resetSnapshot() {
+    this._snapshotVersion = 0;
+    this._snapshotToken = null;
   }
 
   /**
@@ -309,6 +340,8 @@ export class BrowserManager {
         this._page = pageInstance;
         this._state = BROWSER_STATES.RUNNING;
         this._lastError = null;
+        this._snapshotVersion = 1;
+        this._snapshotToken = generateSnapshotToken(1);
 
         return {
           success: true,
@@ -803,6 +836,8 @@ export class BrowserManager {
       ? (await this._page.title()) || ''
       : '';
 
+    this._invalidateSnapshot();
+
     return {
       success: true,
       requestedUrl,
@@ -866,6 +901,8 @@ export class BrowserManager {
       ? (await this._page.title()) || ''
       : '';
 
+    this._invalidateSnapshot();
+
     return {
       success: true,
       navigated: Boolean(response),
@@ -927,6 +964,8 @@ export class BrowserManager {
       ? (await this._page.title()) || ''
       : '';
 
+    this._invalidateSnapshot();
+
     return {
       success: true,
       navigated: Boolean(response),
@@ -985,6 +1024,8 @@ export class BrowserManager {
     const title = (this._page && typeof this._page.title === 'function')
       ? (await this._page.title()) || ''
       : '';
+
+    this._invalidateSnapshot();
 
     return {
       success: true,
@@ -1214,11 +1255,16 @@ export class BrowserManager {
       }
     }
 
+    if (!this._snapshotToken) {
+      this._invalidateSnapshot();
+    }
+
     return {
       success: true,
       state: this._state,
       url: currentUrl,
       title: currentTitle,
+      snapshotToken: this._snapshotToken,
       visibleText: snapshot?.visibleText ?? '',
       textTruncated: Boolean(snapshot?.textTruncated),
       elements: Array.isArray(snapshot?.elements) ? snapshot.elements : [],
@@ -1230,6 +1276,68 @@ export class BrowserManager {
   }
 
   /**
+   * Resolves a unique visible target element deterministically from the current page (Brick 29).
+   * Never clicks, types, focuses, submits, navigates, or interacts.
+   *
+   * @param {Object|string} targetQuery
+   * @param {Object} [options={}]
+   * @returns {Promise<Object>}
+   */
+  async resolveTarget(targetQuery, options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError(
+        'Browser is not running. Please launch the browser first.',
+        'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    const startTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      ? performance.now()
+      : Date.now();
+
+    if (!this._snapshotToken) {
+      this._invalidateSnapshot();
+    }
+
+    let elements = options.elements;
+    let pageUrl = options.pageUrl;
+    let pageTitle = options.pageTitle;
+
+    if (!elements) {
+      const inspection = await this.inspectPage(options);
+      elements = inspection.elements;
+      pageUrl = inspection.url;
+      pageTitle = inspection.title;
+    }
+
+    try {
+      const result = resolveTargetFromElements(elements, targetQuery, {
+        snapshotToken: this._snapshotToken,
+        pageUrl: pageUrl ?? (typeof this._page?.url === 'function' ? this._page.url() : ''),
+        pageTitle: pageTitle ?? '',
+        ...options
+      });
+
+      const endTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+      result.resolutionDurationMs = Math.max(0.001, Number((endTime - startTime).toFixed(3)));
+
+      return result;
+    } catch (err) {
+      if (err instanceof TargetResolutionError) {
+        throw err;
+      }
+      throw new BrowserManagerError(
+        'Target resolution failed.',
+        'TARGET_RESOLUTION_FAILED'
+      );
+    }
+  }
+
+  /**
    * Clears internal references to managed browser, context, and page objects.
    * @private
    */
@@ -1237,6 +1345,7 @@ export class BrowserManager {
     this._browser = null;
     this._context = null;
     this._page = null;
+    this._resetSnapshot();
   }
 }
 

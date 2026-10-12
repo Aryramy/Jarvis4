@@ -58,6 +58,7 @@ const REQUIRED_FILES = [
   'src/browser/playwrightBrowser.js',
   'src/browser/browserManager.js',
   'src/browser/pageInspection.js',
+  'src/browser/targetResolver.js',
   'src/webpage/urlSafety.js',
   'src/webpage/htmlExtractor.js',
   'src/webpage/pageReader.js',
@@ -85,6 +86,7 @@ const REQUIRED_FILES = [
   'tests/unit/browserEscalation.test.js',
   'tests/unit/browserManager.test.js',
   'tests/unit/pageInspection.test.js',
+  'tests/unit/targetResolver.test.js',
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
   'tests/unit/voiceTurn.test.js',
@@ -108,6 +110,7 @@ const REQUIRED_FILES = [
   'tests/integration/browserDecisionEndpoint.test.js',
   'tests/integration/browserLifecycleEndpoints.test.js',
   'tests/integration/browserInspectEndpoint.test.js',
+  'tests/integration/browserResolveTargetEndpoint.test.js',
   'tests/fixtures/html/article.html',
   'tests/fixtures/html/noisy.html',
   'tests/fixtures/html/unicode.html',
@@ -449,6 +452,20 @@ check('Browser Page Inspection Module Sanity Check', async () => {
   const snap = inspectHtmlString('<h1>Example Domain</h1><p>Hello World</p><a href="https://example.com">Link</a>');
   if (snap.elements.length !== 2 || snap.elements[0].kind !== 'heading' || snap.elements[1].kind !== 'link') {
     throw new Error('inspectHtmlString sanity check failed');
+  }
+});
+
+check('Browser Target Resolver Module Sanity Check', async () => {
+  const { resolveTargetFromElements, normalizeTargetText, generateSnapshotToken, SUPPORTED_KINDS, TargetResolutionError } = await import('../src/browser/targetResolver.js');
+  if (typeof resolveTargetFromElements !== 'function' || typeof normalizeTargetText !== 'function' || typeof generateSnapshotToken !== 'function') {
+    throw new Error('targetResolver module failed to export required functions');
+  }
+  const testElements = [
+    { kind: 'button', tag: 'button', text: 'Submit', accessibleName: 'Submit' }
+  ];
+  const res = resolveTargetFromElements(testElements, { kind: 'button', name: 'Submit' });
+  if (!res.success || res.resolution !== 'unique' || res.match.accessibleName !== 'Submit') {
+    throw new Error('resolveTargetFromElements sanity check failed');
   }
 });
 

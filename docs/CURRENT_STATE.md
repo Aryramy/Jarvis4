@@ -1,11 +1,44 @@
 Project: JARVIS4
-Current Brick: 28
-Status: BRICK-028 VERIFIED
-Last Verified Brick: BRICK-028
-Current Feature: Page Understanding v1 (Visible Page + Element Inventory)
+Current Brick: 29
+Status: BRICK-029 VERIFIED
+Last Verified Brick: BRICK-029
+Current Feature: Reliable Element Targeting v1 (Semantic Target Resolution Without Interaction)
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
+
+- Reliable Element Targeting v1 (Brick 29) observational semantic targeting subsystem on top of managed page understanding (`resolveTarget` in `src/browser/browserManager.js`, `resolveTargetFromElements`, `normalizeTargetText`, `generateSnapshotToken`, `createSafeElementSummary` in `src/browser/targetResolver.js`):
+  - Human live verification completed and verified across all real-page semantic targeting tests:
+    - Live Test A (Selenium Submit button): URL `https://www.selenium.dev/selenium/web/web-form.html`, target `{ kind: "button", name: "Submit" }`. Resolution: `unique`, Confidence: `high`, Matched By: `["kind", "accessibleName"]`, Candidate Count: 1; resolved element: `kind: "button"`, `accessibleName: "Submit"`, `text: "Submit"`, `formAction: "submitted-form.html"`, `formMethod: "GET"`, snapshot token & opaque targetId present; zero CSS/XPath exposed, zero interaction.
+    - Live Test B (Selenium Password input): target `{ kind: "input", name: "Password" }`. Resolution: `unique`, Confidence: `high`, Matched By: `["kind", "accessibleName"]`, Candidate Count: 1; resolved: `kind: "input"`, `accessibleName: "Password"`, `label: "Password"`, `inputType: "password"`, `name: "my-password"`; password and input values strictly omitted; zero interaction.
+    - Live Test C (Wikipedia search input): URL `https://www.wikipedia.org/`, target `{ kind: "input", name: "Search Wikipedia" }`. Resolution: `unique`, Confidence: `high`, Matched By: `["kind", "accessibleName"]`, Candidate Count: 1; resolved: `kind: "input"`, `accessibleName: "Search Wikipedia"`, `label: "Search Wikipedia"`, `inputType: "search"`, `name: "search"`; form metadata observed safely; input value exposed: NO, typing: NO.
+    - Live Test D (Wikipedia partial semantic link match): target `{ kind: "link", name: "English" }` against actual accessible text `English 7,249,000+ articles`. Resolution: `unique`, Confidence: `medium`, Matched By: `["kind", "accessibleName"]`, Candidate Count: 1, `href: "//en.wikipedia.org/"`; correctly assigned medium confidence for partial match without false high-confidence claims.
+    - Live Test E (Snapshot stability): Unchanged Wikipedia page resolved twice without navigation, refresh, or interaction; both returned identical snapshot token (`snap_v4_mv58qhxy_4`) and identical opaque target identity. Unchanged document retains snapshot identity: PASS.
+    - Live Test F (Navigation snapshot invalidation): Navigated from Wikipedia (`snap_v4_mv58qhxy_4`) to Selenium web form; resolving Submit returned fresh snapshot (`snap_v2_mv58xz0o_6`); old snapshot strictly invalidated: PASS.
+    - Important Target-ID Contract: Opaque `targetId` values may repeat structurally across documents. TargetId MUST NEVER be treated as globally valid by itself. Future Brick 30 interaction must bind target identity to the current page/document snapshot and must verify/re-resolve before performing any action. A targetId without matching current snapshot context must not authorize an action.
+    - Live Test G (Ambiguity protection): Selenium form containing two checkbox inputs with `name="my-check"`; target `{ kind: "input", name: "my-check" }` returned `TARGET_AMBIGUOUS` (`resolution: "ambiguous"`, Candidate Count: 2) with safe candidate summaries for Candidate 1 (`Checked checkbox`, `checked: true`) and Candidate 2 (`Default checkbox`, `checked: false`); first DOM candidate was NOT arbitrarily selected: PASS.
+    - Live Test H (Semantic disambiguation): Target `{ kind: "input", name: "Checked checkbox" }` resolved uniquely with high confidence (`inputType: "checkbox"`, `label: "Checked checkbox"`, `checked: true`); additional semantic evidence disambiguates correctly: PASS.
+    - Live Test I (Not found protection): Target `{ kind: "button", name: "Definitely Does Not Exist" }` returned `TARGET_NOT_FOUND` (`resolution: "not_found"`, Candidate Count: 0, Message: "No matching element found on the current page"); zero guessing, zero web search, zero navigation, zero AI fallback: PASS.
+    - Live Test J (Non-Latin Unicode / Japanese): Wikipedia target `{ kind: "link", name: "日本語" }` against actual accessible text `日本語 1,521,000+ 記事` resolved uniquely with medium confidence (`href: "//ja.wikipedia.org/"`); zero translation service or language configuration used: PASS.
+    - Arabic Discovery Test & Live Test K (Arabic semantic targeting): Real page `https://ar.wikipedia.org/` inspected (12000 chars, 100 returned elements) discovering visible search button `[button] <button> : "بحث"`; targeted `{ kind: "button", name: "بحث" }` resolved uniquely with high confidence (`accessibleName: "بحث"`, `formAction: "/w/index.php"`, `formMethod: "GET"`, `formName: "searchform"`, snapshot `snap_v2_mv59azn7_9`, opaque targetId present); real Arabic targeting: PASS, Unicode-safe: PASS, no translation dependency: PASS.
+  - Multilingual verification summary: Live targeting verified across English (PASS), Japanese (PASS), and Arabic (PASS); automated tests provide continuous regression coverage including Urdu and other Unicode scripts; zero separate language pipelines.
+  - Read-only target resolution only: answers "Which exact visible element does this target description refer to?" without interaction; zero click, zero typing, zero fill, zero press, zero form submit, zero scroll, zero hover, zero focus, zero navigation, zero reload.
+  - Deterministic exact-match-first resolution: prefers exact normalized matches before weaker partial matching.
+  - Semantic signal matching priority: ARIA role / kind (100) -> accessible name (100) -> associated label (90) -> exact visible text (80) -> placeholder (70) -> name attribute (60) -> href (50) -> bounded partial match (30-15).
+  - Supported element kinds: `heading`, `link`, `button`, `input`, `textarea`, `select`, `form`.
+  - Disambiguation signals: supports structural form context (`formAction`, `formMethod`, `formName`) and role/type constraints to disambiguate identical button names or labels.
+  - Controlled ambiguity contract: returns `TARGET_AMBIGUOUS` (`success: false`, `resolution: "ambiguous"`) with `candidateCount` and non-actionable safe candidate summaries when candidates tie; strictly prohibits arbitrarily selecting first DOM candidate.
+  - Controlled not found contract: returns `TARGET_NOT_FOUND` (`success: false`, `resolution: "not_found"`) when no candidates match; zero guessing, zero web search, zero navigation, zero AI fallback.
+  - Multilingual Unicode safety: conservative deterministic normalization (Unicode NFC, whitespace collapsing, case-insensitivity where intended); fully preserves Arabic, Urdu, English, and non-destructive punctuation without translation or language configuration.
+  - Staleness & snapshot token protection: target resolution is tied to page snapshot tokens (`snap_v{version}_{salt}`) generated from local lifecycle state; invalidated on URL change, navigation, back, forward, refresh, document reload, page close, and browser restart.
+  - No long-lived ElementHandle: zero raw Playwright ElementHandles, JSHandles, or node IDs retained or returned; enables fresh re-resolution prior to future action.
+  - Zero actionable selectors exposed: public API contract never exposes CSS selectors, XPath expressions, DOM paths, or Playwright locator expressions.
+  - Strict input privacy preserved: text values, password values, textarea contents, file input values, hidden inputs, CSRF tokens, cookies, and storage contents are never extracted or returned.
+  - Untrusted data & zero AI: webpage text treated strictly as untrusted data; zero AI / LLM calls, zero OpenRouter calls, zero Exa / web search calls.
+  - Browser must be running: requires browser to be already running; returns controlled `BROWSER_NOT_RUNNING` without auto-launching.
+  - New HTTP endpoint: `POST /api/browser/resolve-target` with deterministic schema; non-POST rejected with 405 Method Not Allowed; invalid requests and arbitrary selectors rejected with 400.
+  - Diagnostic Web UI: dedicated "Target Resolver" section in `src/web/index.html` with Kind selector, Target Name/Text input, and "Resolve Target" button; safe output rendering strictly via `textContent`; zero Execute/Click/Type buttons.
+
 
 - Page Understanding v1 (Brick 28) observational subsystem implemented on existing managed Playwright browser page (`inspectPage` in `src/browser/browserManager.js`, `extractDomSnapshot`, `cleanText`, `truncate`, `inspectHtmlString` in `src/browser/pageInspection.js`):
   - Human live verification completed and verified across all real-page and robustness tests:

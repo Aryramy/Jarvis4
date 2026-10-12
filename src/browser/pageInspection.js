@@ -373,6 +373,9 @@ export function extractDomSnapshot(limits = {}) {
     }
 
     if (kind === 'form') {
+      const formName = (el.getAttribute ? el.getAttribute('name') : null) || el.id;
+      if (formName) record.name = formName;
+
       const method = ((el.getAttribute ? el.getAttribute('method') : null) || el.method || 'GET').toUpperCase();
       record.method = method;
 
@@ -386,6 +389,57 @@ export function extractDomSnapshot(limits = {}) {
       }
       record.fieldCount = fieldCount;
       // STRICT PRIVACY: NEVER RECORD submitted fields or hidden tokens!
+    }
+
+    // Associated parent form context (Brick 29 disambiguation signal)
+    if (['input', 'textarea', 'select', 'button'].includes(kind)) {
+      let parentForm = el.form;
+      if (!parentForm && typeof el.closest === 'function') {
+        parentForm = el.closest('form');
+      }
+      if (!parentForm) {
+        let p = el.parentElement;
+        while (p && p !== doc.documentElement) {
+          if ((p.tagName || '').toLowerCase() === 'form') {
+            parentForm = p;
+            break;
+          }
+          p = p.parentElement;
+        }
+      }
+      if (parentForm) {
+        const fAction = (parentForm.getAttribute ? parentForm.getAttribute('action') : null) || (typeof parentForm.action === 'string' ? parentForm.action : undefined);
+        const fMethod = ((parentForm.getAttribute ? parentForm.getAttribute('method') : null) || parentForm.method || 'GET').toUpperCase();
+        const fName = (parentForm.getAttribute ? parentForm.getAttribute('name') : null) || parentForm.id || undefined;
+        if (fAction) record.formAction = fAction;
+        if (fMethod) record.formMethod = fMethod;
+        if (fName) record.formName = fName;
+      }
+    }
+
+    // Accessible Name calculation (Brick 29: accessibleName preferencing)
+    let accName = null;
+    if (record.ariaLabel) {
+      accName = record.ariaLabel;
+    } else if (el.getAttribute && el.getAttribute('aria-labelledby') && doc.getElementById) {
+      const labelledEl = doc.getElementById(el.getAttribute('aria-labelledby'));
+      if (labelledEl) {
+        const t = innerCleanText(labelledEl.innerText || labelledEl.textContent || '');
+        if (t) accName = innerTruncate(t, maxElementTextChars);
+      }
+    }
+    if (!accName) {
+      if (['button', 'link', 'heading'].includes(kind) && record.text) {
+        accName = record.text;
+      } else if (record.label) {
+        accName = record.label;
+      } else if (kind === 'button' && el.getAttribute && ['submit', 'button', 'reset'].includes((el.getAttribute('type') || '').toLowerCase())) {
+        const btnVal = el.getAttribute('value');
+        if (btnVal) accName = innerTruncate(innerCleanText(btnVal), maxElementTextChars);
+      }
+    }
+    if (accName) {
+      record.accessibleName = accName;
     }
 
     totalEligibleElementCount++;
@@ -664,12 +718,48 @@ export function inspectHtmlString(html, options = {}) {
     }
 
     if (kind === 'form') {
+      if (attribs.name || attribs.id) record.name = attribs.name || attribs.id;
       record.method = (attribs.method || 'GET').toUpperCase();
       if (attribs.action) record.action = attribs.action;
 
       const formFields = $(el).find('input:not([type="hidden"]), textarea, select, button');
       record.fieldCount = formFields.length;
       // STRICT PRIVACY: NEVER RECORD submitted fields or hidden tokens!
+    }
+
+    // Associated parent form context (Brick 29 disambiguation signal)
+    if (['input', 'textarea', 'select', 'button'].includes(kind)) {
+      const $parentForm = $(el).closest('form');
+      if ($parentForm.length > 0) {
+        const pfAttribs = $parentForm[0].attribs || {};
+        if (pfAttribs.action) record.formAction = pfAttribs.action;
+        record.formMethod = (pfAttribs.method || 'GET').toUpperCase();
+        if (pfAttribs.name || pfAttribs.id) record.formName = pfAttribs.name || pfAttribs.id;
+      }
+    }
+
+    // Accessible Name calculation (Brick 29: accessibleName preferencing)
+    let accName = null;
+    if (record.ariaLabel) {
+      accName = record.ariaLabel;
+    } else if (attribs['aria-labelledby']) {
+      const labelledEl = $(`#${attribs['aria-labelledby']}`);
+      if (labelledEl.length > 0) {
+        const t = cleanText(labelledEl.text());
+        if (t) accName = truncate(t, maxElementTextChars);
+      }
+    }
+    if (!accName) {
+      if (['button', 'link', 'heading'].includes(kind) && record.text) {
+        accName = record.text;
+      } else if (record.label) {
+        accName = record.label;
+      } else if (kind === 'button' && ['submit', 'button', 'reset'].includes((attribs.type || '').toLowerCase())) {
+        if (attribs.value) accName = truncate(cleanText(attribs.value), maxElementTextChars);
+      }
+    }
+    if (accName) {
+      record.accessibleName = accName;
     }
 
     totalEligibleElementCount++;
