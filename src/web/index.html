@@ -272,6 +272,23 @@
       <div id="browser-lifecycle-status" class="mic-status">Browser: Stopped</div>
       <div id="browser-lifecycle-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
     </div>
+
+    <!-- Brick 27 Browser Navigation Section -->
+    <div id="browser-navigation-section" class="mic-section">
+      <div style="font-size: 0.95rem; font-weight: 600; color: #38bdf8; text-align: left; margin-bottom: 4px;">Browser Navigation</div>
+      <div class="input-group" style="margin-bottom: 8px;">
+        <input type="text" id="browser-nav-url-input" placeholder="https://example.com/" autocomplete="off" />
+        <div class="button-group" style="margin-top: 6px;">
+          <button type="button" id="browser-nav-goto-btn">Navigate</button>
+          <button type="button" id="browser-nav-back-btn" class="secondary">Back</button>
+          <button type="button" id="browser-nav-forward-btn" class="secondary">Forward</button>
+          <button type="button" id="browser-nav-refresh-btn" class="secondary">Refresh</button>
+          <button type="button" id="browser-nav-status-btn" class="secondary">Refresh Page Status</button>
+        </div>
+      </div>
+      <div id="browser-nav-status" class="mic-status">Navigation: Idle</div>
+      <div id="browser-nav-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
+    </div>
   </div>
 
   <script type="module">
@@ -1741,6 +1758,192 @@
           }
         } finally {
           setBrowserLifecycleBusy(false);
+        }
+      });
+    }
+
+    // Brick 27: Browser Navigation UI Handler
+    const browserNavUrlInput = document.getElementById('browser-nav-url-input');
+    const browserNavGotoBtn = document.getElementById('browser-nav-goto-btn');
+    const browserNavBackBtn = document.getElementById('browser-nav-back-btn');
+    const browserNavForwardBtn = document.getElementById('browser-nav-forward-btn');
+    const browserNavRefreshBtn = document.getElementById('browser-nav-refresh-btn');
+    const browserNavStatusBtn = document.getElementById('browser-nav-status-btn');
+    const browserNavStatus = document.getElementById('browser-nav-status');
+    const browserNavMeta = document.getElementById('browser-nav-meta');
+
+    function setBrowserNavBusy(isBusy, statusText) {
+      if (browserNavGotoBtn) browserNavGotoBtn.disabled = isBusy;
+      if (browserNavBackBtn) browserNavBackBtn.disabled = isBusy;
+      if (browserNavForwardBtn) browserNavForwardBtn.disabled = isBusy;
+      if (browserNavRefreshBtn) browserNavRefreshBtn.disabled = isBusy;
+      if (browserNavStatusBtn) browserNavStatusBtn.disabled = isBusy;
+      if (isBusy && browserNavStatus && statusText) {
+        browserNavStatus.textContent = statusText;
+      }
+    }
+
+    function renderNavigationResult(data) {
+      if (!browserNavStatus || !browserNavMeta) return;
+      browserNavStatus.textContent = 'Navigation: Success';
+      browserNavMeta.style.display = 'block';
+      const metaLines = [
+        `Requested URL: ${data.requestedUrl ?? 'None'}`,
+        `Current URL: ${data.finalUrl ?? data.url ?? 'None'}`,
+        `Title: ${data.title ?? 'None'}`,
+        `HTTP Status: ${data.httpStatus ?? 'None'}`,
+        `Navigation Duration: ${data.navigationDurationMs !== undefined ? data.navigationDurationMs + ' ms' : 'None'}`,
+        `Browser State: ${data.state ?? 'unknown'}`
+      ];
+      if (data.navigated !== undefined) {
+        metaLines.push(`Navigated: ${data.navigated ? 'Yes' : 'No'}`);
+      }
+      browserNavMeta.textContent = metaLines.join('\n');
+    }
+
+    function renderNavigationError(errData) {
+      if (!browserNavStatus || !browserNavMeta) return;
+      browserNavStatus.textContent = 'Navigation: Error';
+      browserNavMeta.style.display = 'block';
+      const metaLines = [
+        `Error Code: ${errData.code || errData.error || 'BROWSER_NAVIGATION_FAILED'}`,
+        `Message: ${errData.message || 'Navigation failed'}`
+      ];
+      if (errData.requestedUrl) metaLines.push(`Requested URL: ${errData.requestedUrl}`);
+      if (errData.finalUrl) metaLines.push(`Current URL: ${errData.finalUrl}`);
+      if (errData.httpStatus) metaLines.push(`HTTP Status: ${errData.httpStatus}`);
+      browserNavMeta.textContent = metaLines.join('\n');
+    }
+
+    if (browserNavGotoBtn) {
+      browserNavGotoBtn.addEventListener('click', async () => {
+        const rawUrl = browserNavUrlInput ? browserNavUrlInput.value.trim() : '';
+        if (!rawUrl) {
+          if (browserNavStatus) browserNavStatus.textContent = 'Navigation: Error';
+          if (browserNavMeta) {
+            browserNavMeta.style.display = 'block';
+            browserNavMeta.textContent = 'Error Code: INVALID_URL\nMessage: Please enter a valid URL to navigate.';
+          }
+          return;
+        }
+
+        setBrowserNavBusy(true, 'Navigation: Navigating...');
+        if (browserNavMeta) browserNavMeta.style.display = 'none';
+
+        try {
+          const res = await fetch('/api/browser/navigate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: rawUrl })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            renderNavigationResult(data);
+          } else {
+            renderNavigationError(data);
+          }
+        } catch (err) {
+          renderNavigationError({ code: 'BROWSER_NAVIGATION_FAILED', message: err.message || 'Network request failed' });
+        } finally {
+          setBrowserNavBusy(false);
+        }
+      });
+    }
+
+    if (browserNavStatusBtn) {
+      browserNavStatusBtn.addEventListener('click', async () => {
+        setBrowserNavBusy(true, 'Navigation: Checking page status...');
+
+        try {
+          const res = await fetch('/api/browser/page-status');
+          const data = await res.json();
+          if (res.ok && data.success) {
+            if (browserNavStatus) browserNavStatus.textContent = `Navigation: Page ${data.pageOpen ? 'Open' : 'Closed'}`;
+            if (browserNavMeta) {
+              browserNavMeta.style.display = 'block';
+              browserNavMeta.textContent = [
+                `Browser State: ${data.state}`,
+                `Page Open: ${data.pageOpen ? 'Yes' : 'No'}`,
+                `Current URL: ${data.url ?? 'None'}`,
+                `Title: ${data.title ?? 'None'}`
+              ].join('\n');
+            }
+          } else {
+            renderNavigationError(data);
+          }
+        } catch (err) {
+          renderNavigationError({ code: 'BROWSER_PAGE_STATUS_FAILED', message: err.message || 'Network request failed' });
+        } finally {
+          setBrowserNavBusy(false);
+        }
+      });
+    }
+
+    if (browserNavBackBtn) {
+      browserNavBackBtn.addEventListener('click', async () => {
+        setBrowserNavBusy(true, 'Navigation: Going back...');
+
+        try {
+          const res = await fetch('/api/browser/back', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            renderNavigationResult(data);
+          } else {
+            renderNavigationError(data);
+          }
+        } catch (err) {
+          renderNavigationError({ code: 'BROWSER_NAVIGATION_FAILED', message: err.message || 'Network request failed' });
+        } finally {
+          setBrowserNavBusy(false);
+        }
+      });
+    }
+
+    if (browserNavForwardBtn) {
+      browserNavForwardBtn.addEventListener('click', async () => {
+        setBrowserNavBusy(true, 'Navigation: Going forward...');
+
+        try {
+          const res = await fetch('/api/browser/forward', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            renderNavigationResult(data);
+          } else {
+            renderNavigationError(data);
+          }
+        } catch (err) {
+          renderNavigationError({ code: 'BROWSER_NAVIGATION_FAILED', message: err.message || 'Network request failed' });
+        } finally {
+          setBrowserNavBusy(false);
+        }
+      });
+    }
+
+    if (browserNavRefreshBtn) {
+      browserNavRefreshBtn.addEventListener('click', async () => {
+        setBrowserNavBusy(true, 'Navigation: Refreshing page...');
+
+        try {
+          const res = await fetch('/api/browser/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            renderNavigationResult(data);
+          } else {
+            renderNavigationError(data);
+          }
+        } catch (err) {
+          renderNavigationError({ code: 'BROWSER_NAVIGATION_FAILED', message: err.message || 'Network request failed' });
+        } finally {
+          setBrowserNavBusy(false);
         }
       });
     }

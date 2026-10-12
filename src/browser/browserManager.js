@@ -15,16 +15,19 @@
 
 import { config } from '../config/index.js';
 import { defaultPlaywrightLauncher } from './playwrightBrowser.js';
+import { validateUrlSafety, PageReaderError } from '../webpage/urlSafety.js';
 
 export class BrowserManagerError extends Error {
   /**
    * @param {string} message
    * @param {string} [code='BROWSER_ERROR']
+   * @param {Object} [details={}]
    */
-  constructor(message, code = 'BROWSER_ERROR') {
+  constructor(message, code = 'BROWSER_ERROR', details = {}) {
     super(message);
     this.name = 'BrowserManagerError';
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -41,7 +44,9 @@ export class BrowserManager {
    * @param {string} [options.channel]
    * @param {boolean} [options.headless]
    * @param {number} [options.timeoutMs]
+   * @param {number} [options.navigationTimeoutMs]
    * @param {Function} [options.launcher]
+   * @param {Function} [options.dnsLookup]
    */
   constructor(options = {}) {
     this._channel = (options.channel ?? config.browser?.channel ?? 'msedge').trim();
@@ -49,6 +54,8 @@ export class BrowserManager {
       ? options.headless
       : (config.browser?.headless ?? false);
     this._timeoutMs = Math.max(1, Number(options.timeoutMs ?? config.browser?.launchTimeoutMs ?? 15000)) || 15000;
+    this._navTimeoutMs = Math.max(1, Number(options.navTimeoutMs ?? options.navigationTimeoutMs ?? config.browser?.navigationTimeoutMs ?? 15000)) || 15000;
+    this._dnsLookup = options.dnsLookup;
     this._launcher = options.launcher || defaultPlaywrightLauncher;
 
     this._state = BROWSER_STATES.STOPPED;
@@ -165,6 +172,11 @@ export class BrowserManager {
     const isRunning = this._state === BROWSER_STATES.RUNNING && this.isSessionActive();
     const connected = isRunning && this.isBrowserConnected();
 
+    let currentUrl = null;
+    if (isRunning && this._page) {
+      currentUrl = typeof this._page.url === 'function' ? this._page.url() : 'about:blank';
+    }
+
     return {
       success: true,
       state: this._state,
@@ -173,7 +185,7 @@ export class BrowserManager {
       pageOpen: isRunning && Boolean(this._page && (!this._page.isClosed || !this._page.isClosed())),
       channel: this._channel,
       headless: this._headless,
-      currentUrl: isRunning && this._page ? 'about:blank' : null
+      currentUrl
     };
   }
 
@@ -487,6 +499,498 @@ export class BrowserManager {
    */
   _handleUnexpectedDisconnect() {
     this._handleSessionTerminated('browser_disconnected');
+  }
+
+  /**
+   * Returns current managed page status without navigating.
+   * Reconciles lifecycle state if the page or browser was manually closed.
+   *
+   * @returns {Promise<{
+   *   success: boolean,
+   *   state: string,
+   *   pageOpen: boolean,
+   *   url: string|null,
+   *   title: string|null
+   * }>}
+   */
+  async getPageStatus() {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      return {
+        success: true,
+        state: BROWSER_STATES.STOPPED,
+        pageOpen: false,
+        url: null,
+        title: null
+      };
+    }
+
+    let currentUrl = null;
+    let currentTitle = '';
+
+    try {
+      if (this._page) {
+        if (typeof this._page.url === 'function') {
+          currentUrl = this._page.url();
+        }
+        if (typeof this._page.title === 'function') {
+          currentTitle = (await this._page.title()) || '';
+        }
+      }
+    } catch {
+      this._reconcileLifecycle();
+      return {
+        success: true,
+        state: this._state,
+        pageOpen: this.isSessionActive(),
+        url: null,
+        title: null
+      };
+    }
+
+    return {
+      success: true,
+      state: this._state,
+      pageOpen: true,
+      url: currentUrl,
+      title: currentTitle
+    };
+  }
+
+  /**
+   * Explicitly navigates the managed page to the specified URL.
+   * Requires the browser to be already running (no auto-launch).
+   * Strictly validates URL format and prevents SSRF and redirect downgrades.
+   *
+   * @param {string} urlStr
+   * @param {Object} [options]
+   * @param {number} [options.timeoutMs]
+   * @param {Function} [options.dnsLookup]
+   * @returns {Promise<{
+   *   success: boolean,
+   *   requestedUrl: string,
+   *   finalUrl: string,
+   *   title: string,
+   *   httpStatus: number,
+   *   navigationDurationMs: number,
+   *   state: string
+   * }>}
+   */
+  async navigate(urlStr, options = {}) {
+    // 1. Reconcile lifecycle and verify browser is running
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError(
+        'Browser is not running. Please launch the browser first.',
+        'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    // 2. Strict URL validation
+    if (typeof urlStr !== 'string' || urlStr.trim().length === 0) {
+      throw new BrowserManagerError('URL must be a non-empty string', 'INVALID_URL');
+    }
+
+    const requestedUrl = urlStr.trim();
+    const dnsLookup = options.dnsLookup || this._dnsLookup;
+
+    try {
+      await validateUrlSafety(requestedUrl, { dnsLookup });
+    } catch (err) {
+      if (err instanceof BrowserManagerError) {
+        throw err;
+      }
+      throw new BrowserManagerError(
+        err.message,
+        err.code || 'INVALID_URL',
+        err.details || {}
+      );
+    }
+
+    const navTimeout = Math.max(1, Number(options.timeoutMs ?? this._navTimeoutMs)) || 15000;
+    const startTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      ? performance.now()
+      : Date.now();
+
+    // 3. Setup redirect interception on managed page
+    let redirectError = null;
+    const routeHandler = async (route) => {
+      try {
+        const req = typeof route.request === 'function' ? route.request() : null;
+        if (req) {
+          const redirectedFrom = typeof req.redirectedFrom === 'function' ? req.redirectedFrom() : null;
+          if (redirectedFrom) {
+            const fromUrl = typeof redirectedFrom.url === 'function' ? redirectedFrom.url() : '';
+            const toUrl = typeof req.url === 'function' ? req.url() : '';
+
+            // Check HTTPS -> HTTP downgrade
+            if (fromUrl.startsWith('https:') && toUrl.startsWith('http:')) {
+              redirectError = new BrowserManagerError(
+                `Insecure redirect downgrade from HTTPS to HTTP blocked: "${toUrl}"`,
+                'INSECURE_REDIRECT_DOWNGRADE',
+                { requestedUrl, finalUrl: toUrl }
+              );
+              if (typeof route.abort === 'function') {
+                await route.abort('blockedbyclient').catch(() => {});
+              }
+              return;
+            }
+
+            // Validate redirect destination network safety
+            try {
+              await validateUrlSafety(toUrl, { dnsLookup });
+            } catch (valErr) {
+              redirectError = new BrowserManagerError(
+                `Redirect destination blocked: ${valErr.message}`,
+                valErr.code || 'LOCAL_OR_PRIVATE_HOST_BLOCKED',
+                { requestedUrl, redirectUrl: toUrl }
+              );
+              if (typeof route.abort === 'function') {
+                await route.abort('blockedbyclient').catch(() => {});
+              }
+              return;
+            }
+          }
+        }
+        if (typeof route.continue === 'function') {
+          await route.continue().catch(() => {});
+        }
+      } catch (handlerErr) {
+        if (!redirectError) {
+          redirectError = handlerErr instanceof BrowserManagerError
+            ? handlerErr
+            : new BrowserManagerError(handlerErr.message || 'Redirect interception failed', 'BROWSER_NAVIGATION_FAILED');
+        }
+        if (typeof route.abort === 'function') {
+          await route.abort('blockedbyclient').catch(() => {});
+        }
+      }
+    };
+
+    let routingRegistered = false;
+    if (this._page && typeof this._page.route === 'function') {
+      try {
+        await this._page.route('**/*', routeHandler);
+        routingRegistered = true;
+      } catch {
+        // Safe fallback for mocks
+      }
+    }
+
+    let response = null;
+    try {
+      response = await this._page.goto(requestedUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: navTimeout
+      });
+    } catch (err) {
+      if (redirectError) {
+        if (this._page && typeof this._page.goto === 'function') {
+          await this._page.goto('about:blank').catch(() => {});
+        }
+        throw redirectError;
+      }
+      if (err.name === 'TimeoutError' || /timeout/i.test(err.message || '')) {
+        throw new BrowserManagerError(
+          `Navigation timed out after ${navTimeout} ms`,
+          'BROWSER_NAVIGATION_TIMEOUT',
+          { requestedUrl, timeoutMs: navTimeout }
+        );
+      }
+      if (err instanceof BrowserManagerError) {
+        throw err;
+      }
+      let safeMsg = 'Navigation failed';
+      if (err && typeof err.message === 'string') {
+        const firstLine = err.message.split('\n')[0].trim();
+        safeMsg = firstLine.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').trim();
+      }
+      throw new BrowserManagerError(
+        safeMsg || 'Navigation failed',
+        'BROWSER_NAVIGATION_FAILED',
+        { requestedUrl }
+      );
+    } finally {
+      if (routingRegistered && this._page && typeof this._page.unroute === 'function') {
+        try {
+          await this._page.unroute('**/*', routeHandler).catch(() => {});
+        } catch {
+          // Safe absorption
+        }
+      }
+    }
+
+    if (redirectError) {
+      if (this._page && typeof this._page.goto === 'function') {
+        await this._page.goto('about:blank').catch(() => {});
+      }
+      throw redirectError;
+    }
+
+    // 4. Secondary check: response request redirect chain
+    if (response && typeof response.request === 'function') {
+      let currReq = response.request();
+      while (currReq && typeof currReq.redirectedFrom === 'function') {
+        const prev = currReq.redirectedFrom();
+        if (!prev) break;
+        const prevUrl = typeof prev.url === 'function' ? prev.url() : '';
+        const currUrl = typeof currReq.url === 'function' ? currReq.url() : '';
+
+        if (prevUrl.startsWith('https:') && currUrl.startsWith('http:')) {
+          if (this._page && typeof this._page.goto === 'function') {
+            await this._page.goto('about:blank').catch(() => {});
+          }
+          throw new BrowserManagerError(
+            `Insecure redirect downgrade from HTTPS to HTTP blocked: "${currUrl}"`,
+            'INSECURE_REDIRECT_DOWNGRADE',
+            { requestedUrl, finalUrl: currUrl }
+          );
+        }
+
+        try {
+          await validateUrlSafety(currUrl, { dnsLookup });
+        } catch (valErr) {
+          if (this._page && typeof this._page.goto === 'function') {
+            await this._page.goto('about:blank').catch(() => {});
+          }
+          throw new BrowserManagerError(
+            `Redirect destination blocked: ${valErr.message}`,
+            valErr.code || 'LOCAL_OR_PRIVATE_HOST_BLOCKED',
+            { requestedUrl, redirectUrl: currUrl }
+          );
+        }
+
+        currReq = prev;
+      }
+    }
+
+    // 5. HTTP status check
+    let httpStatus = 200;
+    if (response) {
+      if (typeof response.status === 'function') {
+        httpStatus = response.status();
+      } else if (typeof response.status === 'number') {
+        httpStatus = response.status;
+      }
+    }
+
+    const finalUrl = (this._page && typeof this._page.url === 'function')
+      ? this._page.url()
+      : requestedUrl;
+
+    if (httpStatus >= 400) {
+      throw new BrowserManagerError(
+        `Navigation failed with HTTP error ${httpStatus}`,
+        'BROWSER_HTTP_ERROR',
+        {
+          httpStatus,
+          requestedUrl,
+          finalUrl,
+          state: this._state
+        }
+      );
+    }
+
+    const endTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      ? performance.now()
+      : Date.now();
+    const navigationDurationMs = Math.max(0.001, Number((endTime - startTime).toFixed(3)));
+
+    const title = (this._page && typeof this._page.title === 'function')
+      ? (await this._page.title()) || ''
+      : '';
+
+    return {
+      success: true,
+      requestedUrl,
+      finalUrl,
+      title,
+      httpStatus,
+      navigationDurationMs,
+      state: this._state
+    };
+  }
+
+  /**
+   * Navigates back in the managed page history.
+   *
+   * @param {Object} [options]
+   * @param {number} [options.timeoutMs]
+   * @returns {Promise<{
+   *   success: boolean,
+   *   navigated: boolean,
+   *   url: string|null,
+   *   title: string,
+   *   state: string
+   * }>}
+   */
+  async back(options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError(
+        'Browser is not running. Please launch the browser first.',
+        'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    const navTimeout = Math.max(1, Number(options.timeoutMs ?? this._navTimeoutMs)) || 15000;
+    let response = null;
+
+    try {
+      response = await this._page.goBack({
+        waitUntil: 'domcontentloaded',
+        timeout: navTimeout
+      });
+    } catch (err) {
+      if (err.name === 'TimeoutError' || /timeout/i.test(err.message || '')) {
+        throw new BrowserManagerError(
+          `Back navigation timed out after ${navTimeout} ms`,
+          'BROWSER_NAVIGATION_TIMEOUT',
+          { timeoutMs: navTimeout }
+        );
+      }
+      throw new BrowserManagerError(
+        `Back navigation failed: ${err.message || 'Unknown error'}`,
+        'BROWSER_NAVIGATION_FAILED'
+      );
+    }
+
+    const currentUrl = (this._page && typeof this._page.url === 'function')
+      ? this._page.url()
+      : null;
+    const title = (this._page && typeof this._page.title === 'function')
+      ? (await this._page.title()) || ''
+      : '';
+
+    return {
+      success: true,
+      navigated: Boolean(response),
+      url: currentUrl,
+      title,
+      state: this._state
+    };
+  }
+
+  /**
+   * Navigates forward in the managed page history.
+   *
+   * @param {Object} [options]
+   * @param {number} [options.timeoutMs]
+   * @returns {Promise<{
+   *   success: boolean,
+   *   navigated: boolean,
+   *   url: string|null,
+   *   title: string,
+   *   state: string
+   * }>}
+   */
+  async forward(options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError(
+        'Browser is not running. Please launch the browser first.',
+        'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    const navTimeout = Math.max(1, Number(options.timeoutMs ?? this._navTimeoutMs)) || 15000;
+    let response = null;
+
+    try {
+      response = await this._page.goForward({
+        waitUntil: 'domcontentloaded',
+        timeout: navTimeout
+      });
+    } catch (err) {
+      if (err.name === 'TimeoutError' || /timeout/i.test(err.message || '')) {
+        throw new BrowserManagerError(
+          `Forward navigation timed out after ${navTimeout} ms`,
+          'BROWSER_NAVIGATION_TIMEOUT',
+          { timeoutMs: navTimeout }
+        );
+      }
+      throw new BrowserManagerError(
+        `Forward navigation failed: ${err.message || 'Unknown error'}`,
+        'BROWSER_NAVIGATION_FAILED'
+      );
+    }
+
+    const currentUrl = (this._page && typeof this._page.url === 'function')
+      ? this._page.url()
+      : null;
+    const title = (this._page && typeof this._page.title === 'function')
+      ? (await this._page.title()) || ''
+      : '';
+
+    return {
+      success: true,
+      navigated: Boolean(response),
+      url: currentUrl,
+      title,
+      state: this._state
+    };
+  }
+
+  /**
+   * Reloads the current managed page.
+   *
+   * @param {Object} [options]
+   * @param {number} [options.timeoutMs]
+   * @returns {Promise<{
+   *   success: boolean,
+   *   url: string|null,
+   *   title: string,
+   *   state: string
+   * }>}
+   */
+  async refresh(options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError(
+        'Browser is not running. Please launch the browser first.',
+        'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    const navTimeout = Math.max(1, Number(options.timeoutMs ?? this._navTimeoutMs)) || 15000;
+
+    try {
+      await this._page.reload({
+        waitUntil: 'domcontentloaded',
+        timeout: navTimeout
+      });
+    } catch (err) {
+      if (err.name === 'TimeoutError' || /timeout/i.test(err.message || '')) {
+        throw new BrowserManagerError(
+          `Refresh timed out after ${navTimeout} ms`,
+          'BROWSER_NAVIGATION_TIMEOUT',
+          { timeoutMs: navTimeout }
+        );
+      }
+      throw new BrowserManagerError(
+        `Refresh failed: ${err.message || 'Unknown error'}`,
+        'BROWSER_NAVIGATION_FAILED'
+      );
+    }
+
+    const currentUrl = (this._page && typeof this._page.url === 'function')
+      ? this._page.url()
+      : null;
+    const title = (this._page && typeof this._page.title === 'function')
+      ? (await this._page.title()) || ''
+      : '';
+
+    return {
+      success: true,
+      url: currentUrl,
+      title,
+      state: this._state
+    };
   }
 
   /**

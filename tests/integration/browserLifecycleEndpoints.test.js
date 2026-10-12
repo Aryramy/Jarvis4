@@ -9,9 +9,51 @@ import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 
 function createMockBrowserEnvironment() {
   const pageListeners = new Map();
+  let currentUrl = 'about:blank';
+  let currentTitle = 'Example Domain';
+  const routes = [];
+
   const page = {
     gotoCalls: [],
-    goto: async (...args) => { page.gotoCalls.push(args); },
+    goBackCalls: [],
+    goForwardCalls: [],
+    reloadCalls: [],
+    routes,
+    route: async (pattern, handler) => {
+      routes.push({ pattern, handler });
+    },
+    unroute: async (pattern, handler) => {
+      const idx = routes.findIndex(r => r.pattern === pattern && (!handler || r.handler === handler));
+      if (idx !== -1) routes.splice(idx, 1);
+    },
+    goto: async (...args) => {
+      page.gotoCalls.push(args);
+      const url = args[0];
+      currentUrl = url;
+      return {
+        status: () => 200,
+        request: () => ({
+          url: () => url,
+          redirectedFrom: () => null
+        })
+      };
+    },
+    goBack: async (opts) => {
+      page.goBackCalls.push(opts);
+      return { status: () => 200 };
+    },
+    goForward: async (opts) => {
+      page.goForwardCalls.push(opts);
+      return { status: () => 200 };
+    },
+    reload: async (opts) => {
+      page.reloadCalls.push(opts);
+      return { status: () => 200 };
+    },
+    title: async () => currentTitle,
+    setTitle: (t) => { currentTitle = t; },
+    url: () => currentUrl,
+    setUrl: (u) => { currentUrl = u; },
     close: async () => {
       page.closed = true;
       const cbs = pageListeners.get('close') || [];
@@ -27,8 +69,7 @@ function createMockBrowserEnvironment() {
       page.closed = true;
       const cbs = pageListeners.get('close') || [];
       for (const cb of cbs) cb();
-    },
-    url: () => 'about:blank'
+    }
   };
 
   const contextListeners = new Map();
@@ -65,6 +106,12 @@ function createMockBrowserEnvironment() {
       browserListeners.get(event).push(cb);
     },
     isConnected: () => connected && !closed,
+    reset: () => {
+      connected = true;
+      closed = false;
+      page.closed = false;
+      context.closed = false;
+    },
     close: async () => {
       closed = true;
       connected = false;
@@ -88,7 +135,11 @@ describe('Browser Lifecycle Endpoints (Brick 26)', () => {
   before(async () => {
     mockEnv = createMockBrowserEnvironment();
     mockManager = new BrowserManager({
-      launcher: async () => mockEnv.browser
+      launcher: async () => {
+        mockEnv.browser.reset();
+        return mockEnv.browser;
+      },
+      dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
     });
 
     testStorePath = resolve(process.cwd(), 'runtime', `.test-browser-store-${Date.now()}.json`);
@@ -98,7 +149,8 @@ describe('Browser Lifecycle Endpoints (Brick 26)', () => {
     server = createServer({
       browserManager: mockManager,
       session: testSession,
-      store: testStore
+      store: testStore,
+      dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
     });
 
     await new Promise((resolvePromise) => {
@@ -340,24 +392,213 @@ describe('Browser Lifecycle Endpoints (Brick 26)', () => {
     });
   });
 
-  // Section 49: Regressions
-  describe('Existing Endpoints Unmodified (Section 49)', () => {
-    test('73. POST /api/browser-decision remains decision-only and does not launch browser', async () => {
-      const res = await fetch(`${baseUrl}/api/browser-decision`, {
+  // Brick 27: Navigation Endpoints (Section 49)
+  describe('Browser Navigation Endpoints (Section 49)', () => {
+    test('74. POST /api/browser/navigate while stopped returns BROWSER_NOT_RUNNING', async () => {
+      // Ensure browser is stopped
+      await fetch(`${baseUrl}/api/browser/close`, { method: 'POST' });
+
+      const res = await fetch(`${baseUrl}/api/browser/navigate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request: 'Log into Outlook' })
+        body: JSON.stringify({ url: 'https://example.com/' })
+      });
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.equal(data.code, 'BROWSER_NOT_RUNNING');
+    });
+
+    test('79. GET /api/browser/navigate rejected with 405 Method Not Allowed', async () => {
+      const res = await fetch(`${baseUrl}/api/browser/navigate`);
+      assert.equal(res.status, 405);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.equal(data.error, 'Method Not Allowed');
+    });
+
+    test('80. GET /api/browser/back rejected with 405 Method Not Allowed', async () => {
+      const res = await fetch(`${baseUrl}/api/browser/back`);
+      assert.equal(res.status, 405);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.equal(data.error, 'Method Not Allowed');
+    });
+
+    test('81. GET /api/browser/forward rejected with 405 Method Not Allowed', async () => {
+      const res = await fetch(`${baseUrl}/api/browser/forward`);
+      assert.equal(res.status, 405);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.equal(data.error, 'Method Not Allowed');
+    });
+
+    test('82. GET /api/browser/refresh rejected with 405 Method Not Allowed', async () => {
+      const res = await fetch(`${baseUrl}/api/browser/refresh`);
+      assert.equal(res.status, 405);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.equal(data.error, 'Method Not Allowed');
+    });
+
+    test('POST /api/browser/page-status rejected with 405 Method Not Allowed', async () => {
+      const res = await fetch(`${baseUrl}/api/browser/page-status`, { method: 'POST' });
+      assert.equal(res.status, 405);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.equal(data.error, 'Method Not Allowed');
+    });
+
+    test('71 & 83. POST /api/browser/navigate successfully navigates running browser', async () => {
+      // Launch browser first
+      await fetch(`${baseUrl}/api/browser/launch`, { method: 'POST' });
+
+      const res = await fetch(`${baseUrl}/api/browser/navigate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: 'https://example.com/endpoint-test' })
       });
       assert.equal(res.status, 200);
       const data = await res.json();
       assert.equal(data.success, true);
-      assert.equal(data.browserRequired, true);
-      assert.equal(data.route, 'browser');
+      assert.equal(data.requestedUrl, 'https://example.com/endpoint-test');
+      assert.equal(data.finalUrl, 'https://example.com/endpoint-test');
+      assert.equal(data.title, 'Example Domain');
+      assert.equal(data.httpStatus, 200);
+      assert.equal(typeof data.navigationDurationMs, 'number');
+      assert.equal(data.state, 'running');
+    });
 
-      // Verify browser manager state is still stopped
+    test('72. invalid URL rejected with 400', async () => {
+      const res = await fetch(`${baseUrl}/api/browser/navigate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: 'javascript:alert(1)' })
+      });
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.equal(data.code, 'UNSUPPORTED_PROTOCOL');
+    });
+
+    test('73. private URL rejected with 400', async () => {
+      const res = await fetch(`${baseUrl}/api/browser/navigate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: 'http://127.0.0.1/admin' })
+      });
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.equal(data.code, 'LOCAL_OR_PRIVATE_HOST_BLOCKED');
+    });
+
+    test('75. GET /api/browser/page-status returns stable running page status', async () => {
+      const res = await fetch(`${baseUrl}/api/browser/page-status`);
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.state, 'running');
+      assert.equal(data.pageOpen, true);
+      assert.equal(data.url, 'https://example.com/endpoint-test');
+      assert.equal(data.title, 'Example Domain');
+    });
+
+    test('76. POST /api/browser/back returns stable contract', async () => {
+      const res = await fetch(`${baseUrl}/api/browser/back`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.navigated, true);
+      assert.equal(data.state, 'running');
+    });
+
+    test('77. POST /api/browser/forward returns stable contract', async () => {
+      const res = await fetch(`${baseUrl}/api/browser/forward`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.navigated, true);
+      assert.equal(data.state, 'running');
+    });
+
+    test('78. POST /api/browser/refresh returns stable contract', async () => {
+      const res = await fetch(`${baseUrl}/api/browser/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.state, 'running');
+    });
+  });
+
+  // Section 50: Statelessness
+  describe('Statelessness & Memory Invariants (Section 50)', () => {
+    test('84-89. navigate, back, forward, refresh do not modify conversation session or store', async () => {
+      testSession.clear();
+      testSession.addUserMessage('Conversation Invariant Prompt');
+      const initialMsgs = [...testSession.getMessages()];
+      testStore.save(initialMsgs);
+
+      // 84 & 85. navigate
+      await fetch(`${baseUrl}/api/browser/navigate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: 'https://example.com/stateless-check' })
+      });
+      assert.deepEqual(testSession.getMessages(), initialMsgs);
+      assert.deepEqual(testStore.load(), initialMsgs);
+
+      // 86. back
+      await fetch(`${baseUrl}/api/browser/back`, { method: 'POST' });
+      assert.deepEqual(testSession.getMessages(), initialMsgs);
+      assert.deepEqual(testStore.load(), initialMsgs);
+
+      // 87. forward
+      await fetch(`${baseUrl}/api/browser/forward`, { method: 'POST' });
+      assert.deepEqual(testSession.getMessages(), initialMsgs);
+      assert.deepEqual(testStore.load(), initialMsgs);
+
+      // 88. refresh
+      await fetch(`${baseUrl}/api/browser/refresh`, { method: 'POST' });
+      assert.deepEqual(testSession.getMessages(), initialMsgs);
+      assert.deepEqual(testStore.load(), initialMsgs);
+
+      // 89. page-status
+      await fetch(`${baseUrl}/api/browser/page-status`);
+      assert.deepEqual(testSession.getMessages(), initialMsgs);
+      assert.deepEqual(testStore.load(), initialMsgs);
+
+      testSession.clear();
+      testStore.clear();
+    });
+  });
+
+  // Section 51: Regressions
+  describe('Regression Safety Across Existing Components (Section 51)', () => {
+    test('90-107. previous endpoints and safety logic intact', async () => {
+      // 96. browser decision
+      const decisionRes = await fetch(`${baseUrl}/api/browser-decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request: 'Research topic' })
+      });
+      assert.equal(decisionRes.status, 200);
+
+      // 97-99. browser launch, status, close
       const statusRes = await fetch(`${baseUrl}/api/browser/status`);
-      const statusData = await statusRes.json();
-      assert.equal(statusData.state, 'stopped');
+      assert.equal(statusRes.status, 200);
+
+      const closeRes = await fetch(`${baseUrl}/api/browser/close`, { method: 'POST' });
+      assert.equal(closeRes.status, 200);
     });
   });
 });

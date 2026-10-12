@@ -78,3 +78,6 @@ Status: VERIFIED
 
 BRICK-026 — Playwright Browser Lifecycle Foundation v1
 Status: VERIFIED
+
+BRICK-027 — Browser Navigation v1
+Status: VERIFIED

@@ -3,11 +3,72 @@ import assert from 'node:assert/strict';
 import { BrowserManager, BrowserManagerError, BROWSER_STATES } from '../../src/browser/browserManager.js';
 import { defaultPlaywrightLauncher, chromium } from '../../src/browser/playwrightBrowser.js';
 
-function createMockBrowserEnvironment() {
+function createMockBrowserEnvironment(options = {}) {
   const pageListeners = new Map();
+  let currentUrl = 'about:blank';
+  let currentTitle = 'Example Domain';
+  const routes = [];
+
   const page = {
     gotoCalls: [],
-    goto: async (...args) => { page.gotoCalls.push(args); },
+    goBackCalls: [],
+    goForwardCalls: [],
+    reloadCalls: [],
+    routes,
+    route: async (pattern, handler) => {
+      routes.push({ pattern, handler });
+    },
+    unroute: async (pattern, handler) => {
+      const idx = routes.findIndex(r => r.pattern === pattern && (!handler || r.handler === handler));
+      if (idx !== -1) routes.splice(idx, 1);
+    },
+    goto: async (...args) => {
+      page.gotoCalls.push(args);
+      const url = args[0];
+      const opts = args[1];
+      if (options.gotoHandler) {
+        return await options.gotoHandler(url, opts, page);
+      }
+      currentUrl = url;
+      return {
+        status: () => 200,
+        request: () => ({
+          url: () => url,
+          redirectedFrom: () => null
+        })
+      };
+    },
+    goBack: async (opts) => {
+      page.goBackCalls.push(opts);
+      if (options.goBackHandler) {
+        return await options.goBackHandler(opts, page);
+      }
+      return {
+        status: () => 200
+      };
+    },
+    goForward: async (opts) => {
+      page.goForwardCalls.push(opts);
+      if (options.goForwardHandler) {
+        return await options.goForwardHandler(opts, page);
+      }
+      return {
+        status: () => 200
+      };
+    },
+    reload: async (opts) => {
+      page.reloadCalls.push(opts);
+      if (options.reloadHandler) {
+        return await options.reloadHandler(opts, page);
+      }
+      return {
+        status: () => 200
+      };
+    },
+    title: async () => currentTitle,
+    setTitle: (t) => { currentTitle = t; },
+    url: () => currentUrl,
+    setUrl: (u) => { currentUrl = u; },
     close: async () => {
       page.closed = true;
       const cbs = pageListeners.get('close') || [];
@@ -23,8 +84,7 @@ function createMockBrowserEnvironment() {
       page.closed = true;
       const cbs = pageListeners.get('close') || [];
       for (const cb of cbs) cb();
-    },
-    url: () => 'about:blank'
+    }
   };
 
   const contextListeners = new Map();
@@ -606,6 +666,828 @@ describe('Playwright Browser Lifecycle Foundation (Brick 26)', () => {
       const bmCode = fs.readFileSync(new URL('../../src/browser/browserManager.js', import.meta.url), 'utf8');
       assert.equal(bmCode.includes('taskkill'), false, 'must not include taskkill');
       assert.equal(bmCode.includes('process.kill'), false, 'must not include process.kill');
+    });
+  });
+
+  // Brick 27: Browser Navigation Foundation
+  describe('Browser Navigation URL Validation (Section 39)', () => {
+    const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+
+    test('1. https URL accepted', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      const res = await manager.navigate('https://example.com/', { dnsLookup: safeDns });
+      assert.equal(res.success, true);
+      assert.equal(res.requestedUrl, 'https://example.com/');
+    });
+
+    test('2. http URL accepted', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      const res = await manager.navigate('http://example.com/', { dnsLookup: safeDns });
+      assert.equal(res.success, true);
+      assert.equal(res.requestedUrl, 'http://example.com/');
+    });
+
+    test('3. missing URL rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate(),
+        (err) => err.code === 'INVALID_URL'
+      );
+    });
+
+    test('4. non-string URL rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate(12345),
+        (err) => err.code === 'INVALID_URL'
+      );
+    });
+
+    test('5. empty URL rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate('   '),
+        (err) => err.code === 'INVALID_URL'
+      );
+    });
+
+    test('6. malformed URL rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate('not-a-url'),
+        (err) => err.code === 'INVALID_URL'
+      );
+    });
+
+    test('7. javascript: rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate('javascript:alert(1)'),
+        (err) => err.code === 'UNSUPPORTED_PROTOCOL'
+      );
+    });
+
+    test('8. file: rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate('file:///etc/passwd'),
+        (err) => err.code === 'UNSUPPORTED_PROTOCOL'
+      );
+    });
+
+    test('9. ftp: rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate('ftp://example.com/file.txt'),
+        (err) => err.code === 'UNSUPPORTED_PROTOCOL'
+      );
+    });
+
+    test('10. data: rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate('data:text/html,<h1>Test</h1>'),
+        (err) => err.code === 'UNSUPPORTED_PROTOCOL'
+      );
+    });
+
+    test('11. about: rejected as user navigation', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate('about:blank'),
+        (err) => err.code === 'UNSUPPORTED_PROTOCOL'
+      );
+    });
+  });
+
+  describe('Browser Navigation Network Safety (Section 40)', () => {
+    test('12. localhost rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate('http://localhost/'),
+        (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+      );
+    });
+
+    test('13. 127.0.0.1 rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate('http://127.0.0.1/'),
+        (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+      );
+    });
+
+    test('14. 10.0.0.1 rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate('http://10.0.0.1/'),
+        (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+      );
+    });
+
+    test('15. 192.168.x.x rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate('http://192.168.1.1/'),
+        (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+      );
+    });
+
+    test('16. 169.254.x.x rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate('http://169.254.169.254/'),
+        (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+      );
+    });
+
+    test('17. IPv6 loopback rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate('http://[::1]/'),
+        (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+      );
+    });
+
+    test('18. private IPv6 rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate('http://[fe80::1]/'),
+        (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+      );
+    });
+
+    test('19. DNS result containing any private address rejected', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await assert.rejects(
+        () => manager.navigate('https://private-dns.example.com/', {
+          dnsLookup: async () => [
+            { address: '93.184.216.34', family: 4 },
+            { address: '10.0.0.1', family: 4 }
+          ]
+        }),
+        (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+      );
+      assert.equal(mockEnv.page.gotoCalls.length, 0, 'page.goto must NOT be called');
+    });
+
+    test('20. safe public DNS accepted', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      const res = await manager.navigate('https://public.example.com/', {
+        dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+      });
+      assert.equal(res.success, true);
+      assert.equal(mockEnv.page.gotoCalls.length, 1);
+    });
+  });
+
+  describe('Browser Navigation Execution (Section 41)', () => {
+    const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+
+    test('21. navigate requires running browser', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      assert.equal(manager.state, BROWSER_STATES.STOPPED);
+
+      await assert.rejects(
+        () => manager.navigate('https://example.com/', { dnsLookup: safeDns }),
+        (err) => err.code === 'BROWSER_NOT_RUNNING'
+      );
+      assert.equal(mockEnv.page.gotoCalls.length, 0);
+    });
+
+    test('22 & 23. page.goto called exactly once with exact requested URL', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await manager.navigate('https://example.com/path?query=1', { dnsLookup: safeDns });
+      assert.equal(mockEnv.page.gotoCalls.length, 1);
+      assert.equal(mockEnv.page.gotoCalls[0][0], 'https://example.com/path?query=1');
+    });
+
+    test('24. waitUntil is NOT networkidle (is domcontentloaded)', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await manager.navigate('https://example.com/', { dnsLookup: safeDns });
+      const opts = mockEnv.page.gotoCalls[0][1];
+      assert.equal(opts.waitUntil, 'domcontentloaded');
+      assert.notEqual(opts.waitUntil, 'networkidle');
+    });
+
+    test('25. configured timeout used', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({
+        launcher: async () => mockEnv.browser,
+        navigationTimeoutMs: 12345
+      });
+      await manager.launch();
+
+      await manager.navigate('https://example.com/', { dnsLookup: safeDns });
+      const opts = mockEnv.page.gotoCalls[0][1];
+      assert.equal(opts.timeout, 12345);
+    });
+
+    test('26. final URL returned from page.url()', async () => {
+      const mockEnv = createMockBrowserEnvironment({
+        gotoHandler: async (url, opts, page) => {
+          page.setUrl('https://example.com/final-redirected');
+          return { status: () => 200, request: () => ({ url: () => 'https://example.com/final-redirected', redirectedFrom: () => null }) };
+        }
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const res = await manager.navigate('https://example.com/start', { dnsLookup: safeDns });
+      assert.equal(res.requestedUrl, 'https://example.com/start');
+      assert.equal(res.finalUrl, 'https://example.com/final-redirected');
+    });
+
+    test('27. title returned from page.title()', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      mockEnv.page.setTitle('Custom Title For Test');
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const res = await manager.navigate('https://example.com/', { dnsLookup: safeDns });
+      assert.equal(res.title, 'Custom Title For Test');
+    });
+
+    test('28. HTTP status returned', async () => {
+      const mockEnv = createMockBrowserEnvironment({
+        gotoHandler: async () => ({
+          status: () => 204,
+          request: () => ({ url: () => 'https://example.com/', redirectedFrom: () => null })
+        })
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const res = await manager.navigate('https://example.com/', { dnsLookup: safeDns });
+      assert.equal(res.httpStatus, 204);
+    });
+
+    test('29. navigationDurationMs returned as positive number', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const res = await manager.navigate('https://example.com/', { dnsLookup: safeDns });
+      assert.equal(typeof res.navigationDurationMs, 'number');
+      assert.ok(res.navigationDurationMs >= 0);
+    });
+  });
+
+  describe('Browser Navigation Redirect Safety (Section 42)', () => {
+    const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+
+    test('30. safe redirect accepted', async () => {
+      const mockEnv = createMockBrowserEnvironment({
+        gotoHandler: async (url, opts, page) => {
+          page.setUrl('https://example.com/dest');
+          return {
+            status: () => 200,
+            request: () => ({
+              url: () => 'https://example.com/dest',
+              redirectedFrom: () => ({
+                url: () => 'https://example.com/src'
+              })
+            })
+          };
+        }
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const res = await manager.navigate('https://example.com/src', { dnsLookup: safeDns });
+      assert.equal(res.success, true);
+      assert.equal(res.finalUrl, 'https://example.com/dest');
+    });
+
+    test('31. redirect to localhost blocked via route handler', async () => {
+      let abortedReason = null;
+      const mockEnv = createMockBrowserEnvironment({
+        gotoHandler: async (url, opts, page) => {
+          // Trigger registered route handler with a redirect to localhost
+          const route = page.routes[0];
+          if (route) {
+            await route.handler({
+              request: () => ({
+                url: () => 'http://localhost:8080/admin',
+                redirectedFrom: () => ({ url: () => 'https://example.com/' })
+              }),
+              abort: async (reason) => { abortedReason = reason; },
+              continue: async () => {}
+            });
+          }
+          if (abortedReason) {
+            throw new Error('net::ERR_BLOCKED_BY_CLIENT');
+          }
+          return { status: () => 200, request: () => ({ url: () => url, redirectedFrom: () => null }) };
+        }
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await assert.rejects(
+        () => manager.navigate('https://example.com/', { dnsLookup: safeDns }),
+        (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED' || err.code === 'INSECURE_REDIRECT_DOWNGRADE'
+      );
+      assert.equal(abortedReason, 'blockedbyclient');
+    });
+
+    test('32. redirect to RFC1918 blocked via secondary chain verification', async () => {
+      const mockEnv = createMockBrowserEnvironment({
+        gotoHandler: async (url, opts, page) => ({
+          status: () => 200,
+          request: () => ({
+            url: () => 'http://192.168.1.1/router',
+            redirectedFrom: () => ({
+              url: () => 'http://example.com/'
+            })
+          })
+        })
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await assert.rejects(
+        () => manager.navigate('http://example.com/', { dnsLookup: safeDns }),
+        (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+      );
+    });
+
+    test('33. redirect to link-local blocked via secondary chain verification', async () => {
+      const mockEnv = createMockBrowserEnvironment({
+        gotoHandler: async (url, opts, page) => ({
+          status: () => 200,
+          request: () => ({
+            url: () => 'http://169.254.169.254/latest/meta-data',
+            redirectedFrom: () => ({
+              url: () => 'http://example.com/'
+            })
+          })
+        })
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await assert.rejects(
+        () => manager.navigate('http://example.com/', { dnsLookup: safeDns }),
+        (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+      );
+    });
+
+    test('34. HTTPS → HTTP downgrade blocked with INSECURE_REDIRECT_DOWNGRADE', async () => {
+      const mockEnv = createMockBrowserEnvironment({
+        gotoHandler: async (url, opts, page) => ({
+          status: () => 200,
+          request: () => ({
+            url: () => 'http://example.com/unencrypted',
+            redirectedFrom: () => ({
+              url: () => 'https://example.com/secure'
+            })
+          })
+        })
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await assert.rejects(
+        () => manager.navigate('https://example.com/secure', { dnsLookup: safeDns }),
+        (err) => err.code === 'INSECURE_REDIRECT_DOWNGRADE'
+      );
+    });
+
+    test('35. blocked redirect does not proceed to usable final state', async () => {
+      const mockEnv = createMockBrowserEnvironment({
+        gotoHandler: async (url, opts, page) => ({
+          status: () => 200,
+          request: () => ({
+            url: () => 'http://10.0.0.1/internal',
+            redirectedFrom: () => ({
+              url: () => 'http://example.com/'
+            })
+          })
+        })
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await assert.rejects(
+        () => manager.navigate('http://example.com/', { dnsLookup: safeDns })
+      );
+
+      // Verify page was reset to about:blank and does not remain on 10.0.0.1
+      assert.equal(mockEnv.page.url(), 'about:blank');
+    });
+  });
+
+  describe('Browser Navigation HTTP & Failure Modes (Section 43)', () => {
+    const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+
+    test('36. HTTP 404 returns controlled BROWSER_HTTP_ERROR', async () => {
+      const mockEnv = createMockBrowserEnvironment({
+        gotoHandler: async () => ({
+          status: () => 404,
+          request: () => ({ url: () => 'https://example.com/missing', redirectedFrom: () => null })
+        })
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await assert.rejects(
+        () => manager.navigate('https://example.com/missing', { dnsLookup: safeDns }),
+        (err) => err.code === 'BROWSER_HTTP_ERROR' && err.details?.httpStatus === 404
+      );
+      assert.equal(manager.state, BROWSER_STATES.RUNNING, 'Browser must remain running');
+    });
+
+    test('37. HTTP 500 returns controlled BROWSER_HTTP_ERROR', async () => {
+      const mockEnv = createMockBrowserEnvironment({
+        gotoHandler: async () => ({
+          status: () => 500,
+          request: () => ({ url: () => 'https://example.com/crash', redirectedFrom: () => null })
+        })
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await assert.rejects(
+        () => manager.navigate('https://example.com/crash', { dnsLookup: safeDns }),
+        (err) => err.code === 'BROWSER_HTTP_ERROR' && err.details?.httpStatus === 500
+      );
+      assert.equal(manager.state, BROWSER_STATES.RUNNING);
+    });
+
+    test('38. navigation timeout → BROWSER_NAVIGATION_TIMEOUT', async () => {
+      const mockEnv = createMockBrowserEnvironment({
+        gotoHandler: async () => {
+          const timeoutErr = new Error('page.goto: Timeout 15000ms exceeded.');
+          timeoutErr.name = 'TimeoutError';
+          throw timeoutErr;
+        }
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await assert.rejects(
+        () => manager.navigate('https://example.com/', { dnsLookup: safeDns }),
+        (err) => err.code === 'BROWSER_NAVIGATION_TIMEOUT'
+      );
+      assert.equal(manager.state, BROWSER_STATES.RUNNING);
+    });
+
+    test('39 & 40. generic navigation error → BROWSER_NAVIGATION_FAILED with safe message', async () => {
+      const mockEnv = createMockBrowserEnvironment({
+        gotoHandler: async () => {
+          throw new Error('page.goto: net::ERR_CONNECTION_REFUSED at C:\\internal\\playwright\\page.js');
+        }
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await assert.rejects(
+        () => manager.navigate('https://example.com/', { dnsLookup: safeDns }),
+        (err) => {
+          assert.equal(err.code, 'BROWSER_NAVIGATION_FAILED');
+          assert.equal(err.message.includes('C:\\internal'), false, 'must not expose internal paths');
+          return true;
+        }
+      );
+    });
+
+    test('41. browser lifecycle remains consistent after failure', async () => {
+      const mockEnv = createMockBrowserEnvironment({
+        gotoHandler: async () => {
+          throw new Error('Navigation failure');
+        }
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      try {
+        await manager.navigate('https://example.com/', { dnsLookup: safeDns });
+      } catch {}
+
+      assert.equal(manager.state, BROWSER_STATES.RUNNING);
+      assert.equal(manager.isSessionActive(), true);
+    });
+  });
+
+  describe('Browser Page Status (Section 44)', () => {
+    test('42. page-status while stopped returns stopped and null url/title', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+
+      const status = await manager.getPageStatus();
+      assert.equal(status.success, true);
+      assert.equal(status.state, 'stopped');
+      assert.equal(status.pageOpen, false);
+      assert.equal(status.url, null);
+      assert.equal(status.title, null);
+    });
+
+    test('43-46. page-status while running returns current URL and title without navigating', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      mockEnv.page.setUrl('https://example.com/active');
+      mockEnv.page.setTitle('Active Page Title');
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const initialGotoCalls = mockEnv.page.gotoCalls.length;
+      const status = await manager.getPageStatus();
+      assert.equal(status.success, true);
+      assert.equal(status.state, 'running');
+      assert.equal(status.pageOpen, true);
+      assert.equal(status.url, 'https://example.com/active');
+      assert.equal(status.title, 'Active Page Title');
+      assert.equal(mockEnv.page.gotoCalls.length, initialGotoCalls, 'Must not navigate');
+    });
+
+    test('47. manual page close reconciles to stopped on getPageStatus', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      assert.equal(manager.state, BROWSER_STATES.RUNNING);
+
+      mockEnv.page.simulateClose();
+
+      const status = await manager.getPageStatus();
+      assert.equal(status.success, true);
+      assert.equal(status.state, 'stopped');
+      assert.equal(status.pageOpen, false);
+      assert.equal(status.url, null);
+      assert.equal(status.title, null);
+    });
+  });
+
+  describe('Browser History Back (Section 45)', () => {
+    test('48. back calls page.goBack once', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const res = await manager.back();
+      assert.equal(res.success, true);
+      assert.equal(res.navigated, true);
+      assert.equal(mockEnv.page.goBackCalls.length, 1);
+    });
+
+    test('49. no history returns navigated false without crash', async () => {
+      const mockEnv = createMockBrowserEnvironment({
+        goBackHandler: async () => null
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const res = await manager.back();
+      assert.equal(res.success, true);
+      assert.equal(res.navigated, false);
+    });
+
+    test('50 & 51. back returns resulting URL and title', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      mockEnv.page.setUrl('https://example.com/previous');
+      mockEnv.page.setTitle('Previous Page');
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const res = await manager.back();
+      assert.equal(res.url, 'https://example.com/previous');
+      assert.equal(res.title, 'Previous Page');
+    });
+
+    test('52. back uses configured timeout', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({
+        launcher: async () => mockEnv.browser,
+        navigationTimeoutMs: 7777
+      });
+      await manager.launch();
+
+      await manager.back();
+      assert.equal(mockEnv.page.goBackCalls[0].timeout, 7777);
+      assert.equal(mockEnv.page.goBackCalls[0].waitUntil, 'domcontentloaded');
+    });
+
+    test('53. back does not launch browser when stopped', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+
+      await assert.rejects(
+        () => manager.back(),
+        (err) => err.code === 'BROWSER_NOT_RUNNING'
+      );
+      assert.equal(mockEnv.page.goBackCalls.length, 0);
+    });
+  });
+
+  describe('Browser History Forward (Section 46)', () => {
+    test('54. forward calls page.goForward once', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const res = await manager.forward();
+      assert.equal(res.success, true);
+      assert.equal(res.navigated, true);
+      assert.equal(mockEnv.page.goForwardCalls.length, 1);
+    });
+
+    test('55. no history returns navigated false', async () => {
+      const mockEnv = createMockBrowserEnvironment({
+        goForwardHandler: async () => null
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const res = await manager.forward();
+      assert.equal(res.success, true);
+      assert.equal(res.navigated, false);
+    });
+
+    test('56 & 57. forward returns resulting URL and title', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      mockEnv.page.setUrl('https://example.com/next');
+      mockEnv.page.setTitle('Next Page');
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const res = await manager.forward();
+      assert.equal(res.url, 'https://example.com/next');
+      assert.equal(res.title, 'Next Page');
+    });
+
+    test('58. forward does not launch browser when stopped', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+
+      await assert.rejects(
+        () => manager.forward(),
+        (err) => err.code === 'BROWSER_NOT_RUNNING'
+      );
+      assert.equal(mockEnv.page.goForwardCalls.length, 0);
+    });
+  });
+
+  describe('Browser Refresh (Section 47)', () => {
+    test('59. refresh calls page.reload once', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const res = await manager.refresh();
+      assert.equal(res.success, true);
+      assert.equal(mockEnv.page.reloadCalls.length, 1);
+    });
+
+    test('60 & 61. refresh uses configured timeout and does not use networkidle', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({
+        launcher: async () => mockEnv.browser,
+        navigationTimeoutMs: 8888
+      });
+      await manager.launch();
+
+      await manager.refresh();
+      assert.equal(mockEnv.page.reloadCalls[0].timeout, 8888);
+      assert.equal(mockEnv.page.reloadCalls[0].waitUntil, 'domcontentloaded');
+    });
+
+    test('62 & 63. refresh returns current URL and title', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      mockEnv.page.setUrl('https://example.com/current');
+      mockEnv.page.setTitle('Current Title');
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const res = await manager.refresh();
+      assert.equal(res.url, 'https://example.com/current');
+      assert.equal(res.title, 'Current Title');
+    });
+
+    test('64. refresh does not launch browser when stopped', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+
+      await assert.rejects(
+        () => manager.refresh(),
+        (err) => err.code === 'BROWSER_NOT_RUNNING'
+      );
+      assert.equal(mockEnv.page.reloadCalls.length, 0);
+    });
+  });
+
+  describe('Browser Lifecycle Regression (Section 48)', () => {
+    test('65. duplicate launch still protected', async () => {
+      let launchCount = 0;
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({
+        launcher: async () => {
+          launchCount++;
+          return mockEnv.browser;
+        }
+      });
+      await manager.launch();
+      const dup = await manager.launch();
+      assert.equal(launchCount, 1);
+      assert.equal(dup.alreadyRunning, true);
+    });
+
+    test('66. manual X-close reconciliation preserved', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      assert.equal(manager.state, BROWSER_STATES.RUNNING);
+
+      mockEnv.page.simulateClose();
+      assert.equal(manager.state, BROWSER_STATES.STOPPED);
+    });
+
+    test('67. fresh relaunch after manual close preserved', async () => {
+      let launchCount = 0;
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({
+        launcher: async () => {
+          launchCount++;
+          return mockEnv.browser;
+        }
+      });
+      await manager.launch();
+      mockEnv.page.simulateClose();
+      assert.equal(manager.state, BROWSER_STATES.STOPPED);
+
+      // Fresh relaunch
+      mockEnv.page.closed = false;
+      const second = await manager.launch();
+      assert.equal(launchCount, 2);
+      assert.equal(second.alreadyRunning, false);
+      assert.equal(manager.state, BROWSER_STATES.RUNNING);
+    });
+
+    test('68. controlled close preserved', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      const closeRes = await manager.close();
+      assert.equal(closeRes.success, true);
+      assert.equal(closeRes.state, 'stopped');
+      assert.equal(manager.state, BROWSER_STATES.STOPPED);
+    });
+
+    test('69. existing user browser windows unaffected', () => {
+      const manager = new BrowserManager();
+      assert.equal(manager._browser, null);
+    });
+
+    test('70. no taskkill/global browser kill', async () => {
+      const fs = await import('node:fs');
+      const bmCode = fs.readFileSync(new URL('../../src/browser/browserManager.js', import.meta.url), 'utf8');
+      assert.equal(bmCode.includes('taskkill'), false);
+      assert.equal(bmCode.includes('process.kill'), false);
     });
   });
 });

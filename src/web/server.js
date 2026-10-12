@@ -1413,6 +1413,210 @@ export function createRequestListener(options = {}) {
       return;
     }
 
+    // Route: POST /api/browser/navigate (Brick 27 Browser Navigation)
+    if (url.pathname === '/api/browser/navigate') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      let isTooLarge = false;
+
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 1e6) {
+          isTooLarge = true;
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Payload Too Large' }));
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        if (isTooLarge) return;
+
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid JSON body' }));
+          return;
+        }
+
+        const inputUrl = parsedBody.url;
+        if (typeof inputUrl !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_URL',
+            code: 'INVALID_URL',
+            message: 'URL must be a string'
+          }));
+          return;
+        }
+
+        const trimmedUrl = inputUrl.trim();
+        if (trimmedUrl.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_URL',
+            code: 'INVALID_URL',
+            message: 'URL cannot be empty'
+          }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.navigate(trimmedUrl, {
+            dnsLookup: options.dnsLookup
+          });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'BROWSER_NAVIGATION_FAILED';
+          let statusCode = 500;
+          if (['INVALID_URL', 'UNSUPPORTED_PROTOCOL', 'URL_CREDENTIALS_NOT_ALLOWED', 'PORT_NOT_ALLOWED', 'LOCAL_OR_PRIVATE_HOST_BLOCKED', 'DNS_RESOLUTION_FAILED', 'BROWSER_NOT_RUNNING', 'INSECURE_REDIRECT_DOWNGRADE'].includes(errorCode)) {
+            statusCode = 400;
+          } else if (errorCode === 'BROWSER_NAVIGATION_TIMEOUT') {
+            statusCode = 504;
+          } else if (errorCode === 'BROWSER_HTTP_ERROR') {
+            statusCode = 502;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: err.message || 'Navigation failed',
+            httpStatus: err.details?.httpStatus,
+            requestedUrl: err.details?.requestedUrl || trimmedUrl,
+            finalUrl: err.details?.finalUrl
+          }));
+        }
+      });
+
+      return;
+    }
+
+    // Route: GET /api/browser/page-status (Brick 27 Browser Navigation)
+    if (url.pathname === '/api/browser/page-status') {
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      (async () => {
+        try {
+          const result = await browserManager.getPageStatus();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'BROWSER_PAGE_STATUS_FAILED',
+            code: 'BROWSER_PAGE_STATUS_FAILED',
+            message: err.message || 'Failed to retrieve page status'
+          }));
+        }
+      })();
+
+      return;
+    }
+
+    // Route: POST /api/browser/back (Brick 27 Browser Navigation)
+    if (url.pathname === '/api/browser/back') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      (async () => {
+        try {
+          const result = await browserManager.back();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'BROWSER_NAVIGATION_FAILED';
+          const statusCode = errorCode === 'BROWSER_NOT_RUNNING' ? 400 : 500;
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: err.message || 'Back navigation failed'
+          }));
+        }
+      })();
+
+      return;
+    }
+
+    // Route: POST /api/browser/forward (Brick 27 Browser Navigation)
+    if (url.pathname === '/api/browser/forward') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      (async () => {
+        try {
+          const result = await browserManager.forward();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'BROWSER_NAVIGATION_FAILED';
+          const statusCode = errorCode === 'BROWSER_NOT_RUNNING' ? 400 : 500;
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: err.message || 'Forward navigation failed'
+          }));
+        }
+      })();
+
+      return;
+    }
+
+    // Route: POST /api/browser/refresh (Brick 27 Browser Navigation)
+    if (url.pathname === '/api/browser/refresh') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      (async () => {
+        try {
+          const result = await browserManager.refresh();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'BROWSER_NAVIGATION_FAILED';
+          const statusCode = errorCode === 'BROWSER_NOT_RUNNING' ? 400 : 500;
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: err.message || 'Refresh failed'
+          }));
+        }
+      })();
+
+      return;
+    }
+
     // Route: /api/stt (Brick 10 multilingual STT endpoint & Brick 18 STT Latency Instrumentation)
     if (url.pathname === '/api/stt') {
       if (req.method !== 'POST') {

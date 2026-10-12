@@ -1,11 +1,36 @@
 Project: JARVIS4
-Current Brick: 26
-Status: BRICK-026 VERIFIED
-Last Verified Brick: BRICK-026
-Current Feature: Playwright Browser Lifecycle Foundation v1
+Current Brick: 27
+Status: BRICK-027 VERIFIED
+Last Verified Brick: BRICK-027
+Current Feature: Browser Navigation v1
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
+
+- Browser Navigation v1 subsystem operational on existing managed Playwright browser page (`navigate`, `back`, `forward`, `refresh`, `getPageStatus` in `src/browser/browserManager.js`)
+- Human live verification completed and verified across all live navigation and security tests:
+  - First real website navigation verified (`https://example.com/` -> HTTP 200, title "Example Domain", navigation duration 439.257 ms)
+  - Page status observational query verified (`GET /api/browser/page-status` returned current URL and title without re-navigating)
+  - Second navigation and history creation verified (`https://example.org/` -> HTTP 200, duration 295.225 ms)
+  - Back navigation verified (`POST /api/browser/back` returned to `https://example.com/`, `navigated: true`)
+  - Forward navigation verified (`POST /api/browser/forward` advanced to `https://example.org/`, `navigated: true`)
+  - Refresh navigation verified (`POST /api/browser/refresh` reloaded `https://example.org/`, same URL preserved)
+  - Localhost / loopback URL blocking verified (`http://127.0.0.1/` rejected with `LOCAL_OR_PRIVATE_HOST_BLOCKED`)
+  - Stopped-browser navigation rejection verified (`BROWSER_NOT_RUNNING` returned when stopped; Edge remained closed with ZERO auto-launch)
+- Single managed page invariant preserved: owns at most ONE browser process, ONE isolated temporary context, and ONE managed page; navigation never creates new tabs, popups, or windows
+- Explicit URL navigation only: accepts strictly valid HTTP and HTTPS URLs (`http:`, `https:`); rejects `javascript:`, `file:`, `ftp:`, `data:`, `about:`, `blob:`, `ws:`, `wss:`, and custom schemes
+- SSRF & private network safety: blocks navigation to localhost, loopback, RFC1918 private IPv4, link-local, carrier-grade NAT, private/local IPv6, and any hostname resolving to private IP addresses before `page.goto` is invoked
+- Main-frame redirect safety: intercepts navigation requests via page route handlers and validates redirect target URLs against SSRF/private network restrictions; blocks and aborts requests before transmission
+- HTTPS downgrade prevention: blocks main-frame redirects downgrading from HTTPS to HTTP with controlled `INSECURE_REDIRECT_DOWNGRADE` error; resets page to `about:blank`
+- Mandatory running browser requirement: navigation, back, forward, refresh require the browser to be already running; returns controlled `BROWSER_NOT_RUNNING` error if stopped without auto-launching
+- Predictable lifecycle wait: uses `waitUntil: 'domcontentloaded'`, strictly prohibiting `networkidle`
+- Navigation timing & metadata: returns requested URL, actual final URL (`page.url()`), document title (`page.title()`), HTTP status, and measured `navigationDurationMs`
+- Controlled error handling: HTTP status >= 400 yields `BROWSER_HTTP_ERROR` without closing browser; timeout yields `BROWSER_NAVIGATION_TIMEOUT`; generic errors yield `BROWSER_NAVIGATION_FAILED` with safe sanitized messages (zero paths or stack traces)
+- History navigation: `back` and `forward` operate strictly on managed page history; no history returns `navigated: false` safely without crashing; `refresh` reloads current page
+- Endpoints added: `POST /api/browser/navigate`, `GET /api/browser/page-status`, `POST /api/browser/back`, `POST /api/browser/forward`, `POST /api/browser/refresh` with strict HTTP method checking (405 on disallowed methods)
+- Minimal Navigation Web UI: dedicated "Browser Navigation" section in `src/web/index.html` with URL input, Navigate, Back, Forward, Refresh, Refresh Page Status controls and safe `.textContent` rendering
+- Zero live browser execution during test verification: automated test suite (`npm run verify`) runs 100% offline using mock browser environments (835 tests passing across 65 suites)
+- Strict statelessness: zero mutations to `ConversationSession`, `ConversationStore`, or persistent conversation files
 
 - Playwright Browser Lifecycle subsystem (`BrowserManager`, `BrowserManagerError`, `BROWSER_STATES` in `src/browser/browserManager.js`, and `defaultPlaywrightLauncher`, `chromium` in `src/browser/playwrightBrowser.js`) managing single browser execution lifecycle
 - Managed single browser instance: JARVIS owns at most ONE browser process, ONE isolated temporary browser context, and ONE blank page (`about:blank`)

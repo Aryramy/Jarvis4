@@ -222,6 +222,25 @@ Currently tracked issues in JARVIS4:
     - **Manual Window Close Reconciled**: Manual X-close of the managed window is caught via `page.on('close')` and active status checks, resetting state to `stopped` and preventing stale "Already Running" blockage.
     - **Stateless Isolation**: Browser lifecycle endpoints are strictly stateless and make zero writes to `ConversationSession`, `ConversationStore`, or runtime persistent files.
 
+20. **Browser Navigation v1 Observations & Limitations (Brick 27 Verified)**:
+    - **Verified Live Capabilities**: First real website navigation (`https://example.com/`), observational page status query without navigation, second navigation/history creation (`https://example.org/`), Back, Forward, Refresh, localhost/loopback blocking (`127.0.0.1`), stopped-browser navigation rejection (`BROWSER_NOT_RUNNING`), and zero browser auto-launch were confirmed working in live testing.
+    - **Explicit URL Navigation Only**: Navigation accepts strictly valid HTTP and HTTPS URLs; search queries and unstructured natural language are rejected.
+    - **No Search Queries Inside Browser**: Browser navigation cannot perform web searches; existing search system remains separate.
+    - **No Element Clicking**: Element clicking, locator clicks, and button interactions are prohibited in this brick.
+    - **No Typing**: Keyboard typing, text entry, and input field manipulation are prohibited in this brick.
+    - **No Forms**: Form filling, submission, and validation are prohibited in this brick.
+    - **No DOM / Accessibility Understanding**: DOM dumps, visible text extraction, element inventories, ARIA analysis, and accessibility trees are not implemented.
+    - **No Multiple Tabs**: Owns at most one managed page; multi-tab navigation is prohibited.
+    - **No Popup Handling**: Popups and new windows are not adopted or managed.
+    - **No Authentication**: Login flows, credentials, cookies, and session state are not supported.
+    - **No Browser Profile Reuse**: Existing personal profiles, extensions, cookies, and history are completely inaccessible.
+    - **No CAPTCHA / MFA**: Bot challenges, CAPTCHAs, and multi-factor authentication are not supported.
+    - **No Downloads / Uploads**: File transfer and download listeners are prohibited in this brick.
+    - **No Automatic Browser Execution**: `/api/browser-decision` remains purely advisory policy and does not trigger navigation or execute browser actions automatically.
+    - **No /api/auto Integration**: Ask JARVIS does not navigate or interact with the browser.
+    - **No Voice Turn Integration**: Voice Turn, STT, and TTS remain completely disconnected from browser navigation.
+
+
 
 
 

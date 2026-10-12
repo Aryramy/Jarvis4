@@ -547,10 +547,41 @@
   - **Live Test D (Manual Window Close Reconciliation)**: PASS. Manually closing the Edge window via the X button was caught and reconciled; status reported `stopped` with references cleared.
   - **Live Test E (Fresh Relaunch After Manual Close)**: PASS. Fresh Edge window opened cleanly without restarting JARVIS; stale `alreadyRunning` no longer blocked launch.
 - **Consequences**:
-  - Playwright browser lifecycle foundation v1 is fully operational with system Microsoft Edge.
-  - Zero bundled Chromium downloads, zero binary installations, zero admin privileges required.
-  - Strictly isolated: no access to existing user profiles or saved sessions; no global process termination; blank page only with zero navigation or interaction.
-  - Automated verification suite remains 100% mocked and offline (760 tests passing across 53 suites).
+## ADR-0035: Browser Navigation Foundation v1 (Brick 27)
+- **Status**: Accepted (BRICK-027 VERIFIED)
+- **Context**:
+  - GREEN-026 established the JARVIS-owned Playwright browser lifecycle managing a single Microsoft Edge browser instance, one temporary isolated context, and one blank page (`about:blank`).
+  - Brick 27 introduces the first real browser operation: deterministic, explicit URL navigation and history traversal.
+- **Decision**:
+  1. **Reuse Existing Browser Manager**: Reuses `BrowserManager` (`src/browser/browserManager.js`) and `playwrightBrowser.js`. Does not create a second browser manager or secondary lifecycle.
+  2. **Single Managed Page Invariant**: Navigation operates strictly on the existing single managed page (`this._page`). Never creates new tabs, popups, or secondary windows.
+  3. **No Auto-Launch**: Navigation, back, forward, and refresh require the browser to already be running. If stopped, returns controlled `BROWSER_NOT_RUNNING` without auto-launching.
+  4. **Strict WHATWG URL Parsing**: Strictly validates input URL with allowed protocols `http:` and `https:`. Rejects non-string, malformed, and non-web protocols (`javascript:`, `file:`, `ftp:`, `data:`, `about:`, `blob:`, etc.).
+  5. **Network & SSRF Safety**: Reuses GREEN-021 SSRF protection (`validateUrlSafety` in `src/webpage/urlSafety.js`). Rejects localhost, loopback (`127.0.0.1`, `::1`), RFC1918 private IPv4 (`10.x`, `172.16-31.x`, `192.168.x`), link-local (`169.254.x`, `fe80::`), and private IPv6 ranges before `page.goto` is called.
+  6. **Redirect Interception & Safety**: Uses page route interception (`page.route('**/*')`) on main-frame navigation requests to revalidate redirect destinations against SSRF rules before dispatch. Blocks private redirect destinations and blocks HTTPS -> HTTP downgrades (`INSECURE_REDIRECT_DOWNGRADE`), ensuring blocked redirects do not leave the browser in a usable final state on the target.
+  7. **Predictable Lifecycle Event**: Navigation uses `waitUntil: 'domcontentloaded'`, strictly avoiding fragile `networkidle` waits. Configurable navigation timeout (`BROWSER_NAVIGATION_TIMEOUT_MS=15000`).
+  8. **Controlled Error Reporting**: HTTP status >= 400 returns controlled `BROWSER_HTTP_ERROR` without closing the browser. Playwright timeout returns `BROWSER_NAVIGATION_TIMEOUT`. Generic errors return `BROWSER_NAVIGATION_FAILED` with sanitized safe messages (no internal paths or stack traces).
+  9. **History Controls**: `POST /api/browser/back` and `POST /api/browser/forward` traverse page history; empty history returns `navigated: false` safely. `POST /api/browser/refresh` reloads current page.
+  10. **Page Status Query**: `GET /api/browser/page-status` returns state, open status, current URL, and title without navigating.
+  11. **Minimal Navigation UI**: Dedicated "Browser Navigation" section in `src/web/index.html` with URL input, Navigate, Back, Forward, Refresh, and Page Status controls rendering text strictly via `.textContent`.
+  12. **Prohibited Capabilities**: Zero element clicking, zero typing, zero form submission, zero DOM extraction, zero accessibility tree analysis, zero tabs/popups, zero authentication, zero browser-decision execution, zero `/api/auto` integration.
+  13. **Stateless Invariant**: Browser navigation endpoints make zero mutations to `ConversationSession`, `ConversationStore`, or runtime persistent files.
+  14. **Offline Test Verification**: All unit and integration tests execute 100% offline using mock browser environments, guaranteeing zero real Edge launches, zero network requests, and zero AI calls during `npm run verify`.
+- **Live Verification**:
+  - **Live Test A (Explicit URL Navigation)**: PASS. Navigated to `https://example.com/`, HTTP status 200, title "Example Domain", navigation duration 439.257 ms, state "running". Verified explicit URL navigation, current URL, page title, HTTP status, and navigation timing.
+  - **Live Test B (Page Status)**: PASS. `GET /api/browser/page-status` returned current URL `https://example.com/`, title "Example Domain" without performing navigation.
+  - **Live Test C (Second Navigation / History Creation)**: PASS. Navigated to `https://example.org/`, HTTP status 200, title "Example Domain", duration 295.225 ms, creating browser history.
+  - **Live Test D (Back)**: PASS. `POST /api/browser/back` returned to `https://example.com/`, title "Example Domain", navigated: true.
+  - **Live Test E (Forward)**: PASS. `POST /api/browser/forward` advanced to `https://example.org/`, title "Example Domain", navigated: true.
+  - **Live Test F (Refresh)**: PASS. `POST /api/browser/refresh` reloaded `https://example.org/`, title "Example Domain", same URL preserved.
+  - **Live Test G (Private / Local URL Block)**: PASS. Navigation to `http://127.0.0.1/` rejected with `LOCAL_OR_PRIVATE_HOST_BLOCKED` ("Access to private or non-routable IP address blocked: 127.0.0.1"). Loopback navigation blocked before dispatch.
+  - **Live Test H (Navigation While Browser Stopped / No Auto-Launch)**: PASS. Navigation to `https://example.com/` while browser was closed rejected with `BROWSER_NOT_RUNNING`. Visual confirmation: Edge remained closed, zero browser auto-launch occurred.
+- **Consequences**:
+  - Deterministic, secure browser navigation and history controls established on existing single managed page.
+  - SSRF safety and redirect protections prevent private network penetration and insecure downgrades.
+  - No element clicking, typing, DOM understanding, authentication, or automatic execution implemented.
+  - Automated verification suite remains 100% mocked and offline (835 tests passing across 65 suites).
+
 
 
 
