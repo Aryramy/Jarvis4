@@ -187,4 +187,20 @@ Currently tracked issues in JARVIS4:
       These are empirical measurements only; no permanent latency guarantees are claimed.
     - **Stateless Isolation**: Pipeline remains strictly stateless and does NOT write questions, answers, URLs, attempt diagnostics, or page text to `ConversationSession`, `ConversationStore`, or runtime persistence.
 
+18. **Browser Escalation Policy Foundation v1 Observations & Limitations (Brick 25 Verified)**:
+    - **Deterministic Pattern Matching**: Policy relies on deterministic pattern matching and guard rails rather than semantic LLM intent classification.
+    - **Unusual Wording Ambiguity**: Unusual, colloquial, or novel interaction requests may not match established signals.
+    - **No Browser Execution**: Brick 25 establishes policy foundation only; no browser library (Playwright, Puppeteer, Selenium) is installed, and no browser process is launched.
+    - **No Usability Guarantee**: Deciding that a browser is required does not guarantee that the target website will be usable or that automation will succeed.
+    - **HTTP 403 Ambiguity**: HTTP 403 is treated conservatively as a potential candidate for interactive browser or user intervention, but may also stem from IP blocking, geofencing, or permanent denial.
+    - **No CAPTCHA / MFA Handling**: Bot-detection challenges and two-factor authentication flows are not implemented.
+    - **No Authentication State / Session Storage**: Browser session, cookies, and credentials management are not implemented.
+    - **No Navigation or Form Automation**: Real clicking, typing, page navigation, and form submission are deferred to future bricks.
+    - **No DOM / Accessibility Inspection**: DOM tree, accessibility-tree, or element inspection is not implemented.
+    - **No Automatic /api/auto Integration**: `/api/auto` does not invoke `/api/browser-decision`.
+    - **No Voice Turn Integration**: Voice Turn, STT, and TTS remain separate and disconnected.
+    - **No Self-Healing or Recovery**: Failed browser executions have no automated recovery mechanisms in this brick.
+    - **Stateless Isolation**: `/api/browser-decision` is strictly stateless, read-only, and writes zero records to `ConversationSession`, `ConversationStore`, or runtime persistence.
+
+
 

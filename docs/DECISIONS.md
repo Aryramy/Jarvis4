@@ -459,6 +459,72 @@
   - **Live Coverage Note**: A search result where index 0 fails and index 1 succeeds was not naturally produced by external search provider during manual testing. This transition is verified deterministically by offline unit/integration test suites (both index 0 -> 1 success and index 0 -> 1 -> 2 success). Live Test B independently verified full ordered traversal through all three sources.
 - **Consequences**: Significantly improves research reliability across search results containing unreadable or unsupported media types while maintaining strict boundaries, security, and statelessness.
 
+## ADR-0033: Browser Escalation Policy Foundation v1 (Brick 25)
+- **Status**: Accepted (BRICK-025 VERIFIED)
+- **Context**: JARVIS has rich static-web capabilities (web search, freshness routing, safe webpage reading, one-page grounded QA, and source fallback). However, JARVIS lacks a deterministic policy to evaluate whether a user request requires an interactive web browser (e.g., clicking, filling forms, submitting, authenticating) or can be satisfied via existing static capabilities.
+- **Decision**:
+  1. **Deterministic Local Policy**: Implement `decideBrowserEscalation({ request, staticOutcome })` in `src/routing/browserEscalation.js` using pure pattern matching without LLM classifiers, network requests, embeddings, or browser automation libraries.
+  2. **Strict Priority Hierarchy**:
+     - Priority 1: Explicit interactive/browser intent in user request (e.g. click, form entry, submit, login, upload, download, control selection, menu navigation, scroll, explicit browser request). Request intent overrides static success and static errors.
+     - Priority 2: Structured browser-eligible static failures (e.g., `NO_READABLE_CONTENT` for SPAs, HTTP 401 for authentication required, HTTP 403 for interactive access candidate).
+     - Priority 3: Informational / static request intent (e.g., web search sufficient, static page read sufficient, general content sufficient).
+     - Priority 4: Default static.
+  3. **Multilingual Architecture**: Single unified policy module supporting English, Urdu, and Arabic action patterns with Unicode-aware matching, without separate language silos or translation services.
+  4. **Definition & Explanation False-Positive Guards**: Inquiries about concepts (e.g., "What is a login page?", "What is browser automation?", "Explain HTML form submission", "What does click-through rate mean?") are recognized as informational and guarded against false-positive escalation.
+  5. **Security & Non-Escalating Failures**: SSRF blocks (`LOCAL_OR_PRIVATE_HOST_BLOCKED`), invalid URLs, DNS errors, protocol downgrades, and timeouts never auto-escalate to browser.
+  6. **Diagnostic Endpoint & UI**: Provide `POST /api/browser-decision` and web UI controls in `src/web/index.html` strictly for policy diagnosis without process execution.
+  7. **Stateless Invariant**: Browser decision policy makes zero modifications to `ConversationSession`, `ConversationStore`, or runtime disk files.
+  8. **Zero Browser Execution**: No browser libraries installed (Playwright/Puppeteer/Selenium), zero browser process launches, and zero integration with `/api/auto`, Voice Turn, STT, or TTS in Brick 25.
+- **Human Live Verification (Verified)**:
+  - **Live Test A (Explicit Browser Interaction)**: "Open Outlook and click the newest email"
+    - Browser Required: `Yes`, Route: `browser`, Reason Code: `interactive-click`
+    - Reason: "The request requires clicking or activating an interactive webpage element."
+    - Source: `request-intent`, Matched Signals: `["interactive-click"]`
+    - Result: Explicit interactive intent: PASS. Browser escalation: PASS. Zero actual browser action executed.
+  - **Live Test B (Informational Request)**: "What is Power BI?"
+    - Browser Required: `No`, Route: `static`, Reason Code: `static-content-sufficient`
+    - Reason: "The request can be handled by existing static web capabilities."
+    - Source: `request-intent`
+    - Result: Ordinary informational request remains static: PASS.
+  - **Live Test C (False-Positive Guard)**: "What is browser automation?"
+    - Browser Required: `No`, Route: `static`, Reason Code: `static-content-sufficient`
+    - Reason: "The request can be handled by existing static web capabilities."
+    - Source: `request-intent`
+    - Result: Mentioning "browser automation" in an explanatory question does NOT trigger browser execution. Explanation guard: PASS.
+  - **Live Test D (Urdu Interaction Intent)**: "اس بٹن پر کلک کریں"
+    - Browser Required: `Yes`, Route: `browser`, Reason Code: `interactive-click`
+    - Reason: "The request requires clicking or activating an interactive webpage element."
+    - Source: `request-intent`, Matched Signals: `["interactive-click"]`
+    - Result: Urdu interaction recognition: PASS. Unified policy module: PASS (no separate Urdu pipeline).
+  - **Live Test E (Arabic Interaction Intent)**: "انقر على زر تسجيل الدخول"
+    - Browser Required: `Yes`, Route: `browser`, Reason Code: `interactive-click`
+    - Reason: "The request requires clicking or activating an interactive webpage element."
+    - Source: `request-intent`, Matched Signals: `["interactive-click", "interactive-authentication"]`
+    - Result: Arabic interaction recognition: PASS. Authentication signal recognition: PASS. Unified policy module: PASS (no separate Arabic pipeline).
+  - **Live Test F (Static-Stack Failure Escalation)**: Request: "Read this webpage", staticOutcome: `{ "success": false, "stage": "page-read", "errorCode": "NO_READABLE_CONTENT" }`
+    - Observed response:
+      ```json
+      {
+        "success": true,
+        "browserRequired": true,
+        "route": "browser",
+        "reasonCode": "static-no-readable-content",
+        "reason": "The static reader found no readable content (possible client-side rendering/SPA); browser interaction is required.",
+        "source": "static-outcome",
+        "matchedSignals": [
+          "NO_READABLE_CONTENT"
+        ]
+      }
+      ```
+    - Result: Structured staticOutcome handling: PASS. NO_READABLE_CONTENT escalation: PASS. source = static-outcome: PASS.
+  - **Diagnostic UI Note**: Browser Decision diagnostic UI was manually tested for request-intent classification; structured staticOutcome escalation was verified directly against `POST /api/browser-decision`.
+- **Consequences**:
+  - Provides a verified, deterministic, auditable, and testable foundation for determining when interactive browser execution is needed without adding dependencies or runtime complexity.
+  - Zero browser libraries installed (no Playwright, Puppeteer, Selenium), zero browser launches, zero AI/LLM classifier calls, zero external search calls, zero page reads.
+  - Strict statelessness preserved: zero modifications to `ConversationSession`, `ConversationStore`, or runtime persistence.
+  - Boundary integrity preserved: `/api/auto`, `/api/research-one`, `/api/search`, `/api/read-page`, `/api/page-qa`, `/api/ai`, `/api/ai/stream`, STT, TTS, and Voice Turn remain completely untouched.
+
+
 
 
 

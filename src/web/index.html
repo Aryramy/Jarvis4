@@ -238,6 +238,28 @@
       <div id="research-one-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
       <div id="research-one-answer" class="response-area" style="display: none; max-height: 240px; overflow-y: auto;"></div>
     </div>
+
+    <!-- Brick 25 Browser Escalation Decision Section (Diagnostic) -->
+    <div id="browser-decision-section" class="mic-section">
+      <div style="font-size: 0.95rem; font-weight: 600; color: #38bdf8; text-align: left; margin-bottom: 4px;">Browser Decision (Policy Diagnostic)</div>
+      <div class="input-group" style="margin-bottom: 8px;">
+        <input type="text" id="browser-decision-input" placeholder="Request to evaluate (e.g. Log into Outlook)" autocomplete="off" />
+        <select id="browser-decision-outcome-select" style="width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: #f8fafc; font-size: 0.9rem; margin-top: 6px;">
+          <option value="">Static Outcome: None (Request Intent Only)</option>
+          <option value="NO_READABLE_CONTENT">Static Outcome: NO_READABLE_CONTENT</option>
+          <option value="HTTP_401">Static Outcome: HTTP 401 Unauthorized</option>
+          <option value="HTTP_403">Static Outcome: HTTP 403 Forbidden</option>
+          <option value="LOCAL_OR_PRIVATE_HOST_BLOCKED">Static Outcome: LOCAL_OR_PRIVATE_HOST_BLOCKED</option>
+          <option value="UNSUPPORTED_CONTENT_TYPE">Static Outcome: UNSUPPORTED_CONTENT_TYPE</option>
+          <option value="FETCH_TIMEOUT">Static Outcome: FETCH_TIMEOUT</option>
+        </select>
+        <div class="button-group" style="margin-top: 6px;">
+          <button type="button" id="browser-decision-btn">Check Browser Need</button>
+        </div>
+      </div>
+      <div id="browser-decision-status" class="mic-status">Browser Decision: Idle</div>
+      <div id="browser-decision-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
+    </div>
   </div>
 
   <script type="module">
@@ -1497,6 +1519,84 @@
           researchOneAnswer.style.display = 'none';
         } finally {
           researchOneBtn.disabled = false;
+        }
+      });
+    }
+
+    // Brick 25: Browser Escalation Policy Diagnostic Handler
+    const browserDecisionInput = document.getElementById('browser-decision-input');
+    const browserDecisionOutcomeSelect = document.getElementById('browser-decision-outcome-select');
+    const browserDecisionBtn = document.getElementById('browser-decision-btn');
+    const browserDecisionStatus = document.getElementById('browser-decision-status');
+    const browserDecisionMeta = document.getElementById('browser-decision-meta');
+
+    if (browserDecisionBtn) {
+      browserDecisionBtn.addEventListener('click', async () => {
+        const rawRequest = browserDecisionInput ? browserDecisionInput.value.trim() : '';
+        if (!rawRequest) {
+          browserDecisionStatus.textContent = 'Status: Error';
+          browserDecisionMeta.style.display = 'block';
+          browserDecisionMeta.textContent = 'Error Code: INVALID_REQUEST\nMessage: Please enter a request to evaluate.';
+          return;
+        }
+
+        browserDecisionBtn.disabled = true;
+        browserDecisionStatus.textContent = 'Status: Evaluating policy...';
+        browserDecisionMeta.style.display = 'none';
+
+        let staticOutcome = null;
+        const selectedOutcome = browserDecisionOutcomeSelect ? browserDecisionOutcomeSelect.value : '';
+        if (selectedOutcome === 'NO_READABLE_CONTENT') {
+          staticOutcome = { success: false, stage: 'page-read', errorCode: 'NO_READABLE_CONTENT' };
+        } else if (selectedOutcome === 'HTTP_401') {
+          staticOutcome = { success: false, stage: 'page-read', statusCode: 401 };
+        } else if (selectedOutcome === 'HTTP_403') {
+          staticOutcome = { success: false, stage: 'page-read', statusCode: 403 };
+        } else if (selectedOutcome === 'LOCAL_OR_PRIVATE_HOST_BLOCKED') {
+          staticOutcome = { success: false, stage: 'page-read', errorCode: 'LOCAL_OR_PRIVATE_HOST_BLOCKED' };
+        } else if (selectedOutcome === 'UNSUPPORTED_CONTENT_TYPE') {
+          staticOutcome = { success: false, stage: 'page-read', errorCode: 'UNSUPPORTED_CONTENT_TYPE' };
+        } else if (selectedOutcome === 'FETCH_TIMEOUT') {
+          staticOutcome = { success: false, stage: 'page-read', errorCode: 'FETCH_TIMEOUT' };
+        }
+
+        try {
+          const res = await fetch('/api/browser-decision', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              request: rawRequest,
+              staticOutcome
+            })
+          });
+
+          const data = await res.json();
+
+          if (res.ok && data.success) {
+            browserDecisionStatus.textContent = 'Status: Evaluated';
+            browserDecisionMeta.style.display = 'block';
+            const metaLines = [
+              `Browser Required: ${data.browserRequired ? 'Yes' : 'No'}`,
+              `Route: ${data.route}`,
+              `Reason Code: ${data.reasonCode}`,
+              `Reason: ${data.reason}`,
+              `Source: ${data.source}`
+            ];
+            if (Array.isArray(data.matchedSignals) && data.matchedSignals.length > 0) {
+              metaLines.push(`Matched Signals: ${data.matchedSignals.join(', ')}`);
+            }
+            browserDecisionMeta.textContent = metaLines.join('\n');
+          } else {
+            browserDecisionStatus.textContent = 'Status: Error';
+            browserDecisionMeta.style.display = 'block';
+            browserDecisionMeta.textContent = `Error Code: ${data.code || data.error || 'BROWSER_DECISION_FAILED'}\nMessage: ${data.message || 'Evaluation failed'}`;
+          }
+        } catch (err) {
+          browserDecisionStatus.textContent = 'Status: Error';
+          browserDecisionMeta.style.display = 'block';
+          browserDecisionMeta.textContent = `Error Code: BROWSER_DECISION_FAILED\nMessage: ${err.message || 'Network request failed'}`;
+        } finally {
+          browserDecisionBtn.disabled = false;
         }
       });
     }

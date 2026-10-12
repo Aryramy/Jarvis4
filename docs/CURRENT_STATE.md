@@ -1,11 +1,22 @@
 Project: JARVIS4
-Current Brick: 24
-Status: BRICK-024 VERIFIED
-Last Verified Brick: BRICK-024
-Current Feature: Research Source Read-Fallback v1
+Current Brick: 25
+Status: BRICK-025 VERIFIED
+Last Verified Brick: BRICK-025
+Current Feature: Browser Escalation Policy Foundation v1
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
+
+- Browser Escalation Policy module (`decideBrowserEscalation`, `BrowserEscalationError`, `REASON_CODES`, `evaluateStaticOutcome` in `src/routing/browserEscalation.js`) implementing pure local deterministic browser escalation policy
+- Priority order enforcement: 1. explicit browser/interactivity intent, 2. structured browser-eligible static failure, 3. ordinary informational/static request, 4. default static
+- Multilingual Unicode-aware matching supporting English, Urdu, and Arabic action patterns without external translation or language-detection services
+- False-positive definition and explanation guards preventing conceptual/informational inquiries (e.g., "What is browser automation?", "Explain HTML form submission", "What is a login page?") from triggering browser escalation
+- Strict security preservation: SSRF blocks (`LOCAL_OR_PRIVATE_HOST_BLOCKED`), invalid URLs, DNS failures, protocol errors, and timeouts never auto-escalate to browser
+- Conservative HTTP 403 handling yielding neutral candidate reason (`interactive-access-candidate`) without claiming guaranteed success or fabricated login requirements
+- Diagnostic HTTP endpoint (`POST /api/browser-decision`) evaluating browser necessity offline with stable response schemas and zero browser process execution
+- Diagnostic web UI section in `src/web/index.html` for testing request evaluation and static outcome inputs with safe `.textContent` rendering
+- Zero browser libraries installed (no Playwright, Puppeteer, Selenium), zero browser launches, zero network calls, zero AI provider calls
+- Strict statelessness: zero writes to `ConversationSession`, `ConversationStore`, or runtime persistence files
 
 - Research One module (`executeResearchOne`, `getValidSourceCandidates`, `selectResearchSource`, `ResearchOneError`, `CONTROLLED_PAGE_READ_ERROR_CODES` in `src/research/researchOne.js`) implementing Research Source Read-Fallback v1 across existing search sources
 - Deterministic candidate ordering preserving original provider citation indices (e.g., index 0, index 1, index 2) with valid HTTP/HTTPS URL filtering and zero LLM ranking, keyword scoring, domain scoring, or reranking
@@ -566,6 +577,44 @@ Status: BRICK-018 VERIFIED (Exit Code: 0)
       13. No automatic /api/auto integration.
       14. No Voice Turn integration.
       15. Search, page-read, and AI latency remain externally variable.
+  - Brick 25 Browser Escalation Policy Foundation v1: VERIFIED
+    - Pipeline & Capabilities: Pure local deterministic policy module (`decideBrowserEscalation` in `src/routing/browserEscalation.js`) and diagnostic endpoint (`POST /api/browser-decision`) evaluating whether requests require an interactive browser without performing browser execution.
+    - Priority Order Verified:
+      1. Explicit interactive/browser intent in user request.
+      2. Structured browser-eligible static failure (`NO_READABLE_CONTENT` -> `static-no-readable-content`, HTTP 401 -> `authentication-required`, HTTP 403 -> `interactive-access-candidate`).
+      3. Ordinary informational / static request intent (`static-search-sufficient`, `static-page-read-sufficient`, `static-content-sufficient`).
+      4. Default static (`static-content-sufficient`).
+    - Multilingual Contract Verified: One unified multilingual policy module supporting English, Urdu (e.g. `کلک کریں`, `فارم بھریں`, `لاگ ان کریں`), and Arabic (e.g. `انقر`, `املأ النموذج`, `سجل الدخول`) via Unicode-aware pattern matching without external translation or language-detection services.
+    - False-Positive Guards Verified: Definition and explanation queries (e.g., "What is browser automation?", "Explain HTML form submission", "What is a login page?") are recognized as informational and guarded against false-positive escalation.
+    - Static Failure Contract Verified: Structured `NO_READABLE_CONTENT` escalates to browser candidate; HTTP 401 escalates to `authentication-required`; HTTP 403 escalates to `interactive-access-candidate` without claiming guaranteed success or fabricated login requirements. Controlled static failures (`LOCAL_OR_PRIVATE_HOST_BLOCKED`, `INVALID_URL`, `UNSUPPORTED_PROTOCOL`, `URL_CREDENTIALS_NOT_ALLOWED`, `PORT_NOT_ALLOWED`, `DNS_RESOLUTION_FAILED`, `INSECURE_REDIRECT_DOWNGRADE`, `PAGE_TOO_LARGE`, `UNSUPPORTED_CONTENT_TYPE`, `FETCH_TIMEOUT`) safely return `browserRequired: false`.
+    - Zero Browser Execution: Zero browser libraries installed (no Playwright, Puppeteer, Selenium), zero browser process launches, zero clicks/typing/navigation/form submissions.
+    - Zero External Calls: Zero AI calls, zero OpenRouter calls, zero Exa searches, zero page reads, zero DNS lookups during policy evaluation.
+    - Statelessness Invariant: Zero modifications to `ConversationSession`, `ConversationStore`, or runtime persistence files.
+    - Diagnostic Web UI: Non-executing diagnostic section in `src/web/index.html` rendering via safe `.textContent`.
+    - Offline Verification: 714 automated tests passing across 37 suites offline with zero live network calls.
+    - Human Live Verification (Verified):
+      - Live Test A (Explicit Browser Interaction: "Open Outlook and click the newest email"): PASS (`browserRequired: true`, `route: "browser"`, `reasonCode: "interactive-click"`, `reason: "The request requires clicking or activating an interactive webpage element."`, `source: "request-intent"`, `matchedSignals: ["interactive-click"]`, zero browser action executed).
+      - Live Test B (Informational Request: "What is Power BI?"): PASS (`browserRequired: false`, `route: "static"`, `reasonCode: "static-content-sufficient"`, `reason: "The request can be handled by existing static web capabilities."`, `source: "request-intent"`).
+      - Live Test C (False-Positive Guard: "What is browser automation?"): PASS (`browserRequired: false`, `route: "static"`, `reasonCode: "static-content-sufficient"`, `reason: "The request can be handled by existing static web capabilities."`, `source: "request-intent"`, explanation guard prevents browser escalation).
+      - Live Test D (Urdu Interaction Intent: "اس بٹن پر کلک کریں"): PASS (`browserRequired: true`, `route: "browser"`, `reasonCode: "interactive-click"`, `source: "request-intent"`, `matchedSignals: ["interactive-click"]`, unified multilingual module).
+      - Live Test E (Arabic Interaction Intent: "انقر على زر تسجيل الدخول"): PASS (`browserRequired: true`, `route: "browser"`, `reasonCode: "interactive-click"`, `source: "request-intent"`, `matchedSignals: ["interactive-click", "interactive-authentication"]`, unified multilingual module).
+      - Live Test F (Static-Stack Failure Escalation: Request: "Read this webpage", staticOutcome: `{ "success": false, "stage": "page-read", "errorCode": "NO_READABLE_CONTENT" }`): PASS (`browserRequired: true`, `route: "browser"`, `reasonCode: "static-no-readable-content"`, `reason: "The static reader found no readable content (possible client-side rendering/SPA); browser interaction is required."`, `source: "static-outcome"`, `matchedSignals: ["NO_READABLE_CONTENT"]`).
+    - Limitations (14 items):
+      1. Policy uses deterministic signals, not semantic LLM classification.
+      2. Unusual wording or phrasing may be misclassified.
+      3. No browser is installed or launched by Brick 25.
+      4. Browser escalation does not guarantee the target website will be usable.
+      5. HTTP 403 remains ambiguous.
+      6. CAPTCHA handling is not implemented.
+      7. MFA handling is not implemented.
+      8. Browser authentication/session handling is not implemented.
+      9. Navigation is not implemented.
+      10. Click/type/form actions are not implemented.
+      11. DOM/accessibility inspection is not implemented.
+      12. No automatic /api/auto integration yet.
+      13. No Voice Turn integration yet.
+      14. No browser recovery/self-healing yet.
+
 
 
 

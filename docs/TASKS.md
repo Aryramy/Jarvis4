@@ -73,4 +73,7 @@ Status: VERIFIED
 BRICK-024 — Research Source Read-Fallback v1
 Status: VERIFIED
 
+BRICK-025 — Browser Escalation Policy Foundation v1
+Status: VERIFIED
+
 

@@ -54,6 +54,7 @@ const REQUIRED_FILES = [
   'src/providers/openRouterSearch.js',
   'src/routing/freshnessSignals.js',
   'src/routing/searchDecision.js',
+  'src/routing/browserEscalation.js',
   'src/webpage/urlSafety.js',
   'src/webpage/htmlExtractor.js',
   'src/webpage/pageReader.js',
@@ -78,6 +79,7 @@ const REQUIRED_FILES = [
   'tests/unit/pageReader.test.js',
   'tests/unit/pageQa.test.js',
   'tests/unit/researchOne.test.js',
+  'tests/unit/browserEscalation.test.js',
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
   'tests/unit/voiceTurn.test.js',
@@ -98,6 +100,7 @@ const REQUIRED_FILES = [
   'tests/integration/readPageEndpoint.test.js',
   'tests/integration/pageQaEndpoint.test.js',
   'tests/integration/researchOneEndpoint.test.js',
+  'tests/integration/browserDecisionEndpoint.test.js',
   'tests/fixtures/html/article.html',
   'tests/fixtures/html/noisy.html',
   'tests/fixtures/html/unicode.html',
@@ -369,6 +372,21 @@ check('Shared Freshness Signals Module Sanity Check', async () => {
   }
   if (isFreshnessSensitiveQuery('ما هو Power BI؟')) {
     throw new Error('isFreshnessSensitiveQuery sanity check failed for Arabic ordinary prompt');
+  }
+});
+
+check('Browser Escalation Policy Module Sanity Check', async () => {
+  const { decideBrowserEscalation, BrowserEscalationError, REASON_CODES } = await import('../src/routing/browserEscalation.js');
+  if (typeof decideBrowserEscalation !== 'function' || typeof BrowserEscalationError !== 'function') {
+    throw new Error('browserEscalation module failed to export required functions or classes');
+  }
+  const result = decideBrowserEscalation({ request: 'Log into Outlook' });
+  if (!result.browserRequired || result.route !== 'browser' || result.reasonCode !== REASON_CODES.INTERACTIVE_AUTHENTICATION) {
+    throw new Error('decideBrowserEscalation sanity check failed for interactive prompt');
+  }
+  const staticResult = decideBrowserEscalation({ request: 'What is Power BI?' });
+  if (staticResult.browserRequired || staticResult.route !== 'static') {
+    throw new Error('decideBrowserEscalation sanity check failed for static prompt');
   }
 });
 

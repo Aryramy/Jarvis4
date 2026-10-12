@@ -21,6 +21,7 @@ import { readWebPage } from '../webpage/pageReader.js';
 import { PageReaderError } from '../webpage/urlSafety.js';
 import { executePageQa, PageQaError } from '../webpage/pageQa.js';
 import { executeResearchOne, ResearchOneError } from '../research/researchOne.js';
+import { decideBrowserEscalation, BrowserEscalationError } from '../routing/browserEscalation.js';
 
 const __dirname = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const HTML_FILE_PATH = join(__dirname, 'index.html');
@@ -1223,6 +1224,108 @@ export function createRequestListener(options = {}) {
             pageReadDurationMs: err.details?.pageReadDurationMs ?? 0,
             providerQaDurationMs: err.details?.providerQaDurationMs ?? 0,
             serverResearchDurationMs
+          }));
+        }
+      });
+
+      return;
+    }
+
+    // Route: /api/browser-decision (Brick 25 Browser Escalation Policy Diagnostic Endpoint)
+    if (url.pathname === '/api/browser-decision') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      let isTooLarge = false;
+
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 1e6) {
+          isTooLarge = true;
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Payload Too Large' }));
+          req.destroy();
+        }
+      });
+
+      req.on('end', () => {
+        if (isTooLarge) return;
+
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid JSON body' }));
+          return;
+        }
+
+        const inputRequest = parsedBody.request !== undefined ? parsedBody.request : parsedBody.input;
+
+        if (inputRequest === undefined || inputRequest === null || typeof inputRequest !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_REQUEST',
+            code: 'INVALID_REQUEST',
+            message: 'Request must be a non-empty string'
+          }));
+          return;
+        }
+
+        const trimmedRequest = inputRequest.trim();
+        if (trimmedRequest.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_REQUEST',
+            code: 'INVALID_REQUEST',
+            message: 'Request cannot be empty or whitespace-only'
+          }));
+          return;
+        }
+
+        if (inputRequest.length > 2000) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'REQUEST_TOO_LONG',
+            code: 'REQUEST_TOO_LONG',
+            message: 'Request exceeds maximum allowed length of 2000 characters'
+          }));
+          return;
+        }
+
+        try {
+          const escalationFn = options.browserEscalationFn || decideBrowserEscalation;
+          const decision = escalationFn({
+            request: inputRequest,
+            staticOutcome: parsedBody.staticOutcome
+          });
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: true,
+            browserRequired: decision.browserRequired,
+            route: decision.route,
+            reasonCode: decision.reasonCode,
+            reason: decision.reason,
+            source: decision.source,
+            matchedSignals: decision.matchedSignals || []
+          }));
+        } catch (err) {
+          const errorCode = err.code || 'BROWSER_DECISION_FAILED';
+          const statusCode = ['INVALID_REQUEST', 'REQUEST_TOO_LONG'].includes(errorCode) ? 400 : 500;
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: err.message || 'Browser decision evaluation failed'
           }));
         }
       });
