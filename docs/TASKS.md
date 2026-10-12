@@ -76,4 +76,5 @@ Status: VERIFIED
 BRICK-025 — Browser Escalation Policy Foundation v1
 Status: VERIFIED
 
-
+BRICK-026 — Playwright Browser Lifecycle Foundation v1
+Status: VERIFIED

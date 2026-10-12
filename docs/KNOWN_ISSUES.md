@@ -202,5 +202,26 @@ Currently tracked issues in JARVIS4:
     - **No Self-Healing or Recovery**: Failed browser executions have no automated recovery mechanisms in this brick.
     - **Stateless Isolation**: `/api/browser-decision` is strictly stateless, read-only, and writes zero records to `ConversationSession`, `ConversationStore`, or runtime persistence.
 
+19. **Playwright Browser Lifecycle Foundation v1 Observations & Limitations (Brick 26 Verified)**:
+    - **Browser Lifecycle Only**: Only lifecycle control exists (launch, status, close); no page actions are supported.
+    - **Browser Starts at about:blank**: Blank page only; no external URLs.
+    - **No URL Navigation**: `page.goto`, reload, back, forward, and URL loading are prohibited in this brick.
+    - **No Clicking**: Element clicking, tapping, or button activation are not implemented.
+    - **No Typing**: Keyboard input, text filling, and form inputs are not implemented.
+    - **No DOM Inspection**: Page content, HTML extraction, and selector queries are not implemented.
+    - **No Accessibility Tree**: Accessibility tree inspection is not implemented.
+    - **No Tabs / Windows Management**: Multiple tabs or secondary windows are not supported.
+    - **No Downloads / Uploads**: File transfer and download listeners are not implemented.
+    - **No Authentication**: Login, credentials, cookies, and session handling are not implemented.
+    - **No User Profile Reuse**: Existing Edge/Chrome personal profiles, cookies, and history are completely inaccessible.
+    - **No Persistent Browser Session**: Browser context is temporary and discarded on close.
+    - **Browser Decision Not Automatically Connected to Execution**: `/api/browser-decision` evaluates need offline and does not launch the browser.
+    - **No Automatic /api/auto Integration**: `/api/auto` is not connected to browser execution.
+    - **No Voice Turn Integration**: Voice Turn, STT, and TTS remain separate and disconnected.
+    - **Single Configured Channel Only**: Exactly one browser channel (`msedge`) is attempted; zero fallback channels are configured.
+    - **Manual Window Close Reconciled**: Manual X-close of the managed window is caught via `page.on('close')` and active status checks, resetting state to `stopped` and preventing stale "Already Running" blockage.
+    - **Stateless Isolation**: Browser lifecycle endpoints are strictly stateless and make zero writes to `ConversationSession`, `ConversationStore`, or runtime persistent files.
+
+
 
 

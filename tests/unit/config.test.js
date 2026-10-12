@@ -21,7 +21,10 @@ describe('Configuration Utility', () => {
     'WEB_READ_MAX_TEXT_CHARS',
     'WEB_READ_MAX_REDIRECTS',
     'PAGE_QA_MAX_QUESTION_CHARS',
-    'PAGE_QA_MAX_OUTPUT_TOKENS'
+    'PAGE_QA_MAX_OUTPUT_TOKENS',
+    'BROWSER_CHANNEL',
+    'BROWSER_HEADLESS',
+    'BROWSER_LAUNCH_TIMEOUT_MS'
   ];
 
   let originalEnv = {};
@@ -261,5 +264,37 @@ describe('Configuration Utility', () => {
     assert.equal(customCfg.pageQa.maxQuestionChars, 2000);
     assert.equal(customCfg.pageQa.maxOutputTokens, 500);
   });
+
+  test('should load browser config defaults when environment is empty', () => {
+    const defaultCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
+    assert.equal(defaultCfg.browser.channel, 'msedge');
+    assert.equal(defaultCfg.browser.headless, false);
+    assert.equal(defaultCfg.browser.launchTimeoutMs, 15000);
+  });
+
+  test('should load browser config overrides passed directly', () => {
+    const customCfg = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'info',
+      BROWSER_CHANNEL: 'chrome',
+      BROWSER_HEADLESS: 'true',
+      BROWSER_LAUNCH_TIMEOUT_MS: '20000'
+    });
+    assert.equal(customCfg.browser.channel, 'chrome');
+    assert.equal(customCfg.browser.headless, true);
+    assert.equal(customCfg.browser.launchTimeoutMs, 20000);
+  });
+
+  test('should load browser config from environment variables when overrides not provided', () => {
+    process.env.BROWSER_CHANNEL = 'msedge';
+    process.env.BROWSER_HEADLESS = 'false';
+    process.env.BROWSER_LAUNCH_TIMEOUT_MS = '10000';
+
+    const envCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
+    assert.equal(envCfg.browser.channel, 'msedge');
+    assert.equal(envCfg.browser.headless, false);
+    assert.equal(envCfg.browser.launchTimeoutMs, 10000);
+  });
 });
+
 

@@ -524,6 +524,35 @@
   - Strict statelessness preserved: zero modifications to `ConversationSession`, `ConversationStore`, or runtime persistence.
   - Boundary integrity preserved: `/api/auto`, `/api/research-one`, `/api/search`, `/api/read-page`, `/api/page-qa`, `/api/ai`, `/api/ai/stream`, STT, TTS, and Voice Turn remain completely untouched.
 
+## ADR-0034: Playwright Browser Lifecycle Foundation v1 (Brick 26)
+- **Status**: Accepted (BRICK-026 VERIFIED)
+- **Context**: Brick 25 established the deterministic policy to decide whether a user request requires an interactive browser. Brick 26 establishes the foundational capability to manage a single browser execution instance safely: launching, inspecting status, and closing it without duplicate instances, navigation, interaction, profile contamination, or external browser interference.
+- **Decision**:
+  1. **Dependency Strategy**: Install `playwright-core` exclusively. Do not install `playwright` or download bundled browser binaries via `npx playwright install`.
+  2. **System Channel Execution**: Default browser channel is configured to `msedge` via Playwright Chromium API with configuration override via `BROWSER_CHANNEL` (default: `msedge`). Exactly one configured browser channel is attempted (zero automatic fallback).
+  3. **Single Managed Instance**: `BrowserManager` (`src/browser/browserManager.js`) manages at most ONE browser instance, ONE isolated temporary browser context, and ONE blank page (`about:blank`).
+  4. **Duplicate & Concurrent Launch Protection**: Repeated launch calls while running return `alreadyRunning: true` without launching a second browser. In-flight launch promises synchronize concurrent launch requests safely.
+  5. **Isolated Temporary Context**: Standard temporary context (`browser.newContext()`) only. Zero access to existing user profiles (Edge/Chrome), cookies, history, saved passwords, or session storage.
+  6. **Safe Closing & Unexpected Disconnect Recovery**: Closes in deterministic order (page -> context -> browser). Clears all managed references. Idempotent closing returns `alreadyStopped: true`. Unexpected browser disconnects (e.g. manual window close) are caught via `disconnected` listener, automatically reconciling state to `stopped`.
+     - **Live Fix (Manual Page/Window Close Reconciliation)**: In Chromium/Edge, closing the browser window fires `page.on('close')` but may not immediately disconnect the underlying Playwright browser connection. `BrowserManager` attaches listeners to `page.on('close')`, `context.on('close')`, and `browser.on('disconnected')`. When the sole managed window is closed, the session is invalidated, `BrowserManager` resets state to `stopped`, clears references, and closes remaining orphan Playwright browser resources in the background. Status checks (`getStatus()`) actively verify `page.isClosed()` and `isBrowserConnected()`, and subsequent launch calls create a fresh browser without being blocked by stale `alreadyRunning` state.
+  7. **Controlled Failure Handling**: Launch failure returns controlled `BROWSER_LAUNCH_FAILED` error without crashing or leaving stale `starting` state.
+  8. **Ownership Boundaries**: Only closes browser instances launched and owned by JARVIS. Zero taskkill commands, zero global process termination (`msedge.exe`/`chrome.exe`), and zero attachment to pre-existing user browsers.
+  9. **No Navigation or Interaction**: Blank page only (`about:blank`). Zero `page.goto`, zero clicking, typing, form submission, or DOM inspection.
+  10. **Stateless Invariant**: Browser lifecycle endpoints make zero modifications to `ConversationSession`, `ConversationStore`, or runtime persistent files.
+  11. **Isolated Test Verification**: `npm run verify` runs with 100% mocked Playwright browser environments, guaranteeing zero real Edge launches, zero network requests, and zero AI calls during automated verification.
+- **Live Verification**:
+  - **Live Test A (Real Browser Launch)**: PASS. Visible Microsoft Edge window opened at `about:blank`. Existing Edge windows remained unaffected.
+  - **Live Test B (Duplicate Launch Protection)**: PASS. Second launch request returned `alreadyRunning: true`, preserving exactly 1 managed session.
+  - **Live Test C (Controlled Close)**: PASS. Managed browser window closed cleanly, state returned to `stopped`, references cleared.
+  - **Live Test D (Manual Window Close Reconciliation)**: PASS. Manually closing the Edge window via the X button was caught and reconciled; status reported `stopped` with references cleared.
+  - **Live Test E (Fresh Relaunch After Manual Close)**: PASS. Fresh Edge window opened cleanly without restarting JARVIS; stale `alreadyRunning` no longer blocked launch.
+- **Consequences**:
+  - Playwright browser lifecycle foundation v1 is fully operational with system Microsoft Edge.
+  - Zero bundled Chromium downloads, zero binary installations, zero admin privileges required.
+  - Strictly isolated: no access to existing user profiles or saved sessions; no global process termination; blank page only with zero navigation or interaction.
+  - Automated verification suite remains 100% mocked and offline (760 tests passing across 53 suites).
+
+
 
 
 

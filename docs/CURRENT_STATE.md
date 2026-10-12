@@ -1,11 +1,24 @@
 Project: JARVIS4
-Current Brick: 25
-Status: BRICK-025 VERIFIED
-Last Verified Brick: BRICK-025
-Current Feature: Browser Escalation Policy Foundation v1
+Current Brick: 26
+Status: BRICK-026 VERIFIED
+Last Verified Brick: BRICK-026
+Current Feature: Playwright Browser Lifecycle Foundation v1
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
+
+- Playwright Browser Lifecycle subsystem (`BrowserManager`, `BrowserManagerError`, `BROWSER_STATES` in `src/browser/browserManager.js`, and `defaultPlaywrightLauncher`, `chromium` in `src/browser/playwrightBrowser.js`) managing single browser execution lifecycle
+- Managed single browser instance: JARVIS owns at most ONE browser process, ONE isolated temporary browser context, and ONE blank page (`about:blank`)
+- System browser channel default: configured to use `msedge` via `playwright-core` with zero bundled browser downloads, zero binary installations, and zero administrator privileges required
+- Isolated temporary context: uses fresh temporary Playwright context; zero access to existing user profiles (Edge/Chrome), cookies, history, saved passwords, or session storage
+- Lifecycle operations & endpoints: explicit `POST /api/browser/launch`, `GET /api/browser/status`, and `POST /api/browser/close` endpoints with strict method enforcement and controlled JSON responses
+- Duplicate & concurrent launch protection: in-flight launch promise locking prevents duplicate or concurrent launches from creating multiple browser processes; repeated launch returns `alreadyRunning: true`
+- Safe closing & manual window close recovery: user closing the visible Edge window (`page.on('close')`, `context.on('close')`, and active status reconciliation via `page.isClosed()`) immediately invalidates the session, resets state to `stopped`, clears references, and cleans up remaining Playwright browser resources in background; second close returns `alreadyStopped: true` without errors
+- Controlled failure handling: returns `BROWSER_LAUNCH_FAILED` without automatic browser fallback or crash
+- Minimal diagnostic web UI: dedicated "Browser Lifecycle" section in `src/web/index.html` with Launch, Refresh Status, and Close controls rendering safe text via `.textContent` without URL input
+- Zero navigation & interaction: `about:blank` only; zero calls to `page.goto`, zero clicking, zero typing, zero DOM inspection
+- Zero external calls during test verification: automated test suite (`npm run verify`) executes completely offline using injected mock browser environments (760 tests across 53 suites passing)
+- Strict statelessness: browser lifecycle operations make zero mutations to `ConversationSession`, `ConversationStore`, or persistent conversation files
 
 - Browser Escalation Policy module (`decideBrowserEscalation`, `BrowserEscalationError`, `REASON_CODES`, `evaluateStaticOutcome` in `src/routing/browserEscalation.js`) implementing pure local deterministic browser escalation policy
 - Priority order enforcement: 1. explicit browser/interactivity intent, 2. structured browser-eligible static failure, 3. ordinary informational/static request, 4. default static

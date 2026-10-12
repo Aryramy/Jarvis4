@@ -65,6 +65,14 @@ export function loadConfig(overrides = {}) {
     maxOutputTokens: Math.max(1, Number(overrides.PAGE_QA_MAX_OUTPUT_TOKENS ?? process.env.PAGE_QA_MAX_OUTPUT_TOKENS ?? 1000)) || 1000
   });
 
+  const browser = Object.freeze({
+    channel: (overrides.BROWSER_CHANNEL ?? process.env.BROWSER_CHANNEL ?? 'msedge').trim(),
+    headless: typeof overrides.BROWSER_HEADLESS === 'boolean'
+      ? overrides.BROWSER_HEADLESS
+      : (overrides.BROWSER_HEADLESS ?? process.env.BROWSER_HEADLESS ?? 'false').toString().trim().toLowerCase() === 'true',
+    launchTimeoutMs: Math.max(1, Number(overrides.BROWSER_LAUNCH_TIMEOUT_MS ?? process.env.BROWSER_LAUNCH_TIMEOUT_MS ?? 15000)) || 15000
+  });
+
   return Object.freeze({
     nodeEnv,
     logLevel,
@@ -73,10 +81,12 @@ export function loadConfig(overrides = {}) {
     cheaperInference,
     openRouter,
     webRead,
-    pageQa
+    pageQa,
+    browser
   });
 }
 
 export const config = loadConfig();
 
 export default config;
+

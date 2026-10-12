@@ -55,6 +55,8 @@ const REQUIRED_FILES = [
   'src/routing/freshnessSignals.js',
   'src/routing/searchDecision.js',
   'src/routing/browserEscalation.js',
+  'src/browser/playwrightBrowser.js',
+  'src/browser/browserManager.js',
   'src/webpage/urlSafety.js',
   'src/webpage/htmlExtractor.js',
   'src/webpage/pageReader.js',
@@ -80,6 +82,7 @@ const REQUIRED_FILES = [
   'tests/unit/pageQa.test.js',
   'tests/unit/researchOne.test.js',
   'tests/unit/browserEscalation.test.js',
+  'tests/unit/browserManager.test.js',
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
   'tests/unit/voiceTurn.test.js',
@@ -101,6 +104,7 @@ const REQUIRED_FILES = [
   'tests/integration/pageQaEndpoint.test.js',
   'tests/integration/researchOneEndpoint.test.js',
   'tests/integration/browserDecisionEndpoint.test.js',
+  'tests/integration/browserLifecycleEndpoints.test.js',
   'tests/fixtures/html/article.html',
   'tests/fixtures/html/noisy.html',
   'tests/fixtures/html/unicode.html',
@@ -116,6 +120,7 @@ const REQUIRED_DIRS = [
   'src/web',
   'src/providers',
   'src/routing',
+  'src/browser',
   'src/webpage',
   'src/research',
   'src/config',
@@ -389,6 +394,50 @@ check('Browser Escalation Policy Module Sanity Check', async () => {
     throw new Error('decideBrowserEscalation sanity check failed for static prompt');
   }
 });
+
+check('Browser Lifecycle Module Sanity Check', async () => {
+  const { BrowserManager, BrowserManagerError, BROWSER_STATES } = await import('../src/browser/browserManager.js');
+  const { defaultPlaywrightLauncher, chromium } = await import('../src/browser/playwrightBrowser.js');
+
+  if (typeof BrowserManager !== 'function' || typeof BrowserManagerError !== 'function') {
+    throw new Error('browserManager module failed to export required classes');
+  }
+  if (!BROWSER_STATES || BROWSER_STATES.STOPPED !== 'stopped') {
+    throw new Error('BROWSER_STATES missing or invalid');
+  }
+  if (typeof defaultPlaywrightLauncher !== 'function' || !chromium) {
+    throw new Error('playwrightBrowser module failed to export launcher or chromium');
+  }
+
+  // Pure mock sanity test (never launch real browser during verify)
+  const mockManager = new BrowserManager({
+    launcher: async () => ({
+      newContext: async () => ({
+        newPage: async () => ({ close: async () => {} }),
+        close: async () => {}
+      }),
+      on: () => {},
+      isConnected: () => true,
+      close: async () => {}
+    })
+  });
+
+  const initialStatus = mockManager.getStatus();
+  if (initialStatus.state !== 'stopped') {
+    throw new Error('BrowserManager initial status must be stopped');
+  }
+
+  const launchResult = await mockManager.launch();
+  if (launchResult.state !== 'running' || !launchResult.browserConnected) {
+    throw new Error('BrowserManager mock launch sanity check failed');
+  }
+
+  const closeResult = await mockManager.close();
+  if (closeResult.state !== 'stopped') {
+    throw new Error('BrowserManager mock close sanity check failed');
+  }
+});
+
 
 check('Webpage URL Safety Module Sanity Check', async () => {
   const { validateUrlSafety, isPublicIP } = await import('../src/webpage/urlSafety.js');

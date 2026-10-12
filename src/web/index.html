@@ -260,6 +260,18 @@
       <div id="browser-decision-status" class="mic-status">Browser Decision: Idle</div>
       <div id="browser-decision-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
     </div>
+
+    <!-- Brick 26 Playwright Browser Lifecycle Section (Diagnostic) -->
+    <div id="browser-lifecycle-section" class="mic-section">
+      <div style="font-size: 0.95rem; font-weight: 600; color: #38bdf8; text-align: left; margin-bottom: 4px;">Browser Lifecycle</div>
+      <div class="button-group" style="margin-bottom: 8px;">
+        <button type="button" id="browser-launch-btn">Launch Browser</button>
+        <button type="button" id="browser-status-btn" class="secondary">Refresh Status</button>
+        <button type="button" id="browser-close-btn" class="secondary">Close Browser</button>
+      </div>
+      <div id="browser-lifecycle-status" class="mic-status">Browser: Stopped</div>
+      <div id="browser-lifecycle-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
+    </div>
   </div>
 
   <script type="module">
@@ -1600,6 +1612,139 @@
         }
       });
     }
+
+    // Brick 26: Playwright Browser Lifecycle UI Handler
+    const browserLaunchBtn = document.getElementById('browser-launch-btn');
+    const browserStatusBtn = document.getElementById('browser-status-btn');
+    const browserCloseBtn = document.getElementById('browser-close-btn');
+    const browserLifecycleStatus = document.getElementById('browser-lifecycle-status');
+    const browserLifecycleMeta = document.getElementById('browser-lifecycle-meta');
+
+    function renderBrowserStatus(data) {
+      if (!browserLifecycleStatus || !browserLifecycleMeta) return;
+      browserLifecycleStatus.textContent = `Browser: ${data.state ? data.state.toUpperCase() : 'UNKNOWN'}`;
+      browserLifecycleMeta.style.display = 'block';
+      const metaLines = [
+        `State: ${data.state || 'stopped'}`,
+        `Browser Connected: ${data.browserConnected ? 'Yes' : 'No'}`,
+        `Context Open: ${data.contextOpen ? 'Yes' : 'No'}`,
+        `Page Open: ${data.pageOpen ? 'Yes' : 'No'}`,
+        `Channel: ${data.channel || 'msedge'}`,
+        `Headless: ${data.headless ? 'Yes' : 'No'}`,
+        `Current URL: ${data.currentUrl || 'None'}`
+      ];
+      if (data.alreadyRunning) {
+        metaLines.push('Already Running: Yes');
+      }
+      if (data.alreadyStopped) {
+        metaLines.push('Already Stopped: Yes');
+      }
+      browserLifecycleMeta.textContent = metaLines.join('\n');
+    }
+
+    function setBrowserLifecycleBusy(isBusy, statusText) {
+      if (browserLaunchBtn) browserLaunchBtn.disabled = isBusy;
+      if (browserStatusBtn) browserStatusBtn.disabled = isBusy;
+      if (browserCloseBtn) browserCloseBtn.disabled = isBusy;
+      if (isBusy && browserLifecycleStatus && statusText) {
+        browserLifecycleStatus.textContent = statusText;
+      }
+    }
+
+    if (browserLaunchBtn) {
+      browserLaunchBtn.addEventListener('click', async () => {
+        setBrowserLifecycleBusy(true, 'Browser: Launching...');
+        if (browserLifecycleMeta) browserLifecycleMeta.style.display = 'none';
+
+        try {
+          const res = await fetch('/api/browser/launch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          const data = await res.json();
+
+          if (res.ok && data.success) {
+            renderBrowserStatus(data);
+          } else {
+            if (browserLifecycleStatus) browserLifecycleStatus.textContent = 'Browser: Error';
+            if (browserLifecycleMeta) {
+              browserLifecycleMeta.style.display = 'block';
+              browserLifecycleMeta.textContent = `Error Code: ${data.code || data.error || 'BROWSER_LAUNCH_FAILED'}\nMessage: ${data.message || 'Launch failed'}`;
+            }
+          }
+        } catch (err) {
+          if (browserLifecycleStatus) browserLifecycleStatus.textContent = 'Browser: Error';
+          if (browserLifecycleMeta) {
+            browserLifecycleMeta.style.display = 'block';
+            browserLifecycleMeta.textContent = `Error Code: BROWSER_LAUNCH_FAILED\nMessage: ${err.message || 'Network request failed'}`;
+          }
+        } finally {
+          setBrowserLifecycleBusy(false);
+        }
+      });
+    }
+
+    if (browserStatusBtn) {
+      browserStatusBtn.addEventListener('click', async () => {
+        setBrowserLifecycleBusy(true, 'Browser: Checking status...');
+
+        try {
+          const res = await fetch('/api/browser/status');
+          const data = await res.json();
+
+          if (res.ok && data.success) {
+            renderBrowserStatus(data);
+          } else {
+            if (browserLifecycleStatus) browserLifecycleStatus.textContent = 'Browser: Error';
+            if (browserLifecycleMeta) {
+              browserLifecycleMeta.style.display = 'block';
+              browserLifecycleMeta.textContent = `Error: ${data.error || 'Failed to get status'}`;
+            }
+          }
+        } catch (err) {
+          if (browserLifecycleStatus) browserLifecycleStatus.textContent = 'Browser: Error';
+          if (browserLifecycleMeta) {
+            browserLifecycleMeta.style.display = 'block';
+            browserLifecycleMeta.textContent = `Error: ${err.message || 'Network request failed'}`;
+          }
+        } finally {
+          setBrowserLifecycleBusy(false);
+        }
+      });
+    }
+
+    if (browserCloseBtn) {
+      browserCloseBtn.addEventListener('click', async () => {
+        setBrowserLifecycleBusy(true, 'Browser: Closing...');
+
+        try {
+          const res = await fetch('/api/browser/close', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          const data = await res.json();
+
+          if (res.ok && data.success) {
+            renderBrowserStatus(data);
+          } else {
+            if (browserLifecycleStatus) browserLifecycleStatus.textContent = 'Browser: Error';
+            if (browserLifecycleMeta) {
+              browserLifecycleMeta.style.display = 'block';
+              browserLifecycleMeta.textContent = `Error: ${data.error || 'Failed to close browser'}`;
+            }
+          }
+        } catch (err) {
+          if (browserLifecycleStatus) browserLifecycleStatus.textContent = 'Browser: Error';
+          if (browserLifecycleMeta) {
+            browserLifecycleMeta.style.display = 'block';
+            browserLifecycleMeta.textContent = `Error: ${err.message || 'Network request failed'}`;
+          }
+        } finally {
+          setBrowserLifecycleBusy(false);
+        }
+      });
+    }
   </script>
 </body>
 </html>
+

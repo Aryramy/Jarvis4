@@ -24,6 +24,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "cheerio": "^1.2.0"
+    "cheerio": "^1.2.0",
+    "playwright-core": "^1.64.0"
   }
 }

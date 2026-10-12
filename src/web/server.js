@@ -22,6 +22,7 @@ import { PageReaderError } from '../webpage/urlSafety.js';
 import { executePageQa, PageQaError } from '../webpage/pageQa.js';
 import { executeResearchOne, ResearchOneError } from '../research/researchOne.js';
 import { decideBrowserEscalation, BrowserEscalationError } from '../routing/browserEscalation.js';
+import { defaultBrowserManager, BrowserManager, BrowserManagerError } from '../browser/browserManager.js';
 
 const __dirname = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const HTML_FILE_PATH = join(__dirname, 'index.html');
@@ -62,6 +63,7 @@ export function createRequestListener(options = {}) {
     ? options.store
     : (options.session ? null : new ConversationStore());
   const session = options.session || new ConversationSession();
+  const browserManager = options.browserManager || defaultBrowserManager;
 
   // Restore persisted messages on startup if session is not already populated
   if (store && session.size === 0) {
@@ -1333,6 +1335,84 @@ export function createRequestListener(options = {}) {
       return;
     }
 
+    // Route: POST /api/browser/launch (Brick 26 Playwright Browser Lifecycle)
+    if (url.pathname === '/api/browser/launch') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      (async () => {
+        try {
+          const result = await browserManager.launch();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'BROWSER_LAUNCH_FAILED';
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: err.message || 'Browser launch failed'
+          }));
+        }
+      })();
+
+      return;
+    }
+
+    // Route: GET /api/browser/status (Brick 26 Playwright Browser Lifecycle)
+    if (url.pathname === '/api/browser/status') {
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      try {
+        const result = browserManager.getStatus();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: 'BROWSER_STATUS_FAILED',
+          message: err.message || 'Failed to retrieve browser status'
+        }));
+      }
+
+      return;
+    }
+
+    // Route: POST /api/browser/close (Brick 26 Playwright Browser Lifecycle)
+    if (url.pathname === '/api/browser/close') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      (async () => {
+        try {
+          const result = await browserManager.close();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'BROWSER_CLOSE_FAILED',
+            message: err.message || 'Failed to close browser'
+          }));
+        }
+      })();
+
+      return;
+    }
+
     // Route: /api/stt (Brick 10 multilingual STT endpoint & Brick 18 STT Latency Instrumentation)
     if (url.pathname === '/api/stt') {
       if (req.method !== 'POST') {
@@ -1715,6 +1795,17 @@ export function startServer(port = Number(process.env.PORT) || DEFAULT_PORT, hos
 
     server.once('error', (err) => {
       rejectPromise(err);
+    });
+
+    server.once('close', async () => {
+      const bm = options.browserManager || defaultBrowserManager;
+      if (bm && typeof bm.close === 'function') {
+        try {
+          await bm.close();
+        } catch {
+          // safe cleanup
+        }
+      }
     });
 
     server.listen(port, host, () => {
