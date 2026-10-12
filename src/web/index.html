@@ -1444,11 +1444,20 @@
           if (res.ok && data.success) {
             researchOneStatus.textContent = 'Status: Complete';
             researchOneMeta.style.display = 'block';
-            researchOneMeta.textContent = [
+            const metaLines = [
               `Selected Source Title: ${data.selectedSource?.title ?? 'None'}`,
               `Selected Source URL: ${data.selectedSource?.url ?? 'None'}`,
               `Selected Source Index: ${data.selectedSourceIndex ?? data.selectedSource?.index ?? 0}`,
               `Search Sources Found: ${data.sourcesFound ?? data.search?.sourcesFound ?? 0}`,
+              `Page Read Attempts: ${data.pageReadAttempts ?? 1}`
+            ];
+            if (Array.isArray(data.attempts) && data.attempts.length > 0) {
+              data.attempts.forEach((att, idx) => {
+                const statusText = att.status === 'success' ? 'Success' : `Failed — ${att.errorCode || 'UNKNOWN_ERROR'}`;
+                metaLines.push(`Attempt ${idx + 1}: Source Index ${att.sourceIndex} — ${statusText}`);
+              });
+            }
+            metaLines.push(
               `Page Final URL: ${data.page?.finalUrl ?? 'None'}`,
               `Page Truncated: ${(data.pageTruncated ?? data.page?.truncated) ? 'Yes' : 'No'}`,
               `Provider: ${data.provider ?? 'openrouter'}`,
@@ -1457,13 +1466,28 @@
               `Page Read Duration: ${data.pageReadDurationMs ?? 0} ms`,
               `AI Duration: ${data.providerQaDurationMs ?? 0} ms`,
               `Total Duration: ${data.serverResearchDurationMs ?? 0} ms`
-            ].join('\n');
+            );
+            researchOneMeta.textContent = metaLines.join('\n');
             researchOneAnswer.style.display = 'block';
             researchOneAnswer.textContent = data.answer;
           } else {
             researchOneStatus.textContent = 'Status: Error';
             researchOneMeta.style.display = 'block';
-            researchOneMeta.textContent = `Error Code: ${data.code || data.error || 'RESEARCH_FAILED'}\nStage: ${data.stage || 'unknown'}\nMessage: ${data.message || 'Research request failed'}`;
+            const errLines = [
+              `Error Code: ${data.code || data.error || 'RESEARCH_FAILED'}`,
+              `Stage: ${data.stage || 'unknown'}`,
+              `Message: ${data.message || 'Research request failed'}`
+            ];
+            if (typeof data.pageReadAttempts === 'number' && data.pageReadAttempts > 0) {
+              errLines.push(`Page Read Attempts: ${data.pageReadAttempts}`);
+            }
+            if (Array.isArray(data.attempts) && data.attempts.length > 0) {
+              data.attempts.forEach((att, idx) => {
+                const statusText = att.status === 'success' ? 'Success' : `Failed — ${att.errorCode || 'UNKNOWN_ERROR'}`;
+                errLines.push(`Attempt ${idx + 1}: Source Index ${att.sourceIndex} — ${statusText}`);
+              });
+            }
+            researchOneMeta.textContent = errLines.join('\n');
             researchOneAnswer.style.display = 'none';
           }
         } catch (err) {

@@ -166,3 +166,25 @@ Currently tracked issues in JARVIS4:
     - **Latency Variability**: Search and AI latency remain externally variable (e.g. search 7.8s-10.2s, AI 1.4s-13.9s observed live); page reading stage was fast (~700ms-720ms).
     - **Stateless Isolation**: Workflow is strictly stateless and does NOT write questions, answers, URLs, or page text to `ConversationSession`, `ConversationStore`, or runtime persistence.
 
+17. **Research Source Read-Fallback v1 Observations & Limitations (Brick 24 Verified)**:
+    - **Maximum Sources Limited to Citations**: Maximum sources are limited to citations returned by the existing search configuration (currently at most 3).
+    - **Authoritative Provider Citation Ranking**: Source evaluation order strictly follows provider ranking; no LLM, embedding, or domain reranking.
+    - **Technical Read Fallback Only**: Fallback to subsequent citations is triggered strictly by approved technical or safe-read failures (`UNSUPPORTED_CONTENT_TYPE`, `LOCAL_OR_PRIVATE_HOST_BLOCKED`, `DNS_RESOLUTION_FAILED`, `FETCH_TIMEOUT`, `PAGE_TOO_LARGE`, `HTTP_ERROR`, `NO_READABLE_CONTENT`, `FETCH_FAILED`). Verified in live testing with PDF search results failing safely with `UNSUPPORTED_CONTENT_TYPE`.
+    - **No Answer-Quality Fallback**: A readable page that lacks the answer (or where the model states "answer not found") immediately stops the pipeline without falling back to later citations.
+    - **No Semantic Source Evaluation**: No semantic matching or relevance filtering occurs prior to reading candidate pages.
+    - **No Multi-Source Synthesis**: Only the first successfully read page grounds the final answer; information from multiple sources is not synthesized.
+    - **No Search Retry**: Zero second search queries or search retries when sources fail to read or provide answers.
+    - **No Query Rewriting**: The original user query is not rewritten or expanded.
+    - **No PDF Parsing**: PDFs returned in search results are safely skipped with `UNSUPPORTED_CONTENT_TYPE` and trigger fallback to the next candidate. Zero PDF parser was introduced.
+    - **No JavaScript-Rendered Pages**: Dynamic SPAs rendered via client-side JavaScript are not executed; empty pages yield `NO_READABLE_CONTENT` and trigger fallback.
+    - **No Authenticated Pages**: Authenticated, paywalled, or login-required sources cannot be accessed.
+    - **No Browser Automation**: Does not use Playwright, Puppeteer, or headless browsers.
+    - **No Automatic /api/auto Integration**: `/api/auto` does not invoke `/api/research-one`.
+    - **No Voice Turn Integration**: Voice Turn, STT, and TTS remain separate and disconnected.
+    - **Latency Variability**: Search, cumulative page-read, and AI generation latencies remain externally variable based on network and provider conditions. Empirical live test observations:
+      - Live Test A: Search 10049 ms, Page Read 2264.029 ms, AI 9382 ms, Total 21715.762 ms.
+      - Live Test C: Search 13246 ms, Page Read 990.494 ms, AI 8717 ms, Total 22953.768 ms.
+      These are empirical measurements only; no permanent latency guarantees are claimed.
+    - **Stateless Isolation**: Pipeline remains strictly stateless and does NOT write questions, answers, URLs, attempt diagnostics, or page text to `ConversationSession`, `ConversationStore`, or runtime persistence.
+
+

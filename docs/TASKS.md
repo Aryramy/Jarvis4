@@ -70,4 +70,7 @@ Status: VERIFIED
 BRICK-023 — Search → Read → Grounded Answer v1
 Status: VERIFIED
 
+BRICK-024 — Research Source Read-Fallback v1
+Status: VERIFIED
+
 

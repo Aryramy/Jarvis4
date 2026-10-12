@@ -421,6 +421,45 @@
   - Live Test B (Current Information: "What are the latest Microsoft Fabric announcements?"): PASS (`status: Complete`, `selectedSource: FabCon and SQLCon 2026: Explore Microsoft Fabric and SQL innovations | Microsoft Azure Blog`, `url: https://azure.microsoft.com/en-us/blog/fabcon-and-sqlcon-2026-in-barcelona-building-the-data-foundation-for-microsoft-copilot-and-agents/`, `index: 0`, `sourcesFound: 3`, `searchDuration: 10214 ms`, `pageReadDuration: 720.470 ms`, `aiDuration: 13947 ms`, `totalDuration: 24882.781 ms`, substantive page-grounded answer covering Fabric IQ, agentic app creation in Power BI Desktop, Fabric data engineering agent, BigQuery mirroring, Salesforce Data 360, etc.).
 - **Consequences**: Enables reliable, grounded research over single web sources with verifiable provider evidence, strong SSRF protections, and complete conversational isolation.
 
+## ADR-0032: Research Source Read-Fallback v1 (Brick 24)
+- **Status**: Accepted (BRICK-024 VERIFIED)
+- **Context**: In Brick 23, if citation source 0 could not be safely read (e.g. returned a PDF, HTTP 404, or private IP address), the entire research request immediately failed even if subsequent provider citation sources (index 1 or 2) were valid and safely readable. Brick 24 addresses this limitation with deterministic page-read fallback across existing search results without relaxing security or expanding search scope.
+- **Decision**:
+  1. **Strictly One Search Provider Call**: Exactly one OpenRouter web search request per research turn. Zero second searches, zero query rewrites, and zero search retries when reading fails or information is missing.
+  2. **Authoritative Provider Citation Order**: Candidate sources are ordered strictly by provider ranking (`getValidSourceCandidates`). Original provider indices (0, 1, 2) are preserved for diagnostics. No LLM ranking, embeddings, keyword scoring, or domain bias.
+  3. **Page-Read Fallback Eligibility**: Fallback to the next citation candidate is permitted ONLY for approved controlled page-reader errors (`CONTROLLED_PAGE_READ_ERROR_CODES`: `UNSUPPORTED_CONTENT_TYPE`, `LOCAL_OR_PRIVATE_HOST_BLOCKED`, `DNS_RESOLUTION_FAILED`, `FETCH_TIMEOUT`, `PAGE_TOO_LARGE`, `HTTP_ERROR`, `NO_READABLE_CONTENT`, `FETCH_FAILED`, etc.). SSRF checks remain strictly enforced for every candidate.
+  4. **First Readable Source Wins**: As soon as a candidate page read succeeds, reading stops immediately. Subsequent provider citations are never fetched.
+  5. **Strictly One Grounded AI Call**: Exactly one AI completion per request using the existing Brick-22 helper (`answerFromPageContent`). Only content from the single successfully read page is passed to the grounding model; failed or unattempted source texts, search prose, and snippets are strictly excluded.
+  6. **No Semantic or Answer-Quality Fallback**: If a successfully read webpage does not contain the answer (e.g. model responds that the answer was not found), the workflow stops. No fallback to other sources is permitted based on answer content or quality.
+  7. **No Fallback on AI Failure**: If the grounded AI model call fails, the workflow immediately returns a controlled error without trying other sources or falling back to normal AI.
+  8. **All Sources Unreadable Error**: If all valid candidates fail controlled page reading, the endpoint returns controlled error `NO_READABLE_SEARCH_SOURCE` (HTTP 422) with safe attempt diagnostics.
+  9. **Unexpected Error Safety**: If an unexpected internal error occurs during page reading, the pipeline halts immediately (`PAGE_READ_INTERNAL_ERROR`) without swallowing errors or trying further sources.
+  10. **Cumulative Timing**: `pageReadDurationMs` measures cumulative time spent across all page read attempts.
+  11. **Stateless Invariant**: Research-One does not mutate `ConversationSession`, `ConversationStore`, or runtime persistence.
+  12. **Boundary Enforcement**: Zero browser automation, zero JavaScript execution, zero PDF parsing, zero multi-source synthesis, and zero automatic `/api/auto` or voice routing.
+- **Human Live Verification (Verified)**:
+  - **Live Test A (First Source Readable)**: "What are the latest Microsoft Fabric announcements?"
+    - Status: `Complete`, Selected Source: `FabCon and SQLCon 2026: Explore Microsoft Fabric and SQL innovations | Microsoft Azure Blog`, URL: `https://azure.microsoft.com/en-us/blog/fabcon-and-sqlcon-2026-in-barcelona-building-the-data-foundation-for-microsoft-copilot-and-agents/`, Selected Source Index: 0, Sources Found: 3, Page Read Attempts: 1.
+    - Attempt 1: Source Index 0 — Success.
+    - Timings: search 10049 ms, page read 2264.029 ms, AI 9382 ms, total 21715.762 ms.
+    - Verification: Source 0 success cleanly stopped further reads; unnecessary fallback was avoided; first readable source won; grounded answer produced from single page.
+  - **Live Test B (All Search Sources Unreadable)**: "What is the W3C dummy PDF file used for?"
+    - Status: `Error`, Error Code: `NO_READABLE_SEARCH_SOURCE`, Stage: `page-read`, Message: `"No provider citation source could be safely read"`.
+    - Page Read Attempts: 3.
+    - Attempt 1: Source Index 0 Failed (`UNSUPPORTED_CONTENT_TYPE`).
+    - Attempt 2: Source Index 1 Failed (`UNSUPPORTED_CONTENT_TYPE`).
+    - Attempt 3: Source Index 2 Failed (`UNSUPPORTED_CONTENT_TYPE`).
+    - Verification: Demonstrates full sequential fallback across all 3 returned sources; controlled `NO_READABLE_SEARCH_SOURCE` returned upon citation exhaustion; PDF rejection preserved with zero PDF parser introduced; zero content-type bypass; zero grounded AI call made.
+  - **Live Test C (Normal Readable Source Regression)**: "What is the purpose of the NIST AI Risk Management Framework?"
+    - Status: `Complete`, Selected Source: `AI Risk Management Framework | NIST`, URL: `https://www.nist.gov/itl/ai-risk-management-framework`, Selected Source Index: 0, Sources Found: 3, Page Read Attempts: 1.
+    - Attempt 1: Source Index 0 — Success.
+    - Timings: search 13246 ms, page read 990.494 ms, AI 8717 ms, total 22953.768 ms.
+    - Answer: Accurately grounded in NIST webpage content (cultivate trust in AI, promote innovation while mitigating risk, trustworthy/responsible AI, voluntary use).
+    - Verification: Normal GREEN-023 research behavior preserved; source 0 success: PASS; single-page grounding: PASS.
+  - **Live Coverage Note**: A search result where index 0 fails and index 1 succeeds was not naturally produced by external search provider during manual testing. This transition is verified deterministically by offline unit/integration test suites (both index 0 -> 1 success and index 0 -> 1 -> 2 success). Live Test B independently verified full ordered traversal through all three sources.
+- **Consequences**: Significantly improves research reliability across search results containing unreadable or unsupported media types while maintaining strict boundaries, security, and statelessness.
+
+
 
 
 

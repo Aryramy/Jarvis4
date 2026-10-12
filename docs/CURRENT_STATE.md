@@ -1,23 +1,26 @@
 Project: JARVIS4
-Current Brick: 23
-Status: BRICK-023 VERIFIED
-Last Verified Brick: BRICK-023
-Current Feature: Search → Read → Grounded Answer v1
+Current Brick: 24
+Status: BRICK-024 VERIFIED
+Last Verified Brick: BRICK-024
+Current Feature: Research Source Read-Fallback v1
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
 
-- Research One module (`executeResearchOne`, `selectResearchSource`, `ResearchOneError` in `src/research/researchOne.js`) implementing Search → Read → Grounded Answer v1 pipeline
-- Deterministic source selection walking provider citation results in authoritative order to pick the first valid HTTP/HTTPS URL with zero LLM, embeddings, or reranking
-- Explicit search verification requiring provider-level evidence (`searchUsed = true` via usage metrics or url_citation annotations) before attempting page read
-- Web research endpoint (`POST /api/research-one`) connecting search, single-source selection, safe single page read, and grounded AI answering in a strictly linear pipeline
-- Complete exclusion of search answer prose and search snippets from final grounding prompt; only extracted static content of the selected page is passed to the grounding model
-- Strict single-source and zero-fallback invariant: exactly one search request, one selected source, one page read, and one grounded AI response; failures stop pipeline immediately without falling back to source 2, source 3, another search, or normal AI
-- Grounded Page-QA extraction helper (`answerFromPageContent` in `src/webpage/pageQa.js`) reused by both `/api/page-qa` and `/api/research-one` without duplicate page fetching
-- Dedicated Grounded Web Research UI section (`#research-one-section`), input (`#research-question-input`), button (`#research-one-btn`), status (`#research-one-status`), metadata diagnostics (`#research-one-meta`), and answer display (`#research-one-answer`)
-- Safe text rendering using `.textContent` with zero HTML injection or innerHTML parsing
+- Research One module (`executeResearchOne`, `getValidSourceCandidates`, `selectResearchSource`, `ResearchOneError`, `CONTROLLED_PAGE_READ_ERROR_CODES` in `src/research/researchOne.js`) implementing Research Source Read-Fallback v1 across existing search sources
+- Deterministic candidate ordering preserving original provider citation indices (e.g., index 0, index 1, index 2) with valid HTTP/HTTPS URL filtering and zero LLM ranking, keyword scoring, domain scoring, or reranking
+- Page-read fallback loop: sequentially attempts valid provider citations; falls back to the next candidate ONLY upon approved controlled page-reader failures (`INVALID_URL`, `UNSUPPORTED_PROTOCOL`, `URL_CREDENTIALS_NOT_ALLOWED`, `PORT_NOT_ALLOWED`, `LOCAL_OR_PRIVATE_HOST_BLOCKED`, `DNS_RESOLUTION_FAILED`, `TOO_MANY_REDIRECTS`, `INSECURE_REDIRECT_DOWNGRADE`, `FETCH_TIMEOUT`, `PAGE_TOO_LARGE`, `UNSUPPORTED_CONTENT_TYPE`, `HTTP_ERROR`, `NO_READABLE_CONTENT`, `FETCH_FAILED`)
+- First readable source wins: source reading stops immediately upon first successful page read; subsequent citation sources are never read
+- Strict search isolation: exactly ONE search provider call per request; zero second search queries, query rewrites, or search retries on source read failures or missing answers
+- Strict AI grounding isolation: exactly ONE grounded AI call per request; grounded model receives strictly the content of the single successfully read webpage; failed page contents, search prose, search snippets, and other citations are completely excluded
+- No answer-quality fallback: if a readable page lacks the answer or yields "answer not found", the workflow stops immediately and does NOT try subsequent sources
+- No AI failure fallback: if the grounded AI call fails, the workflow stops immediately and does NOT read another source, retry search, or fall back to normal AI
+- All sources unreadable returns controlled `NO_READABLE_SEARCH_SOURCE` error (status 422) with ordered attempt diagnostics (`sourceIndex`, `title`, `url`, `status`, `errorCode`)
+- Unexpected internal page-reader exceptions stop the pipeline immediately with safe error (`PAGE_READ_INTERNAL_ERROR`) without attempting subsequent sources or leaking stack traces
+- Cumulative read timing: `pageReadDurationMs` measures total cumulative duration spent across all page-read attempts
+- Grounded Web Research UI updated to display `Page Read Attempts` and detailed attempt lines using safe `.textContent`
 - Strict statelessness: zero writes to `ConversationSession`, `ConversationStore`, or runtime persistence files
-- Zero live network requirement in offline test verification (`npm run verify`)
+- Zero live network requirement in offline test verification (`npm run verify` passes with 650 tests across 28 suites)
 
 - Zero-dependency Node.js ESM project foundation
 - Minimal reusable 4-level logger supporting DEBUG, INFO, WARN, ERROR
@@ -519,20 +522,50 @@ Status: BRICK-018 VERIFIED (Exit Code: 0)
       - Timings: search 10214 ms, page read 720.470 ms, AI 13947 ms, total 24882.781 ms.
       - Result: Substantive page-grounded answer extracted key topics (Fabric IQ, agentic app creation in Power BI Desktop, Fabric data engineering agent, Real-Time Intelligence Copilot capabilities, BigQuery mirroring, Salesforce Data 360, etc.) from the blog post.
     - Grounding contract verified: Search answer prose and snippets were NOT passed into grounding prompt.
-    - Limitations (13 items):
-      1. Only one search-result source is selected.
-      2. Source selection follows provider citation order.
-      3. The first selected source may fail to load.
-      4. No fallback to source 2 or source 3.
-      5. The selected page may not contain the answer.
+  - Brick 24 Research Source Read-Fallback v1: VERIFIED
+    - Pipeline: Question -> One Search (OpenRouter / Exa fast) -> Real Provider Citation Sources in provider order -> Sequentially attempt valid candidate pages -> Fall back on controlled page-reader failure -> Stop at FIRST readable source -> Exactly ONE grounded AI call -> Answer grounded strictly in single readable page.
+    - Controlled fallback: Triggered solely by approved controlled page-reader failures (`UNSUPPORTED_CONTENT_TYPE`, `LOCAL_OR_PRIVATE_HOST_BLOCKED`, `DNS_RESOLUTION_FAILED`, `FETCH_TIMEOUT`, `PAGE_TOO_LARGE`, `HTTP_ERROR`, `NO_READABLE_CONTENT`, `FETCH_FAILED`, etc.).
+    - Exhaustion handling: If all provider citations fail controlled page reading, returns controlled error `NO_READABLE_SEARCH_SOURCE` (HTTP 422) with ordered attempt diagnostics.
+    - Live Test A (First Source Readable: "What are the latest Microsoft Fabric announcements?"): PASS
+      - Selected Source: FabCon and SQLCon 2026: Explore Microsoft Fabric and SQL innovations | Microsoft Azure Blog
+      - URL: `https://azure.microsoft.com/en-us/blog/fabcon-and-sqlcon-2026-in-barcelona-building-the-data-foundation-for-microsoft-copilot-and-agents/`
+      - Selected Source Index: 0, Sources Found: 3, Page Read Attempts: 1
+      - Attempt 1: Source Index 0 — Success
+      - Timings: search 10049 ms, page read 2264.029 ms, AI 9382 ms, total 21715.762 ms
+      - Result: Source 0 success stopped further reads, unnecessary fallback: NO, first readable source won: PASS, grounded answer preserved: PASS.
+    - Live Test B (All Search Sources Unreadable: "What is the W3C dummy PDF file used for?"): PASS
+      - Status: Error, Error Code: `NO_READABLE_SEARCH_SOURCE`, Stage: page-read
+      - Message: "No provider citation source could be safely read"
+      - Page Read Attempts: 3
+      - Attempt 1: Source Index 0 Failed (`UNSUPPORTED_CONTENT_TYPE`)
+      - Attempt 2: Source Index 1 Failed (`UNSUPPORTED_CONTENT_TYPE`)
+      - Attempt 3: Source Index 2 Failed (`UNSUPPORTED_CONTENT_TYPE`)
+      - Result: All-source fallback traversal demonstrated through index 0 -> index 1 -> index 2; controlled `NO_READABLE_SEARCH_SOURCE` returned; PDF rejection preserved; zero PDF parser introduced; zero content-type bypass; zero grounded AI call made.
+    - Live Test C (Normal Readable Source Regression: "What is the purpose of the NIST AI Risk Management Framework?"): PASS
+      - Selected Source: AI Risk Management Framework | NIST
+      - URL: `https://www.nist.gov/itl/ai-risk-management-framework`
+      - Selected Source Index: 0, Sources Found: 3, Page Read Attempts: 1
+      - Attempt 1: Source Index 0 — Success
+      - Timings: search 13246 ms, page read 990.494 ms, AI 8717 ms, total 22953.768 ms
+      - Answer: Accurately grounded in NIST webpage content (cultivate trust in AI, promote innovation while mitigating risk, trustworthy/responsible AI, voluntary use).
+      - Result: Normal GREEN-023 research behavior preserved cleanly; source 0 success: PASS; one-page grounding: PASS.
+    - Live Coverage Note: Provider citations where index 0 fails and index 1 succeeds was not naturally produced by external search provider during manual queries; verified deterministically by offline unit/integration test suite. Combined live traversal in Test B + deterministic test suite verifies full fallback logic.
+    - Limitations (15 items):
+      1. Maximum candidate sources remain limited to citations returned by existing search configuration (currently at most 3).
+      2. Provider source order remains authoritative (no LLM, embedding, or domain reranking).
+      3. Fallback is technical page-read fallback only (not semantic or answer-quality).
+      4. A readable page that lacks the answer stops fallback immediately.
+      5. No semantic source evaluation.
       6. No multi-source synthesis.
-      7. No PDF support.
-      8. No JavaScript-rendered-page support.
-      9. No authenticated pages.
-      10. No crawling.
-      11. No automatic Ask JARVIS integration yet.
-      12. No Voice Turn integration.
-      13. Search and AI latency remain externally variable.
+      7. No second search.
+      8. No query rewriting.
+      9. No PDF parsing.
+      10. No JavaScript-rendered page support.
+      11. No authenticated page support.
+      12. No browser automation.
+      13. No automatic /api/auto integration.
+      14. No Voice Turn integration.
+      15. Search, page-read, and AI latency remain externally variable.
 
 
 

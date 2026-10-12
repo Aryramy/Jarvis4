@@ -1203,7 +1203,7 @@ export function createRequestListener(options = {}) {
             statusCode = 413;
           } else if (errorCode === 'FETCH_TIMEOUT') {
             statusCode = 504;
-          } else if (['UNSUPPORTED_CONTENT_TYPE', 'NO_READABLE_CONTENT', 'NO_USABLE_SEARCH_SOURCE', 'SEARCH_NOT_EXECUTED'].includes(errorCode)) {
+          } else if (['UNSUPPORTED_CONTENT_TYPE', 'NO_READABLE_CONTENT', 'NO_USABLE_SEARCH_SOURCE', 'SEARCH_NOT_EXECUTED', 'NO_READABLE_SEARCH_SOURCE'].includes(errorCode)) {
             statusCode = 422;
           }
 
@@ -1214,6 +1214,11 @@ export function createRequestListener(options = {}) {
             code: errorCode,
             message: safeMessage,
             stage,
+            sourcesFound: err.details?.sourcesFound ?? (err.sourcesFound ?? 0),
+            pageReadAttempts: err.details?.pageReadAttempts ?? (err.pageReadAttempts ?? 0),
+            attempts: err.details?.attempts ?? (err.attempts ?? []),
+            selectedSourceIndex: err.details?.selectedSourceIndex ?? (err.selectedSourceIndex ?? null),
+            selectedSource: err.details?.selectedSource ?? (err.selectedSource ?? null),
             searchDurationMs: err.details?.searchDurationMs ?? 0,
             pageReadDurationMs: err.details?.pageReadDurationMs ?? 0,
             providerQaDurationMs: err.details?.providerQaDurationMs ?? 0,
