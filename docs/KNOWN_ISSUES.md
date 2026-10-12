@@ -240,6 +240,33 @@ Currently tracked issues in JARVIS4:
     - **No /api/auto Integration**: Ask JARVIS does not navigate or interact with the browser.
     - **No Voice Turn Integration**: Voice Turn, STT, and TTS remain completely disconnected from browser navigation.
 
+21. **Page Understanding v1 Observations & Limitations (Brick 28 Verified)**:
+    - **Live Verification on Real Webpages**:
+      - `https://example.com/`: Basic inspection passed (correct URL, title, visible text, link detection, href returned; zero interaction).
+      - `https://www.wikipedia.org/`: Complex page inspection passed (Title "Wikipedia", 2007 visible chars, 35 returned elements including heading, links, form, search input, select; input privacy verified).
+      - `https://selenium.dev/selenium/web/web-form.html`: Real web form inspection passed (HTTP 200, Title "Web form", 276 visible chars, 19 elements: heading, form, text input, password, textarea, disabled input, link, select, file input, checkboxes, radios, button, color, date, range).
+      - Real-World Input Privacy Verified: Text input values, passwords, textarea user entries, file paths, and hidden CSRF tokens are strictly omitted and never exposed.
+    - **Transient Execution-Context Replacement & Live Fix**:
+      - An unstable navigation test against an external endpoint (`httpbin.org`) timed out due to external 503 Service Temporarily Unavailable (not evidence of a navigation defect).
+      - Inspecting immediately following unstable navigation exposed raw Playwright error: `page.evaluate: Execution context was destroyed, most likely because of a navigation`.
+      - Live Fix implemented: inspection recognizes transient execution-context replacement and performs bounded recovery (waits for `domcontentloaded` stability and retries at most once; max 2 total attempts).
+      - Controlled Errors: Persistent instability returns controlled `BROWSER_PAGE_BUSY` (HTTP 503) with message: "The page is still changing or loading. Try inspection again shortly." Generic failures return sanitized `BROWSER_INSPECTION_FAILED` (HTTP 500) with message: "Page inspection could not be completed."
+      - Zero Raw Error Leakage: Raw Playwright error strings, internal JavaScript filenames, Windows paths, and stack traces are completely sanitized and never reach user-facing API or UI.
+      - Live Fix Test A (Real HTTP 503 error-page inspection): External 503 error document was cleanly inspected; heading and text "503 Service Temporarily Unavailable" extracted; browser remained completely usable; zero raw error leakage occurred.
+      - Live Fix Test B (Real web-form regression after fix): Form re-inspected cleanly on Selenium web form; 19/19 elements detected with identical structure and full privacy preserved.
+      - Future Scope Boundary: Element targeting, selectors, and interactive actions belong to Brick 29; Brick 29 has not been started.
+    - **Read-Only Main-Document Inspection Only**: Inspection operates strictly on the active managed page's main document. Cross-origin iframe traversal, iframe orchestration, and shadow DOM traversal systems are not implemented.
+    - **Point-in-Time Snapshot Staleness**: Inspection returns a static, point-in-time observational snapshot. If the page mutates after inspection, the returned snapshot may become stale. No `MutationObserver`, continuous page monitoring, or background polling is implemented.
+    - **Untrusted Page Content**: All extracted text and element attributes are treated as untrusted data. Webpage content saying "ignore previous instructions" or similar prompts remains plain extracted webpage text. Zero AI interpretation is performed over inspected page content.
+    - **Bounded Text and Element Inventory**: Visible text is bounded by `BROWSER_INSPECTION_MAX_TEXT_CHARS` (default 12,000). Element inventory is bounded by `BROWSER_INSPECTION_MAX_ELEMENTS` (default 100). Individual element text is bounded by `BROWSER_INSPECTION_MAX_ELEMENT_TEXT_CHARS` (default 300). Truncation flags (`textTruncated`, `elementsTruncated`) are explicitly returned.
+    - **Supported Element Categories**: Observational element inventory extracts only `heading`, `link`, `button`, `input`, `textarea`, `select`, and `form`. Non-visible elements (`display: none`, `visibility: hidden`, `hidden`, zero-size, `<script>`, `<style>`, `<template>`) are excluded where practical.
+    - **No Element Targeting or Selectors**: No CSS selectors, XPath selectors, Playwright locators, JavaScript handles, or backend node IDs are exposed or generated. Reliable element targeting is deferred to Brick 29.
+    - **No Interactive Execution**: Inspection performs zero clicking, typing, filling, pressing, focusing, hovering, scrolling, form submitting, file uploading, downloading, or cookie/storage modification.
+    - **No Navigation Side Effects**: Inspection does not navigate to discovered links or fetch discovered URLs (`page.goto`, reload, back, forward are never called during inspection or recovery).
+    - **No AI / Search Provider Usage**: Zero OpenRouter calls, zero LLM calls, zero search calls, and zero Exa calls are made. Inspection is 100% deterministic local evaluation.
+    - **Browser Lifecycle Required**: Browser must already be running; auto-launch is strictly forbidden (`BROWSER_NOT_RUNNING`). If the managed page was manually closed, lifecycle reconciles to stopped.
+    - **Subsystem Decoupling**: `/api/auto`, `/api/browser-decision`, STT, TTS, and Voice Turn remain completely disconnected from page inspection.
+
 
 
 

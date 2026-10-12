@@ -1,11 +1,44 @@
 Project: JARVIS4
-Current Brick: 27
-Status: BRICK-027 VERIFIED
-Last Verified Brick: BRICK-027
-Current Feature: Browser Navigation v1
+Current Brick: 28
+Status: BRICK-028 VERIFIED
+Last Verified Brick: BRICK-028
+Current Feature: Page Understanding v1 (Visible Page + Element Inventory)
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
+
+- Page Understanding v1 (Brick 28) observational subsystem implemented on existing managed Playwright browser page (`inspectPage` in `src/browser/browserManager.js`, `extractDomSnapshot`, `cleanText`, `truncate`, `inspectHtmlString` in `src/browser/pageInspection.js`):
+  - Human live verification completed and verified across all real-page and robustness tests:
+    - Live Test A (example.com): URL, title, real visible text, link href observationally extracted; zero navigation/interaction caused.
+    - Live Test B (wikipedia.org): Title "Wikipedia", 2007 visible chars, 35 returned elements (headings, links, form, search input, select); input values omitted.
+    - Live Test C (selenium.dev web-form.html): HTTP 200, Title "Web form", 276 chars, 19 elements (heading, form, text input, password, textarea, disabled input, link, select, file input, checkboxes, radios, button, color, date, range); input values, passwords, textarea entries, and file paths strictly omitted.
+    - Live Fix Test A (httpbin.org 503 error-page inspection): External 503 error-document successfully inspected; heading and text "503 Service Temporarily Unavailable" extracted; browser remained usable; raw Playwright internal errors completely eliminated.
+    - Live Fix Test B (Selenium web-form regression after fix): Re-navigated and inspected; 19/19 elements detected, title "Web form", 276 chars, 37.577 ms duration; full privacy preserved.
+  - Live Robustness Fix (Safe inspection after unstable/failed navigation):
+    - External service (httpbin) returned 503 and timed out; not considered evidence of a navigation implementation defect.
+    - Fixed raw Playwright error leakage (`Execution context was destroyed, most likely because of a navigation`).
+    - Bounded recovery: detects transient execution-context replacement/destruction and performs exactly one bounded retry after waiting for `domcontentloaded` stability (max 2 total evaluation attempts).
+    - Persistent instability returns controlled `BROWSER_PAGE_BUSY` (HTTP 503) with safe message: "The page is still changing or loading. Try inspection again shortly."
+    - Generic non-transient failures return sanitized `BROWSER_INSPECTION_FAILED` (HTTP 500) with safe message: "Page inspection could not be completed."
+    - Raw Playwright errors, internal messages, Windows paths, and stack traces are strictly prohibited from reaching API and UI.
+  - Read-only main-document inspection: observes currently loaded page in existing managed single browser context; zero click, zero typing, zero scroll, zero form submit, zero navigation, zero reload.
+  - Page metadata extraction: returns actual `page.url()` and `page.title()` without inventing values.
+  - Visible text extraction: extracts user-visible rendered page text semantics; excludes `<script>`, `<style>`, `<template>`, `<noscript>`, `<svg>`, `<canvas>`, `<textarea>`, `display:none`, `visibility:hidden`, `hidden` attribute, and zero-size elements.
+  - Conservative whitespace normalization: collapses excess intra-line spaces and tabs while preserving line structure and Unicode scripts.
+  - Deterministic text limit: bounded by `BROWSER_INSPECTION_MAX_TEXT_CHARS` (default: 12000); returns `textTruncated: true` when truncated, otherwise `false`.
+  - Structured visible element inventory: detects visible elements in deterministic DOM tree order across supported categories: `heading`, `link`, `button`, `input`, `textarea`, `select`, `form`, and exposes detected semantic roles.
+  - Deterministic element limit: bounded by `BROWSER_INSPECTION_MAX_ELEMENTS` (default: 100); returns `elementsTruncated: true` when truncated, otherwise `false`; exposes `returnedElementCount` and `totalEligibleElementCount`.
+  - Element text limit: individual element text bounded by `BROWSER_INSPECTION_MAX_ELEMENT_TEXT_CHARS` (default: 300).
+  - Strict input privacy: input, textarea, and password values are NEVER extracted or returned; password fields are identified by `inputType: "password"` with zero value leakage; hidden inputs and CSRF tokens are completely excluded.
+  - Strict form privacy: forms expose structural metadata (`method`, `action`, `fieldCount`) only; zero submitted data or hidden token values.
+  - Non-actionable observational records: zero CSS selectors, XPath expressions, Playwright locators, handles, or backend node IDs exposed; element targeting is not implemented (deferred to Brick 29).
+  - Main document only limitation: inspects main frame only; no cross-origin iframe traversal, no iframe orchestration, and no shadow DOM traversal.
+  - Dynamic snapshot limitation: point-in-time snapshot only; no MutationObserver, no continuous page polling; snapshots may become stale if page mutates.
+  - Untrusted data guarantee: webpage text is treated strictly as untrusted data; zero AI interpretation; zero OpenRouter or LLM calls; zero search calls.
+  - Mandatory running browser requirement: inspection requires browser to be running; returns controlled `BROWSER_NOT_RUNNING` error if stopped without auto-launching; reconciles manual page close to stopped.
+  - New HTTP endpoint: `GET /api/browser/inspect-page` with strict method enforcement (405 for non-GET).
+  - Diagnostic Web UI: dedicated "Page Understanding" section in `src/web/index.html` with "Inspect Page" button, metadata display, visible text display, and element inventory rendering strictly via `.textContent` (zero `.innerHTML`).
+
 
 - Browser Navigation v1 subsystem operational on existing managed Playwright browser page (`navigate`, `back`, `forward`, `refresh`, `getPageStatus` in `src/browser/browserManager.js`)
 - Human live verification completed and verified across all live navigation and security tests:

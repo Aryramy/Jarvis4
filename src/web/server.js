@@ -1617,6 +1617,42 @@ export function createRequestListener(options = {}) {
       return;
     }
 
+    // Route: GET /api/browser/inspect-page (Brick 28 Page Understanding v1)
+    if (url.pathname === '/api/browser/inspect-page') {
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      (async () => {
+        try {
+          const result = await browserManager.inspectPage();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'BROWSER_INSPECTION_FAILED';
+          const statusCode = (errorCode === 'BROWSER_NOT_RUNNING' || errorCode === 'BROWSER_PAGE_NOT_AVAILABLE')
+            ? 400
+            : (errorCode === 'BROWSER_PAGE_BUSY' ? 503 : 500);
+          const safeMessage = (err instanceof BrowserManagerError && typeof err.message === 'string')
+            ? err.message
+            : (errorCode === 'BROWSER_PAGE_BUSY'
+              ? 'The page is still changing or loading. Try inspection again shortly.'
+              : 'Page inspection could not be completed.');
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage
+          }));
+        }
+      })();
+
+      return;
+    }
+
     // Route: /api/stt (Brick 10 multilingual STT endpoint & Brick 18 STT Latency Instrumentation)
     if (url.pathname === '/api/stt') {
       if (req.method !== 'POST') {

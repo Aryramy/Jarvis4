@@ -81,3 +81,6 @@ Status: VERIFIED
 
 BRICK-027 — Browser Navigation v1
 Status: VERIFIED
+
+BRICK-028 — Page Understanding v1 (Visible Page + Element Inventory)
+Status: VERIFIED

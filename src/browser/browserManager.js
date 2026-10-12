@@ -16,6 +16,7 @@
 import { config } from '../config/index.js';
 import { defaultPlaywrightLauncher } from './playwrightBrowser.js';
 import { validateUrlSafety, PageReaderError } from '../webpage/urlSafety.js';
+import { extractDomSnapshot } from './pageInspection.js';
 
 export class BrowserManagerError extends Error {
   /**
@@ -990,6 +991,241 @@ export class BrowserManager {
       url: currentUrl,
       title,
       state: this._state
+    };
+  }
+
+  /**
+   * Observes and inspects the currently loaded managed page (Brick 28).
+   * Extracts visible text and a bounded inventory of visible elements without interaction.
+   *
+   * Strict invariants:
+   * - Requires browser to be already running (no auto-launch).
+   * - Reconciles lifecycle state if the page or browser was manually closed.
+   * - Read-only: zero clicking, typing, scrolling, form submitting, reloading, or navigating.
+   * - Input privacy: zero field values returned (passwords, text, email, tokens omitted).
+   * - Untrusted data: extracted content treated strictly as passive text, zero AI calls.
+   *
+   * @param {Object} [options={}]
+   * @param {number} [options.maxTextChars]
+   * @param {number} [options.maxElements]
+   * @param {number} [options.maxElementTextChars]
+   * @param {Function} [options.evaluator]
+   * @returns {Promise<{
+   *   success: boolean,
+   *   state: string,
+   *   url: string,
+   *   title: string,
+   *   visibleText: string,
+   *   textTruncated: boolean,
+   *   elements: Array<Object>,
+   *   returnedElementCount: number,
+   *   totalEligibleElementCount: number,
+   *   elementsTruncated: boolean,
+   *   inspectionDurationMs: number
+   * }>}
+   */
+  /**
+   * Determines whether an inspection failure is a recognized transient error
+   * caused by document navigation, frame detachment, or execution context replacement.
+   *
+   * @param {Error|unknown} err
+   * @returns {boolean}
+   * @private
+   */
+  _isTransientInspectionError(err) {
+    if (!err) return false;
+    const msg = typeof err.message === 'string' ? err.message : '';
+    const transientPatterns = [
+      /execution context was destroyed/i,
+      /cannot find context with specified id/i,
+      /frame was detached/i,
+      /execution context is not available in detached frame/i,
+      /document replaced/i,
+      /navigation occurred/i
+    ];
+    return transientPatterns.some((pattern) => pattern.test(msg));
+  }
+
+  /**
+   * Observes and inspects the currently loaded managed page (Brick 28).
+   * Extracts visible text and a bounded inventory of visible elements without interaction.
+   *
+   * Strict invariants:
+   * - Requires browser to be already running (no auto-launch).
+   * - Reconciles lifecycle state if the page or browser was manually closed.
+   * - Read-only: zero clicking, typing, scrolling, form submitting, reloading, or navigating.
+   * - Input privacy: zero field values returned (passwords, text, email, tokens omitted).
+   * - Untrusted data: extracted content treated strictly as passive text, zero AI calls.
+   * - Bounded transient recovery: retries at most once if execution context was replaced during navigation.
+   * - Sanitized error messages: raw Playwright internals are never exposed to API or UI.
+   *
+   * @param {Object} [options={}]
+   * @param {number} [options.maxTextChars]
+   * @param {number} [options.maxElements]
+   * @param {number} [options.maxElementTextChars]
+   * @param {Function} [options.evaluator]
+   * @param {Function} [options.waitForStability]
+   * @param {number} [options.stabilityTimeoutMs]
+   * @returns {Promise<{
+   *   success: boolean,
+   *   state: string,
+   *   url: string,
+   *   title: string,
+   *   visibleText: string,
+   *   textTruncated: boolean,
+   *   elements: Array<Object>,
+   *   returnedElementCount: number,
+   *   totalEligibleElementCount: number,
+   *   elementsTruncated: boolean,
+   *   inspectionDurationMs: number
+   * }>}
+   */
+  async inspectPage(options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError(
+        'Browser is not running. Please launch the browser first.',
+        'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    const maxTextChars = Math.max(1, Number(options.maxTextChars ?? config.browser?.inspectionMaxTextChars ?? 12000)) || 12000;
+    const maxElements = Math.max(1, Number(options.maxElements ?? config.browser?.inspectionMaxElements ?? 100)) || 100;
+    const maxElementTextChars = Math.max(1, Number(options.maxElementTextChars ?? config.browser?.inspectionMaxElementTextChars ?? 300)) || 300;
+
+    const startTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      ? performance.now()
+      : Date.now();
+
+    let snapshot;
+    let lastError = null;
+    const maxAttempts = 2;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        if (typeof options.evaluator === 'function') {
+          snapshot = await options.evaluator(this._page, {
+            maxTextChars,
+            maxElements,
+            maxElementTextChars,
+            attempt
+          });
+        } else if (this._page && typeof this._page.evaluate === 'function') {
+          snapshot = await this._page.evaluate(extractDomSnapshot, {
+            maxTextChars,
+            maxElements,
+            maxElementTextChars
+          });
+        } else {
+          throw new Error('Page evaluate method not available');
+        }
+
+        // Inspection succeeded on this attempt!
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+
+        // Reconcile lifecycle immediately in case page/browser was closed
+        this._reconcileLifecycle();
+        if (!this.isSessionActive()) {
+          throw new BrowserManagerError(
+            'Browser is not running. Please launch the browser first.',
+            'BROWSER_NOT_RUNNING'
+          );
+        }
+
+        if (err instanceof BrowserManagerError) {
+          throw err;
+        }
+
+        const isTransient = this._isTransientInspectionError(err);
+        if (!isTransient || attempt >= maxAttempts) {
+          break;
+        }
+
+        // Bounded wait for page lifecycle/stability before exactly one retry
+        if (typeof options.waitForStability === 'function') {
+          await options.waitForStability(this._page).catch(() => {});
+        } else if (this._page && typeof this._page.waitForLoadState === 'function') {
+          const waitTimeout = Math.min(5000, Math.max(100, Number(options.stabilityTimeoutMs ?? 2000) || 2000));
+          await this._page.waitForLoadState('domcontentloaded', { timeout: waitTimeout }).catch(() => {});
+        }
+
+        // Reconcile lifecycle after wait in case page was closed during the wait
+        this._reconcileLifecycle();
+        if (!this.isSessionActive()) {
+          throw new BrowserManagerError(
+            'Browser is not running. Please launch the browser first.',
+            'BROWSER_NOT_RUNNING'
+          );
+        }
+      }
+    }
+
+    if (lastError) {
+      this._reconcileLifecycle();
+      if (!this.isSessionActive()) {
+        throw new BrowserManagerError(
+          'Browser is not running. Please launch the browser first.',
+          'BROWSER_NOT_RUNNING'
+        );
+      }
+      if (lastError instanceof BrowserManagerError) {
+        throw lastError;
+      }
+      if (this._isTransientInspectionError(lastError)) {
+        throw new BrowserManagerError(
+          'The page is still changing or loading. Try inspection again shortly.',
+          'BROWSER_PAGE_BUSY'
+        );
+      }
+      throw new BrowserManagerError(
+        'Page inspection could not be completed.',
+        'BROWSER_INSPECTION_FAILED'
+      );
+    }
+
+    const endTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      ? performance.now()
+      : Date.now();
+    const inspectionDurationMs = Math.max(0.001, Number((endTime - startTime).toFixed(3)));
+
+    let currentUrl = 'about:blank';
+    let currentTitle = '';
+
+    try {
+      if (this._page) {
+        if (typeof this._page.url === 'function') {
+          currentUrl = this._page.url();
+        }
+        if (typeof this._page.title === 'function') {
+          currentTitle = (await this._page.title()) || '';
+        }
+      }
+    } catch {
+      this._reconcileLifecycle();
+      if (!this.isSessionActive()) {
+        throw new BrowserManagerError(
+          'Browser is not running. Please launch the browser first.',
+          'BROWSER_NOT_RUNNING'
+        );
+      }
+    }
+
+    return {
+      success: true,
+      state: this._state,
+      url: currentUrl,
+      title: currentTitle,
+      visibleText: snapshot?.visibleText ?? '',
+      textTruncated: Boolean(snapshot?.textTruncated),
+      elements: Array.isArray(snapshot?.elements) ? snapshot.elements : [],
+      returnedElementCount: Number(snapshot?.returnedElementCount ?? snapshot?.elements?.length ?? 0),
+      totalEligibleElementCount: Number(snapshot?.totalEligibleElementCount ?? snapshot?.elements?.length ?? 0),
+      elementsTruncated: Boolean(snapshot?.elementsTruncated),
+      inspectionDurationMs
     };
   }
 

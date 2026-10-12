@@ -582,6 +582,48 @@
   - No element clicking, typing, DOM understanding, authentication, or automatic execution implemented.
   - Automated verification suite remains 100% mocked and offline (835 tests passing across 65 suites).
 
+## ADR-0036: Page Understanding v1 — Visible Page and Element Inventory (Brick 28)
+- **Status**: Accepted (BRICK-028 VERIFIED)
+- **Context**:
+  - GREEN-026 gave JARVIS the Playwright browser lifecycle; GREEN-027 gave JARVIS deterministic, safe browser navigation and history traversal.
+  - JARVIS now needs to answer "what is currently on this page?" in a bounded, strictly read-only observational manner.
+  - Interaction, selector generation, element targeting, and AI reasoning are explicitly prohibited in this brick and belong to future bricks (BRICK-029).
+- **Decision**:
+  1. **Read-Only Observational Contract**: Inspection strictly observes the loaded page; zero calls to `click`, `type`, `fill`, `press`, `submit`, `scroll`, `hover`, `focus`, `goto`, `goBack`, `goForward`, or `reload`. Zero user-supplied JavaScript execution. Zero cookie/storage modification.
+  2. **Main Document Scope**: Operates only on the main document of the existing single managed page (`this._page`). No cross-origin iframe traversal, no iframe orchestration, and no shadow DOM traversal.
+  3. **Page Metadata Extraction**: Returns actual `page.url()` and `page.title()` without inventing values.
+  4. **Visible Text Extraction & Normalization**: Extracts user-visible rendered page text semantics. Excludes `<script>`, `<style>`, `<template>`, `<noscript>`, `<svg>`, `<canvas>`, `<textarea>`, `display:none`, `visibility:hidden`, `hidden` attribute, and zero-size elements. Normalizes whitespace conservatively.
+  5. **Deterministic Text Limit**: Bounded by `BROWSER_INSPECTION_MAX_TEXT_CHARS` (default: 12000). Text exceeding limit is truncated deterministically with `textTruncated: true`.
+  6. **Structured Visible Element Inventory**: Returns eligible visible elements in deterministic DOM tree order across supported categories: `heading`, `link`, `button`, `input`, `textarea`, `select`, `form`, exposing safe observational attributes (`tag`, `role`, `text`, `ariaLabel`, `placeholder`, `inputType`, `href`, `disabled`, `required`, `checked`, `selectedText`, `method`, `action`, `fieldCount`).
+  7. **Element Limit & Text Limit**: Bounded by `BROWSER_INSPECTION_MAX_ELEMENTS` (default: 100) and `BROWSER_INSPECTION_MAX_ELEMENT_TEXT_CHARS` (default: 300). Exposes `returnedElementCount`, `totalEligibleElementCount`, and `elementsTruncated`.
+  8. **Strict Privacy**: Input, textarea, and password values are NEVER extracted or returned (`value` omitted). Password fields are identified by `inputType: "password"` with zero value extraction. Hidden inputs and CSRF tokens are completely excluded. Forms expose structural metadata only (`method`, `action`, `fieldCount`).
+  9. **No Actionable Selectors**: Zero CSS selectors, XPath expressions, Playwright locators, handles, or backend node IDs exposed or generated. Reliable element targeting belongs to Brick 29.
+  10. **Untrusted Data & Zero AI**: Extracted page text is treated strictly as passive observational data; zero interpretation, zero OpenRouter/LLM calls, zero web search calls.
+  11. **Point-in-Time Snapshot**: Inspection produces a point-in-time snapshot that may become stale if the page mutates. Continuous observation and MutationObserver are prohibited.
+  12. **Mandatory Running Browser Requirement**: Requires browser to be running; returns controlled `BROWSER_NOT_RUNNING` error if stopped without auto-launching. Reconciles manual page close to stopped.
+  13. **Bounded Transient Recovery & Error Sanitization (Live Fix)**:
+      - Live verification proved successful on example.com, wikipedia.org, and selenium web-form.
+      - An unstable external navigation test against httpbin.org timed out (503 Service Temporarily Unavailable, not a navigation defect).
+      - Immediate subsequent inspection exposed a raw Playwright error: `page.evaluate: Execution context was destroyed, most likely because of a navigation`.
+      - Fix implemented: inspection recognizes transient execution-context replacement and performs bounded recovery (waits for `domcontentloaded` stability and retries at most once, max 2 total attempts).
+      - Persistent transient instability produces controlled `BROWSER_PAGE_BUSY` (HTTP 503) with safe message: "The page is still changing or loading. Try inspection again shortly."
+      - Generic failures return sanitized `BROWSER_INSPECTION_FAILED` (HTTP 500) with safe message: "Page inspection could not be completed."
+      - Raw Playwright internal error strings, internal JavaScript filenames, Windows paths, and stack traces are strictly prohibited from reaching API or UI.
+  14. **New Endpoint**: `GET /api/browser/inspect-page` with strict HTTP method checking (405 for non-GET).
+  15. **Safe UI Rendering**: Dedicated "Page Understanding" section in `src/web/index.html` with "Inspect Page" button, rendering text strictly via `.textContent` (zero `.innerHTML`).
+  16. **100% Mocked Offline Tests**: Test suite executes completely offline during `npm run verify` using mock browser environments (902 tests passing across 79 suites).
+- **Live Verification**:
+  - **Live Test A (Basic Page Inspection)**: PASS. URL `https://example.com/`, Title "Example Domain", visible text extracted, visible link detected and href returned observationally; zero navigation or interaction caused.
+  - **Live Test B (Complex Page Inspection)**: PASS. URL `https://www.wikipedia.org/`, Title "Wikipedia", 2007 visible chars, 35 returned elements (headings, links, form, search input, select); input values omitted.
+  - **Live Test C (Real Web Form Inspection)**: PASS. URL `https://selenium.dev/selenium/web/web-form.html`, HTTP 200, Title "Web form", 276 visible chars, 19 returned elements (heading, form, text input, password input, textarea, disabled input, link, select, file input, checkboxes, radios, button, color, date, range). Form metadata (`method="GET"`, `action="submitted-form.html"`, `fieldCount=16`), password metadata (`type="password"`, `name="my-password"`, `label="Password"`), button (`Submit`), and option text (`One`) correctly observed.
+  - **Live Privacy Verification**: PASS. Text input values, password values, textarea user entries, file paths, hidden CSRF tokens, cookies, and storage strictly omitted across all live tests.
+  - **Live Fix Test A (Failed/503 Navigation Inspection)**: PASS. External navigation to `https://httpbin.org/forms/post` returned HTTP 503; inspection succeeded on the error document (heading/text "503 Service Temporarily Unavailable"), browser remained usable, and raw Playwright errors were completely eliminated.
+  - **Live Fix Test B (Web Form Regression After Fix)**: PASS. Re-navigation to Selenium web form returned identical 19/19 element inventory, 276 chars, full privacy, and fast inspection duration (37.577 ms).
+- **Consequences**:
+  - JARVIS can now observe and inspect loaded pages safely and deterministically without side effects or privacy leaks.
+  - Transient document replacement after unstable navigations is recovered safely without crashing or exposing raw browser internals.
+  - No element targeting, clicking, typing, or auto-decision connections implemented; Brick 29 not started.
+
 
 
 

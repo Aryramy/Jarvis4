@@ -71,7 +71,10 @@ export function loadConfig(overrides = {}) {
       ? overrides.BROWSER_HEADLESS
       : (overrides.BROWSER_HEADLESS ?? process.env.BROWSER_HEADLESS ?? 'false').toString().trim().toLowerCase() === 'true',
     launchTimeoutMs: Math.max(1, Number(overrides.BROWSER_LAUNCH_TIMEOUT_MS ?? process.env.BROWSER_LAUNCH_TIMEOUT_MS ?? 15000)) || 15000,
-    navigationTimeoutMs: Math.max(1, Number(overrides.BROWSER_NAVIGATION_TIMEOUT_MS ?? process.env.BROWSER_NAVIGATION_TIMEOUT_MS ?? 15000)) || 15000
+    navigationTimeoutMs: Math.max(1, Number(overrides.BROWSER_NAVIGATION_TIMEOUT_MS ?? process.env.BROWSER_NAVIGATION_TIMEOUT_MS ?? 15000)) || 15000,
+    inspectionMaxTextChars: Math.max(1, Number(overrides.BROWSER_INSPECTION_MAX_TEXT_CHARS ?? process.env.BROWSER_INSPECTION_MAX_TEXT_CHARS ?? 12000)) || 12000,
+    inspectionMaxElements: Math.max(1, Number(overrides.BROWSER_INSPECTION_MAX_ELEMENTS ?? process.env.BROWSER_INSPECTION_MAX_ELEMENTS ?? 100)) || 100,
+    inspectionMaxElementTextChars: Math.max(1, Number(overrides.BROWSER_INSPECTION_MAX_ELEMENT_TEXT_CHARS ?? process.env.BROWSER_INSPECTION_MAX_ELEMENT_TEXT_CHARS ?? 300)) || 300
   });
 
   return Object.freeze({

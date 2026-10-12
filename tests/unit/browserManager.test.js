@@ -65,6 +65,43 @@ function createMockBrowserEnvironment(options = {}) {
         status: () => 200
       };
     },
+    clickCalls: [],
+    click: async (...args) => {
+      page.clickCalls.push(args);
+    },
+    typeCalls: [],
+    type: async (...args) => {
+      page.typeCalls.push(args);
+    },
+    fillCalls: [],
+    fill: async (...args) => {
+      page.fillCalls.push(args);
+    },
+    waitForLoadStateCalls: [],
+    waitForLoadState: async (state, opts) => {
+      page.waitForLoadStateCalls.push({ state, opts });
+      if (options.waitForLoadStateHandler) {
+        return await options.waitForLoadStateHandler(state, opts, page);
+      }
+    },
+    evaluateCalls: [],
+    evaluate: async (fn, args) => {
+      page.evaluateCalls.push({ fn, args });
+      if (options.evaluateHandler) {
+        return await options.evaluateHandler(fn, args, page);
+      }
+      return {
+        visibleText: options.mockVisibleText ?? 'Example Domain text content.',
+        textTruncated: false,
+        elements: options.mockElements ?? [
+          { kind: 'heading', tag: 'h1', text: 'Example Domain' },
+          { kind: 'link', tag: 'a', text: 'More information...', href: 'https://example.com' }
+        ],
+        returnedElementCount: 2,
+        totalEligibleElementCount: 2,
+        elementsTruncated: false
+      };
+    },
     title: async () => currentTitle,
     setTitle: (t) => { currentTitle = t; },
     url: () => currentUrl,
@@ -1488,6 +1525,366 @@ describe('Playwright Browser Lifecycle Foundation (Brick 26)', () => {
       const bmCode = fs.readFileSync(new URL('../../src/browser/browserManager.js', import.meta.url), 'utf8');
       assert.equal(bmCode.includes('taskkill'), false);
       assert.equal(bmCode.includes('process.kill'), false);
+    });
+  });
+
+  describe('Brick 28 Page Inspection v1 Tests', () => {
+    test('1. inspection requires running browser', async () => {
+      const manager = new BrowserManager();
+      assert.equal(manager.state, BROWSER_STATES.STOPPED);
+      await assert.rejects(
+        async () => manager.inspectPage(),
+        (err) => {
+          assert.equal(err.code, 'BROWSER_NOT_RUNNING');
+          assert.ok(err.message.includes('not running'));
+          return true;
+        }
+      );
+    });
+
+    test('2-5. inspectPage returns url, title, visible text, and inspection duration', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      mockEnv.page.setUrl('https://example.com/');
+      mockEnv.page.setTitle('Example Domain');
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const res = await manager.inspectPage();
+      assert.equal(res.success, true);
+      assert.equal(res.state, 'running');
+      assert.equal(res.url, 'https://example.com/');
+      assert.equal(res.title, 'Example Domain');
+      assert.equal(res.visibleText, 'Example Domain text content.');
+      assert.equal(res.textTruncated, false);
+      assert.equal(res.returnedElementCount, 2);
+      assert.equal(res.elements.length, 2);
+      assert.equal(res.elementsTruncated, false);
+      assert.ok(typeof res.inspectionDurationMs === 'number');
+      assert.ok(res.inspectionDurationMs >= 0);
+    });
+
+    test('6-9. inspection does not navigate, click, type, or reload', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await manager.inspectPage();
+      assert.equal(mockEnv.page.gotoCalls.length, 0, 'inspection must not call page.goto');
+      assert.equal(mockEnv.page.clickCalls.length, 0, 'inspection must not click');
+      assert.equal(mockEnv.page.typeCalls.length, 0, 'inspection must not type');
+      assert.equal(mockEnv.page.fillCalls.length, 0, 'inspection must not fill');
+      assert.equal(mockEnv.page.reloadCalls.length, 0, 'inspection must not reload');
+    });
+
+    test('59-60. manually closed page reconciles to stopped and rejects inspectPage', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      mockEnv.page.simulateClose();
+      assert.equal(manager.state, BROWSER_STATES.STOPPED);
+
+      await assert.rejects(
+        async () => manager.inspectPage(),
+        (err) => {
+          assert.equal(err.code, 'BROWSER_NOT_RUNNING');
+          return true;
+        }
+      );
+    });
+
+    test('61. controlled close still works after inspectPage', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await manager.inspectPage();
+      const closeRes = await manager.close();
+      assert.equal(closeRes.success, true);
+      assert.equal(closeRes.state, 'stopped');
+      assert.equal(manager.state, BROWSER_STATES.STOPPED);
+    });
+
+    test('62. fresh relaunch still works after inspectPage and close', async () => {
+      let count = 0;
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({
+        launcher: async () => {
+          count++;
+          return mockEnv.browser;
+        }
+      });
+      await manager.launch();
+      await manager.inspectPage();
+      await manager.close();
+
+      const relaunch = await manager.launch();
+      assert.equal(relaunch.success, true);
+      assert.equal(count, 2);
+      assert.equal(manager.state, BROWSER_STATES.RUNNING);
+    });
+
+    test('63. duplicate launch protection remains after inspection', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+      await manager.inspectPage();
+
+      const dup = await manager.launch();
+      assert.equal(dup.alreadyRunning, true);
+    });
+
+    test('64. navigation from GREEN-027 still works alongside inspection', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({
+        launcher: async () => mockEnv.browser,
+        dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+      });
+      await manager.launch();
+
+      const navRes = await manager.navigate('https://example.com/');
+      assert.equal(navRes.success, true);
+      assert.equal(navRes.finalUrl, 'https://example.com/');
+
+      const inspectRes = await manager.inspectPage();
+      assert.equal(inspectRes.success, true);
+      assert.equal(inspectRes.url, 'https://example.com/');
+    });
+
+    test('controlled error handling when evaluation throws', async () => {
+      const mockEnv = createMockBrowserEnvironment({
+        evaluateHandler: async () => {
+          throw new Error('Evaluation internal failure at C:\\Users\\secret\\path.js');
+        }
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await assert.rejects(
+        async () => manager.inspectPage(),
+        (err) => {
+          assert.equal(err.code, 'BROWSER_INSPECTION_FAILED');
+          assert.equal(err.message, 'Page inspection could not be completed.');
+          assert.ok(!err.message.includes('C:\\Users'));
+          assert.ok(!err.message.includes('secret'));
+          return true;
+        }
+      );
+    });
+  });
+
+  describe('Inspection Transient Error Recovery & Error Sanitization (Live Fix)', () => {
+    test('1-2. normal successful inspection performs exactly one attempt and does not enter recovery', async () => {
+      const mockEnv = createMockBrowserEnvironment();
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const result = await manager.inspectPage();
+      assert.equal(result.success, true);
+      assert.equal(mockEnv.page.evaluateCalls.length, 1, 'exactly 1 evaluate attempt performed');
+      assert.equal(mockEnv.page.waitForLoadStateCalls.length, 0, 'did not enter recovery path');
+    });
+
+    test('3-6, 17-23. recognized transient condition triggers bounded recovery and successful retry returns normal inspection without navigation/interaction', async () => {
+      let attempts = 0;
+      const mockEnv = createMockBrowserEnvironment({
+        evaluateHandler: async () => {
+          attempts++;
+          if (attempts === 1) {
+            throw new Error('page.evaluate: Execution context was destroyed, most likely because of a navigation');
+          }
+          return {
+            visibleText: 'Recovered page text',
+            textTruncated: false,
+            elements: [{ kind: 'heading', tag: 'h1', text: 'Recovered' }],
+            returnedElementCount: 1,
+            totalEligibleElementCount: 1,
+            elementsTruncated: false
+          };
+        }
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      const result = await manager.inspectPage();
+      assert.equal(result.success, true);
+      assert.equal(result.visibleText, 'Recovered page text');
+      assert.equal(attempts, 2, 'retried exactly once');
+      assert.equal(mockEnv.page.waitForLoadStateCalls.length, 1, 'waited for domcontentloaded');
+      assert.equal(mockEnv.page.waitForLoadStateCalls[0].state, 'domcontentloaded');
+
+      // 17-23. Zero navigation or interaction during recovery
+      assert.equal(mockEnv.page.gotoCalls.length, 0, 'recovery must not call page.goto');
+      assert.equal(mockEnv.page.reloadCalls.length, 0, 'recovery must not call page.reload');
+      assert.equal(mockEnv.page.goBackCalls.length, 0, 'recovery must not call goBack');
+      assert.equal(mockEnv.page.goForwardCalls.length, 0, 'recovery must not call goForward');
+      assert.equal(mockEnv.page.clickCalls.length, 0, 'recovery must not click');
+      assert.equal(mockEnv.page.typeCalls.length, 0, 'recovery must not type');
+      assert.equal(mockEnv.page.fillCalls.length, 0, 'recovery must not fill');
+    });
+
+    test('7-12. persistent transient failure stops at max 2 total attempts and returns controlled BROWSER_PAGE_BUSY with zero raw error leakage', async () => {
+      let attempts = 0;
+      const mockEnv = createMockBrowserEnvironment({
+        evaluateHandler: async () => {
+          attempts++;
+          throw new Error('page.evaluate: Execution context was destroyed, most likely because of a navigation at InternalRuntime.js:42\n    at eval (file:///C:/path/internal.js:10:5)');
+        }
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await assert.rejects(
+        async () => manager.inspectPage(),
+        (err) => {
+          assert.equal(err.code, 'BROWSER_PAGE_BUSY');
+          assert.equal(err.message, 'The page is still changing or loading. Try inspection again shortly.');
+          // 9-12. Sanity checks: raw text, Playwright internals, paths, stack traces must NOT appear
+          assert.ok(!err.message.includes('page.evaluate'), '9. raw page.evaluate must not be returned');
+          assert.ok(!err.message.includes('Execution context was destroyed'), '10. raw Execution context was destroyed must not be returned');
+          assert.ok(!err.message.includes('InternalRuntime'), '11. raw Playwright error string must not be exposed');
+          assert.ok(!err.message.includes('at eval'), '12. stack trace must not be exposed');
+          assert.ok(!err.message.includes('C:/path'), 'Windows path must not be exposed');
+          return true;
+        }
+      );
+
+      // 7. Maximum retry count is exactly 1 additional attempt (2 total attempts)
+      assert.equal(attempts, 2, 'max total attempts must be exactly 2');
+    });
+
+    test('13-14. unknown/generic Playwright error is NOT retried and returns sanitized BROWSER_INSPECTION_FAILED', async () => {
+      let attempts = 0;
+      const mockEnv = createMockBrowserEnvironment({
+        evaluateHandler: async () => {
+          attempts++;
+          throw new Error('Internal V8 TypeError: cannot read properties of null at C:\\Playwright\\core.js');
+        }
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await assert.rejects(
+        async () => manager.inspectPage(),
+        (err) => {
+          assert.equal(err.code, 'BROWSER_INSPECTION_FAILED');
+          assert.equal(err.message, 'Page inspection could not be completed.');
+          assert.ok(!err.message.includes('TypeError'));
+          assert.ok(!err.message.includes('Playwright'));
+          assert.ok(!err.message.includes('C:\\Playwright'));
+          return true;
+        }
+      );
+
+      assert.equal(attempts, 1, 'non-transient error must not be retried');
+      assert.equal(mockEnv.page.waitForLoadStateCalls.length, 0, 'must not wait for stability on non-transient error');
+    });
+
+    test('15. closed page during recovery uses lifecycle reconciliation and throws BROWSER_NOT_RUNNING', async () => {
+      let attempts = 0;
+      const mockEnv = createMockBrowserEnvironment({
+        evaluateHandler: async () => {
+          attempts++;
+          throw new Error('page.evaluate: Execution context was destroyed, most likely because of a navigation');
+        },
+        waitForLoadStateHandler: async (state, opts, page) => {
+          // Page closes while waiting for stability
+          page.simulateClose();
+        }
+      });
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await assert.rejects(
+        async () => manager.inspectPage(),
+        (err) => {
+          assert.equal(err.code, 'BROWSER_NOT_RUNNING');
+          assert.equal(manager.state, BROWSER_STATES.STOPPED);
+          return true;
+        }
+      );
+
+      assert.equal(attempts, 1, 'must not retry once page is closed');
+    });
+
+    test('16. browser disconnect during recovery uses lifecycle reconciliation', async () => {
+      let attempts = 0;
+      let connected = true;
+      const mockEnv = createMockBrowserEnvironment({
+        evaluateHandler: async () => {
+          attempts++;
+          throw new Error('page.evaluate: Execution context was destroyed, most likely because of a navigation');
+        },
+        waitForLoadStateHandler: async () => {
+          // Browser disconnects while waiting
+          connected = false;
+        }
+      });
+      mockEnv.browser.isConnected = () => connected;
+
+      const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+      await manager.launch();
+
+      await assert.rejects(
+        async () => manager.inspectPage(),
+        (err) => {
+          assert.equal(err.code, 'BROWSER_NOT_RUNNING');
+          assert.equal(manager.state, BROWSER_STATES.STOPPED);
+          return true;
+        }
+      );
+
+      assert.equal(attempts, 1, 'must not retry once browser disconnected');
+    });
+
+    test('24-26. recovery does not create another page, context, or auto-launch browser', async () => {
+      let pageCreations = 0;
+      let contextCreations = 0;
+      let launches = 0;
+      const mockEnv = createMockBrowserEnvironment({
+        evaluateHandler: async () => {
+          throw new Error('page.evaluate: Execution context was destroyed, most likely because of a navigation');
+        }
+      });
+      const origNewPage = mockEnv.context.newPage;
+      mockEnv.context.newPage = async () => {
+        pageCreations++;
+        return await origNewPage();
+      };
+      const origNewContext = mockEnv.browser.newContext;
+      mockEnv.browser.newContext = async () => {
+        contextCreations++;
+        return await origNewContext();
+      };
+
+      const manager = new BrowserManager({
+        launcher: async () => {
+          launches++;
+          return mockEnv.browser;
+        }
+      });
+      await manager.launch();
+      assert.equal(launches, 1);
+      assert.equal(pageCreations, 1);
+      assert.equal(contextCreations, 1);
+
+      await assert.rejects(
+        async () => manager.inspectPage(),
+        (err) => err.code === 'BROWSER_PAGE_BUSY'
+      );
+
+      // Verify no extra pages, contexts, or launches
+      assert.equal(launches, 1, 'no extra launches during recovery');
+      assert.equal(pageCreations, 1, '24. recovery does not create another page');
+      assert.equal(contextCreations, 1, '25. recovery does not create another context');
+
+      // 26. When stopped, inspectPage must NOT auto-launch
+      await manager.close();
+      await assert.rejects(
+        async () => manager.inspectPage(),
+        (err) => err.code === 'BROWSER_NOT_RUNNING'
+      );
+      assert.equal(launches, 1, '26. recovery does not auto-launch browser');
     });
   });
 });

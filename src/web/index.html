@@ -289,6 +289,20 @@
       <div id="browser-nav-status" class="mic-status">Navigation: Idle</div>
       <div id="browser-nav-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
     </div>
+
+    <!-- Brick 28 Page Understanding Section (Inspect Page) -->
+    <div id="browser-inspect-section" class="mic-section">
+      <div style="font-size: 0.95rem; font-weight: 600; color: #38bdf8; text-align: left; margin-bottom: 4px;">Page Understanding</div>
+      <div class="button-group" style="margin-bottom: 8px;">
+        <button type="button" id="browser-inspect-btn">Inspect Page</button>
+      </div>
+      <div id="browser-inspect-status" class="mic-status">Inspection: Idle</div>
+      <div id="browser-inspect-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
+      <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; display: none;" id="browser-inspect-text-label">Visible Text:</div>
+      <div id="browser-inspect-text" class="response-area" style="display: none; max-height: 200px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
+      <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; display: none;" id="browser-inspect-elements-label">Elements Inventory:</div>
+      <div id="browser-inspect-elements" class="response-area" style="display: none; max-height: 260px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
+    </div>
   </div>
 
   <script type="module">
@@ -1944,6 +1958,99 @@
           renderNavigationError({ code: 'BROWSER_NAVIGATION_FAILED', message: err.message || 'Network request failed' });
         } finally {
           setBrowserNavBusy(false);
+        }
+      });
+    }
+
+    // Brick 28 Page Understanding
+    const browserInspectBtn = document.getElementById('browser-inspect-btn');
+    const browserInspectStatus = document.getElementById('browser-inspect-status');
+    const browserInspectMeta = document.getElementById('browser-inspect-meta');
+    const browserInspectTextLabel = document.getElementById('browser-inspect-text-label');
+    const browserInspectText = document.getElementById('browser-inspect-text');
+    const browserInspectElementsLabel = document.getElementById('browser-inspect-elements-label');
+    const browserInspectElements = document.getElementById('browser-inspect-elements');
+
+    if (browserInspectBtn) {
+      browserInspectBtn.addEventListener('click', async () => {
+        browserInspectBtn.disabled = true;
+        if (browserInspectStatus) browserInspectStatus.textContent = 'Inspection: Inspecting...';
+        if (browserInspectMeta) browserInspectMeta.style.display = 'none';
+        if (browserInspectTextLabel) browserInspectTextLabel.style.display = 'none';
+        if (browserInspectText) browserInspectText.style.display = 'none';
+        if (browserInspectElementsLabel) browserInspectElementsLabel.style.display = 'none';
+        if (browserInspectElements) browserInspectElements.style.display = 'none';
+
+        try {
+          const res = await fetch('/api/browser/inspect-page');
+          const data = await res.json();
+          if (res.ok && data.success) {
+            if (browserInspectStatus) browserInspectStatus.textContent = `Inspection: Complete (${data.inspectionDurationMs} ms)`;
+            if (browserInspectMeta) {
+              browserInspectMeta.style.display = 'block';
+              browserInspectMeta.textContent = [
+                `URL: ${data.url || 'about:blank'}`,
+                `Title: ${data.title || '(No title)'}`,
+                `Visible Text Characters: ${(data.visibleText || '').length}`,
+                `Text Truncated: ${data.textTruncated ? 'Yes' : 'No'}`,
+                `Returned Elements: ${data.returnedElementCount}`,
+                `Total Eligible Elements: ${data.totalEligibleElementCount}`,
+                `Elements Truncated: ${data.elementsTruncated ? 'Yes' : 'No'}`,
+                `Inspection Duration: ${data.inspectionDurationMs} ms`
+              ].join('\n');
+            }
+
+            if (browserInspectTextLabel) browserInspectTextLabel.style.display = 'block';
+            if (browserInspectText) {
+              browserInspectText.style.display = 'block';
+              browserInspectText.textContent = data.visibleText || '(No visible text)';
+            }
+
+            if (browserInspectElementsLabel) browserInspectElementsLabel.style.display = 'block';
+            if (browserInspectElements) {
+              browserInspectElements.style.display = 'block';
+              if (!data.elements || data.elements.length === 0) {
+                browserInspectElements.textContent = '(No eligible elements found)';
+              } else {
+                const lines = data.elements.map((el, idx) => {
+                  let desc = `[${el.kind}] <${el.tag}>`;
+                  if (el.role) desc += ` role="${el.role}"`;
+                  if (el.inputType) desc += ` type="${el.inputType}"`;
+                  if (el.name) desc += ` name="${el.name}"`;
+                  if (el.label) desc += ` label="${el.label}"`;
+                  if (el.placeholder) desc += ` placeholder="${el.placeholder}"`;
+                  if (el.href) desc += ` href="${el.href}"`;
+                  if (el.method) desc += ` method="${el.method}"`;
+                  if (el.action) desc += ` action="${el.action}"`;
+                  if (el.fieldCount !== undefined) desc += ` fieldCount=${el.fieldCount}`;
+                  if (el.selectedText) desc += ` selected="${el.selectedText}"`;
+                  if (el.disabled) desc += ` [disabled]`;
+                  if (el.required) desc += ` [required]`;
+                  if (el.checked !== undefined) desc += ` checked=${el.checked}`;
+                  if (el.text) desc += ` : "${el.text}"`;
+                  return `${idx + 1}. ${desc}`;
+                });
+                browserInspectElements.textContent = lines.join('\n');
+              }
+            }
+          } else {
+            if (browserInspectStatus) browserInspectStatus.textContent = 'Inspection: Error';
+            if (browserInspectMeta) {
+              browserInspectMeta.style.display = 'block';
+              browserInspectMeta.textContent = [
+                `Error Code: ${data.code || data.error || 'BROWSER_INSPECTION_FAILED'}`,
+                `Message: ${data.message || 'Page inspection failed'}`
+              ].join('\n');
+            }
+          }
+        } catch (err) {
+          if (browserInspectStatus) browserInspectStatus.textContent = 'Inspection: Error';
+          if (browserInspectMeta) {
+            browserInspectMeta.style.display = 'block';
+            browserInspectMeta.textContent = `Error Code: BROWSER_INSPECTION_FAILED\nMessage: ${err.message || 'Network request failed'}`;
+          }
+        } finally {
+          browserInspectBtn.disabled = false;
         }
       });
     }

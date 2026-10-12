@@ -57,6 +57,7 @@ const REQUIRED_FILES = [
   'src/routing/browserEscalation.js',
   'src/browser/playwrightBrowser.js',
   'src/browser/browserManager.js',
+  'src/browser/pageInspection.js',
   'src/webpage/urlSafety.js',
   'src/webpage/htmlExtractor.js',
   'src/webpage/pageReader.js',
@@ -83,6 +84,7 @@ const REQUIRED_FILES = [
   'tests/unit/researchOne.test.js',
   'tests/unit/browserEscalation.test.js',
   'tests/unit/browserManager.test.js',
+  'tests/unit/pageInspection.test.js',
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
   'tests/unit/voiceTurn.test.js',
@@ -105,6 +107,7 @@ const REQUIRED_FILES = [
   'tests/integration/researchOneEndpoint.test.js',
   'tests/integration/browserDecisionEndpoint.test.js',
   'tests/integration/browserLifecycleEndpoints.test.js',
+  'tests/integration/browserInspectEndpoint.test.js',
   'tests/fixtures/html/article.html',
   'tests/fixtures/html/noisy.html',
   'tests/fixtures/html/unicode.html',
@@ -435,6 +438,17 @@ check('Browser Lifecycle Module Sanity Check', async () => {
   const closeResult = await mockManager.close();
   if (closeResult.state !== 'stopped') {
     throw new Error('BrowserManager mock close sanity check failed');
+  }
+});
+
+check('Browser Page Inspection Module Sanity Check', async () => {
+  const { extractDomSnapshot, cleanText, truncate, inspectHtmlString } = await import('../src/browser/pageInspection.js');
+  if (typeof extractDomSnapshot !== 'function' || typeof cleanText !== 'function' || typeof truncate !== 'function' || typeof inspectHtmlString !== 'function') {
+    throw new Error('pageInspection module failed to export required functions');
+  }
+  const snap = inspectHtmlString('<h1>Example Domain</h1><p>Hello World</p><a href="https://example.com">Link</a>');
+  if (snap.elements.length !== 2 || snap.elements[0].kind !== 'heading' || snap.elements[1].kind !== 'link') {
+    throw new Error('inspectHtmlString sanity check failed');
   }
 });
 
