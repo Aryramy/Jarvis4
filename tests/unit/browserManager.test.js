@@ -77,6 +77,36 @@ function createMockBrowserEnvironment(options = {}) {
     fill: async (...args) => {
       page.fillCalls.push(args);
     },
+    checkCalls: [],
+    check: async (...args) => {
+      page.checkCalls.push(args);
+    },
+    uncheckCalls: [],
+    uncheck: async (...args) => {
+      page.uncheckCalls.push(args);
+    },
+    selectOptionCalls: [],
+    selectOption: async (...args) => {
+      page.selectOptionCalls.push(args);
+    },
+    evaluateHandleCalls: [],
+    evaluateHandle: async (fn, args) => {
+      page.evaluateHandleCalls.push({ fn, args });
+      if (options.evaluateHandleHandler) {
+        return await options.evaluateHandleHandler(fn, args, page);
+      }
+      return {
+        asElement: () => page,
+        click: async (...a) => page.click(...a),
+        fill: async (...a) => page.fill(...a),
+        check: async (...a) => page.check(...a),
+        uncheck: async (...a) => page.uncheck(...a),
+        selectOption: async (...a) => page.selectOption(...a),
+        isDisabled: async () => false,
+        isVisible: async () => true,
+        dispose: async () => {}
+      };
+    },
     waitForLoadStateCalls: [],
     waitForLoadState: async (state, opts) => {
       page.waitForLoadStateCalls.push({ state, opts });

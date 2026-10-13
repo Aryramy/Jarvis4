@@ -1,11 +1,56 @@
 Project: JARVIS4
-Current Brick: 29
-Status: BRICK-029 VERIFIED
-Last Verified Brick: BRICK-029
-Current Feature: Reliable Element Targeting v1 (Semantic Target Resolution Without Interaction)
+Current Brick: 30
+Status: BRICK-030 VERIFIED
+Last Verified Brick: BRICK-030
+Current Feature: Basic Real Browser Interactions v1 (Safe Semantic Action Execution)
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
+
+- Basic Real Browser Interactions v1 (Brick 30) safe semantic action execution subsystem on top of managed page understanding and semantic target resolution (`executeAction` in `src/browser/browserManager.js`, `executeSemanticAction`, `ActionExecutionError` in `src/browser/actionExecutor.js`):
+  - Human live verification completed and verified across all real-page interaction tests:
+    - Live Test A (Fill text input): URL `https://www.selenium.dev/selenium/web/web-form.html`, target `{ kind: "input", name: "Text input" }`, value `"JARVIS BRICK30 TEST"`. Result: `valueMatchesRequested = true`; human visual verification confirmed text appeared in field; no navigation occurred; privacy preserved (value omitted from response).
+    - Live Test B (Checkbox check): Target `{ kind: "input", name: "Default checkbox" }`, action `check`. Before: unchecked. Result: `checked = true`; human visual verification confirmed checkbox visibly checked.
+    - Live Test C (Checkbox uncheck): Target `{ kind: "input", name: "Checked checkbox" }`, action `uncheck`. Before: checked. Result: `checked = false`; human visual verification confirmed checkbox visibly unchecked.
+    - Live Test D (Native select & semantic contamination fix): Initial live testing exposed that native select option text contaminated enclosing `<label>`/accessibleName strings, causing `Dropdown (select)` to resolve only with medium confidence. Root cause was diagnosed and fixed in `src/browser/pageInspection.js` (DOM node and Cheerio traversals now exclude nested select/options and controls from label text). After fix: Target `{ kind: "select", name: "Dropdown (select)" }` resolved uniquely with high confidence (`accessibleName: "Dropdown (select)"`, `label: "Dropdown (select)"`, initial `selectedText: "Open this select menu"`). Action `select` with option label `"Two"` verified cleanly (`verification: { selectedText: "Two" }`); human visual verification confirmed "Two" visibly selected in dropdown. High-confidence requirement strictly maintained without weakening to medium confidence.
+    - Live Test E (Safe same-tab click): Target `{ kind: "link", name: "Return to index" }`, action `click`. Result: `navigationOccurred = true`, pre snapshot `snap_v2_mv6dfq7w_2`, post snapshot `snap_v3_mv6do625_3`, `snapshotChanged = true`, destination `https://www.selenium.dev/selenium/web/index.html`, title "Index of Available Pages"; human visual verification confirmed destination page visibly displayed.
+    - Live Test F (Stale snapshot protection): Target `{ kind: "link", name: "Return to index" }` submitted with old web-form snapshot after navigation occurred. Result: controlled `TARGET_STALE`. No action or navigation performed; browser remained on current page.
+    - Live Test G (Password interaction block): Target `{ kind: "input", name: "Password" }`, action `fill`. Result: controlled `PASSWORD_INTERACTION_NOT_AUTHORIZED`. Password field remained empty; zero value exposure.
+    - Live Test H (File input interaction block): Target `{ kind: "input", name: "File input" }`, action `fill`. Result: controlled `FILE_INTERACTION_NOT_AUTHORIZED`. File picker did not open; control remained unchanged.
+    - Live Test I (Form submission block): Target `{ kind: "button", name: "Submit" }`, action `click`. Result: controlled `FORM_SUBMISSION_NOT_AUTHORIZED`. Browser remained on `web-form.html`; zero form submission occurred.
+    - Live Test J (Ambiguous target protection): Target `{ kind: "input", name: "my-check" }`, action `check`. Result: controlled `TARGET_AMBIGUOUS`. Neither checkbox changed state.
+    - Live Test K (Radio check): Target `{ kind: "input", name: "Default radio" }`, action `check`. Result: `checked = true`. Human visual verification confirmed radio visibly selected.
+    - Live Test L (Radio uncheck block): Target `{ kind: "input", name: "Default radio" }`, action `uncheck`. Result: controlled `ACTION_NOT_SUPPORTED_FOR_TARGET`. Radio remained selected.
+    - Live Test M (Disabled input protection): Target `{ kind: "input", name: "Disabled input" }`, action `fill`. Result: controlled `TARGET_DISABLED`. Field remained unchanged.
+    - Live Test N (Missing target protection): Target `{ kind: "button", name: "Definitely Does Not Exist" }`, action `click`. Result: controlled `TARGET_NOT_FOUND`. No action or visible state change.
+    - Live Test O (Medium-confidence interaction safety): Site `https://www.wikipedia.org/`, target `{ kind: "link", name: "English" }` (partial match against "English 7,249,000+ articles"), action `click`. Result: controlled `TARGET_CONFIDENCE_TOO_LOW`. Browser remained on `https://www.wikipedia.org/`; no navigation occurred; strict high-confidence rule preserved.
+  - First real browser interaction layer: safely executes bounded primitive actions on existing single managed Playwright page without creating secondary contexts, browsers, or pages.
+  - Supported actions: `click`, `fill`, `check`, `uncheck`, `select`.
+  - One action per request: strictly executes exactly ONE action per request. Requests with multiple actions, action arrays, or action sequences are rejected with `MULTI_ACTION_NOT_SUPPORTED`.
+  - Snapshot token required: caller must supply `expectedSnapshotToken` matching current page snapshot. Stale or mismatched tokens immediately return `TARGET_STALE` with zero interaction.
+  - Immediate semantic re-resolution: target is re-resolved against current document immediately before action execution. Prior candidate objects and targetId values are never trusted blindly.
+  - Action confidence policy: requires `confidence === 'high'`. Medium-confidence targets (e.g. partial matches) return `TARGET_CONFIDENCE_TOO_LOW` with zero interaction. No weakening to medium confidence.
+  - TargetId alone never authorizes action: targetId cannot authorize interactions without snapshot verification and current semantic resolution.
+  - Short-lived Playwright handles: zero persistent `ElementHandle` storage; handles are retrieved, validated, acted upon, and deterministically disposed in a `finally` block during that single request.
+  - Supported Action — Fill: supports text, search, email, tel, url, number, and textarea controls. Uses standard Playwright fill semantics.
+  - Fill Privacy: requested values are never logged, stored in conversation memory, returned in API results, or leaked in error messages. Returns `verification: { valueMatchesRequested: true }`.
+  - Sensitive Input Blocking: password inputs (`type="password"`) blocked with `PASSWORD_INTERACTION_NOT_AUTHORIZED`; file inputs (`type="file"`) blocked with `FILE_INTERACTION_NOT_AUTHORIZED`; hidden inputs / CSRF tokens blocked.
+  - Check / Uncheck: supports checkboxes and radios for check; uncheck supported for checkboxes only (radio uncheck returns `ACTION_NOT_SUPPORTED_FOR_TARGET`). Returns `verification: { checked: true/false }`.
+  - Select: supports native `<select>` controls by visible option label. Multi-select is blocked. Returns `verification: { selectedText }`.
+  - Click Safety Boundaries:
+    - Form submission blocked: `button type="submit"`, `input type="submit"`, `input type="image"`, default submit buttons inside forms, and buttons with submit text inside forms are blocked with `FORM_SUBMISSION_NOT_AUTHORIZED`.
+    - Form reset blocked: `button type="reset"` and `input type="reset"` blocked with `FORM_RESET_NOT_AUTHORIZED`.
+    - Download click blocked: links/controls triggering downloads blocked with `DOWNLOAD_NOT_AUTHORIZED`.
+    - Popups / new-tabs blocked: links opening popups or new tabs (`target="_blank"`) blocked with `POPUP_NOT_SUPPORTED`; transient popups safely released to maintain single managed page contract.
+    - Click navigation safety: click-induced navigations strictly enforce GREEN-027 URL safety (blocks private/loopback IPs, RFC1918, link-local, private IPv6, non-HTTP schemes `javascript:`, `file:`, `data:`, `ftp:`, `mailto:`, `tel:`, and HTTPS->HTTP downgrades).
+  - Post-Action Evidence: returns bounded evidence (`action`, `target`, `preSnapshotToken`, `postSnapshotToken`, `snapshotChanged`, `currentUrl`, `title`, `actionDurationMs`, `verification`). Never claims higher-level task success.
+  - Action timeout configuration: `actionTimeoutMs` configured via `BROWSER_ACTION_TIMEOUT_MS` (default 10,000 ms).
+  - Zero AI / LLM calls: makes 0 OpenRouter, 0 LLM, 0 Exa, 0 web search calls.
+  - Untrusted webpage data: page content treated as passive text; cannot alter action safety policies.
+  - Zero auto-chaining: UI and API execute exactly one primitive action and never auto-chain sequences or auto-submit forms.
+  - Decoupled from existing subsystems: `/api/auto`, `/api/browser-decision`, STT, TTS, and Voice Turn remain untouched.
+  - Production milestone notice: The browser subsystem is NOT yet production-ready. GREEN-045 remains the production-ready milestone.
+  - Brick 31 not started.
 
 - Reliable Element Targeting v1 (Brick 29) observational semantic targeting subsystem on top of managed page understanding (`resolveTarget` in `src/browser/browserManager.js`, `resolveTargetFromElements`, `normalizeTargetText`, `generateSnapshotToken`, `createSafeElementSummary` in `src/browser/targetResolver.js`):
   - Human live verification completed and verified across all real-page semantic targeting tests:

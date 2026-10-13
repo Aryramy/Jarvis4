@@ -24,6 +24,7 @@ import { executeResearchOne, ResearchOneError } from '../research/researchOne.js
 import { decideBrowserEscalation, BrowserEscalationError } from '../routing/browserEscalation.js';
 import { defaultBrowserManager, BrowserManager, BrowserManagerError } from '../browser/browserManager.js';
 import { TargetResolutionError, SUPPORTED_KINDS } from '../browser/targetResolver.js';
+import { ActionExecutionError } from '../browser/actionExecutor.js';
 
 const __dirname = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const HTML_FILE_PATH = join(__dirname, 'index.html');
@@ -1770,6 +1771,149 @@ export function createRequestListener(options = {}) {
             safeMessage = 'The page is still changing or loading. Try inspection again shortly.';
           } else if (err instanceof TargetResolutionError || err instanceof BrowserManagerError) {
             safeMessage = (typeof err.message === 'string')
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage
+          }));
+        }
+      });
+
+      return;
+    }
+
+    // Route: POST /api/browser/action (Brick 30 Basic Real Browser Interactions v1)
+    if (url.pathname === '/api/browser/action') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) {
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_REQUEST',
+            code: 'INVALID_REQUEST',
+            message: 'Invalid JSON request body'
+          }));
+          return;
+        }
+
+        if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_REQUEST',
+            code: 'INVALID_REQUEST',
+            message: 'Request body must be an object'
+          }));
+          return;
+        }
+
+        if (Array.isArray(parsedBody.actions) || parsedBody.actions) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'MULTI_ACTION_NOT_SUPPORTED',
+            code: 'MULTI_ACTION_NOT_SUPPORTED',
+            message: 'Multiple actions are not supported. Exactly one action per request.'
+          }));
+          return;
+        }
+
+        if (!parsedBody.expectedSnapshotToken || typeof parsedBody.expectedSnapshotToken !== 'string' || parsedBody.expectedSnapshotToken.trim().length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'MISSING_SNAPSHOT_TOKEN',
+            code: 'MISSING_SNAPSHOT_TOKEN',
+            message: 'Expected snapshot token is required.'
+          }));
+          return;
+        }
+
+        if (!parsedBody.action || typeof parsedBody.action !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_ACTION',
+            code: 'INVALID_ACTION',
+            message: 'Action must be a non-empty string.'
+          }));
+          return;
+        }
+
+        if (!parsedBody.target || typeof parsedBody.target !== 'object' || Array.isArray(parsedBody.target)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_TARGET_QUERY',
+            code: 'INVALID_TARGET_QUERY',
+            message: 'Target query must be an object'
+          }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.executeAction(parsedBody);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'ACTION_EXECUTION_FAILED';
+          let statusCode = 400;
+          if (errorCode === 'BROWSER_PAGE_BUSY') {
+            statusCode = 503;
+          } else if (errorCode === 'BROWSER_ERROR' || errorCode === 'ACTION_EXECUTION_FAILED') {
+            statusCode = 500;
+          }
+
+          let safeMessage = 'Browser action failed.';
+          if (errorCode === 'BROWSER_NOT_RUNNING') {
+            safeMessage = 'Browser is not running. Please launch the browser first.';
+          } else if (errorCode === 'TARGET_STALE') {
+            safeMessage = 'Snapshot token is stale or invalid.';
+          } else if (errorCode === 'TARGET_AMBIGUOUS') {
+            safeMessage = 'Multiple elements matched the target query equally.';
+          } else if (errorCode === 'TARGET_NOT_FOUND') {
+            safeMessage = 'No matching element found on the current page.';
+          } else if (errorCode === 'TARGET_CONFIDENCE_TOO_LOW') {
+            safeMessage = 'Target confidence is too low for interaction (high confidence required).';
+          } else if (errorCode === 'TARGET_DISABLED') {
+            safeMessage = 'Target element is disabled.';
+          } else if (errorCode === 'PASSWORD_INTERACTION_NOT_AUTHORIZED') {
+            safeMessage = 'Password interaction is not authorized in Brick 30.';
+          } else if (errorCode === 'FILE_INTERACTION_NOT_AUTHORIZED') {
+            safeMessage = 'File interaction is not authorized in Brick 30.';
+          } else if (errorCode === 'FORM_SUBMISSION_NOT_AUTHORIZED') {
+            safeMessage = 'Form submission is not authorized in Brick 30.';
+          } else if (errorCode === 'FORM_RESET_NOT_AUTHORIZED') {
+            safeMessage = 'Form reset is not authorized in Brick 30.';
+          } else if (errorCode === 'DOWNLOAD_NOT_AUTHORIZED') {
+            safeMessage = 'File downloads are not authorized in Brick 30.';
+          } else if (errorCode === 'POPUP_NOT_SUPPORTED') {
+            safeMessage = 'Opening popups or new tabs is not supported in Brick 30.';
+          } else if (err instanceof ActionExecutionError || err instanceof BrowserManagerError) {
+            safeMessage = typeof err.message === 'string'
               ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
               : safeMessage;
           }

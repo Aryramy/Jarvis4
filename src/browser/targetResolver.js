@@ -87,8 +87,11 @@ export function createSafeElementSummary(el, index, snapshotToken) {
   if (el.label) summary.label = el.label;
   if (el.placeholder) summary.placeholder = el.placeholder;
   if (el.inputType) summary.inputType = el.inputType;
+  if (el.type) summary.type = el.type;
   if (el.name) summary.name = el.name;
   if (el.href) summary.href = el.href;
+  if (el.target) summary.target = el.target;
+  if (el.download !== undefined) summary.download = el.download;
   if (el.disabled) summary.disabled = true;
   if (el.required) summary.required = true;
   if (el.checked !== undefined) summary.checked = el.checked;

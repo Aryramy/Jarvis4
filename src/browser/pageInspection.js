@@ -166,6 +166,38 @@ export function extractDomSnapshot(limits = {}) {
     return true;
   }
 
+  function getLabelNodeText(node) {
+    if (!node) return '';
+    if (node.nodeType === 3) {
+      return node.nodeValue || '';
+    }
+    if (node.nodeType === 1) {
+      const tag = (node.tagName || node.nodeName || '').toLowerCase();
+      // Exclude form controls and their contents (especially select options) from label text
+      if (['select', 'option', 'textarea', 'input', 'button', 'script', 'style'].includes(tag)) {
+        return '';
+      }
+      let text = '';
+      const children = node.childNodes || [];
+      for (let i = 0; i < children.length; i++) {
+        text += getLabelNodeText(children[i]) + ' ';
+      }
+      return text;
+    }
+    return '';
+  }
+
+  function getCleanLabelText(labelNode) {
+    if (!labelNode) return '';
+    if (labelNode.childNodes && labelNode.childNodes.length > 0) {
+      const raw = getLabelNodeText(labelNode);
+      const cleaned = innerCleanText(raw);
+      if (cleaned.length > 0) return cleaned;
+    }
+    const fallback = labelNode.innerText || labelNode.textContent || '';
+    return innerCleanText(fallback);
+  }
+
   function findAssociatedLabel(el) {
     if (!el || !doc) return undefined;
 
@@ -175,7 +207,7 @@ export function extractDomSnapshot(limits = {}) {
       if (doc.getElementById) {
         const labelEl = doc.getElementById(labelledById);
         if (labelEl) {
-          const txt = innerCleanText(labelEl.innerText || labelEl.textContent || '');
+          const txt = getCleanLabelText(labelEl);
           if (txt) return innerTruncate(txt, maxElementTextChars);
         }
       }
@@ -187,7 +219,7 @@ export function extractDomSnapshot(limits = {}) {
       try {
         const labelEl = doc.querySelector(`label[for="${id}"]`);
         if (labelEl) {
-          const txt = innerCleanText(labelEl.innerText || labelEl.textContent || '');
+          const txt = getCleanLabelText(labelEl);
           if (txt) return innerTruncate(txt, maxElementTextChars);
         }
       } catch {}
@@ -197,7 +229,7 @@ export function extractDomSnapshot(limits = {}) {
     if (typeof el.closest === 'function') {
       const parentLabel = el.closest('label');
       if (parentLabel) {
-        const txt = innerCleanText(parentLabel.innerText || parentLabel.textContent || '');
+        const txt = getCleanLabelText(parentLabel);
         if (txt) return innerTruncate(txt, maxElementTextChars);
       }
     }
@@ -300,9 +332,18 @@ export function extractDomSnapshot(limits = {}) {
       if (typeof href === 'string') {
         record.href = href;
       }
+      const targetAttr = el.getAttribute ? el.getAttribute('target') : null;
+      if (targetAttr) {
+        record.target = targetAttr;
+      }
+      if (el.hasAttribute && el.hasAttribute('download')) {
+        record.download = true;
+      }
     }
 
     if (kind === 'button') {
+      const buttonType = ((el.getAttribute ? el.getAttribute('type') : null) || el.type || 'submit').toLowerCase();
+      record.type = buttonType;
       const isDisabled = Boolean(el.disabled || (el.hasAttribute && el.hasAttribute('disabled')) || (el.getAttribute && el.getAttribute('aria-disabled') === 'true'));
       if (isDisabled) {
         record.disabled = true;
@@ -424,7 +465,7 @@ export function extractDomSnapshot(limits = {}) {
     } else if (el.getAttribute && el.getAttribute('aria-labelledby') && doc.getElementById) {
       const labelledEl = doc.getElementById(el.getAttribute('aria-labelledby'));
       if (labelledEl) {
-        const t = innerCleanText(labelledEl.innerText || labelledEl.textContent || '');
+        const t = getCleanLabelText(labelledEl);
         if (t) accName = innerTruncate(t, maxElementTextChars);
       }
     }
@@ -631,12 +672,19 @@ export function inspectHtmlString(html, options = {}) {
       }
     }
 
+    function getCheerioLabelText($labelNode) {
+      if (!$labelNode || $labelNode.length === 0) return '';
+      const $clone = $labelNode.clone();
+      $clone.find('select, option, textarea, input, button, script, style').remove();
+      return cleanText($clone.text());
+    }
+
     function findLabel() {
       // Check aria-labelledby
       if (attribs['aria-labelledby']) {
         const labelEl = $(`#${attribs['aria-labelledby']}`);
         if (labelEl.length > 0) {
-          const t = cleanText(labelEl.text());
+          const t = getCheerioLabelText(labelEl);
           if (t) return truncate(t, maxElementTextChars);
         }
       }
@@ -644,14 +692,14 @@ export function inspectHtmlString(html, options = {}) {
       if (attribs.id) {
         const labelEl = $(`label[for="${attribs.id}"]`);
         if (labelEl.length > 0) {
-          const t = cleanText(labelEl.text());
+          const t = getCheerioLabelText(labelEl);
           if (t) return truncate(t, maxElementTextChars);
         }
       }
       // Check wrapping <label>
       const parentLabel = $(el).closest('label');
       if (parentLabel.length > 0) {
-        const t = cleanText(parentLabel.text());
+        const t = getCheerioLabelText(parentLabel);
         if (t) return truncate(t, maxElementTextChars);
       }
       return undefined;
@@ -745,7 +793,7 @@ export function inspectHtmlString(html, options = {}) {
     } else if (attribs['aria-labelledby']) {
       const labelledEl = $(`#${attribs['aria-labelledby']}`);
       if (labelledEl.length > 0) {
-        const t = cleanText(labelledEl.text());
+        const t = getCheerioLabelText(labelledEl);
         if (t) accName = truncate(t, maxElementTextChars);
       }
     }

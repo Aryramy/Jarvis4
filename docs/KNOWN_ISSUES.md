@@ -297,6 +297,40 @@ Currently tracked issues in JARVIS4:
     - **Snapshot Staleness & Invalidation**: Resolved targets and opaque target IDs are tied to document snapshot tokens and are immediately invalidated on navigation, back, forward, refresh, document re-render, page close, or browser restart.
     - **Decoupled from Existing Subsystems**: `/api/auto`, `/api/browser-decision`, STT, TTS, and Voice Turn remain completely disconnected from target resolution.
 
+23. **Basic Real Browser Interactions v1 Observations & Limitations (Brick 30 Verified)**:
+    - **Human Live Verification Completed**: Verified across 15 real browser interaction tests:
+      - Fill text input: Text input "JARVIS BRICK30 TEST" entered and verified; no navigation; input privacy preserved.
+      - Checkbox check: Default checkbox checked.
+      - Checkbox uncheck: Checked checkbox unchecked.
+      - Native select: Discovered live issue where native select option text contaminated enclosing `<label>`/accessible name, resolving only medium confidence. Fixed cleanly in `src/browser/pageInspection.js` by excluding nested select/options and form controls from label text. After fix, "Dropdown (select)" resolved unique, high confidence, and selecting "Two" verified cleanly (`selectedText = "Two"`). High-confidence requirement strictly maintained without weakening to medium confidence.
+      - Safe same-tab click: Return to index navigated to `index.html` with new snapshot token and verified destination.
+      - Stale snapshot protection: Old snapshot token rejected with `TARGET_STALE`.
+      - Password block: Password input fill blocked with `PASSWORD_INTERACTION_NOT_AUTHORIZED`.
+      - File input block: File input fill blocked with `FILE_INTERACTION_NOT_AUTHORIZED`.
+      - Form submission block: Submit button click blocked with `FORM_SUBMISSION_NOT_AUTHORIZED`.
+      - Ambiguous target protection: `my-check` returned `TARGET_AMBIGUOUS`.
+      - Radio check: Default radio checked.
+      - Radio uncheck block: Default radio uncheck rejected with `ACTION_NOT_SUPPORTED_FOR_TARGET`.
+      - Disabled input protection: Disabled input fill blocked with `TARGET_DISABLED`.
+      - Missing target protection: Non-existent button rejected with `TARGET_NOT_FOUND`.
+      - Medium-confidence interaction safety: Wikipedia English link (partial match) blocked with `TARGET_CONFIDENCE_TOO_LOW`.
+    - **Single Primitive Interactions Only**: Brick 30 supports only single primitive interactions (`click`, `fill`, `check`, `uncheck`, `select`). Exactly one action per request is allowed.
+    - **No Form Submission / Workflow**: Blocked intentionally in Brick 30 (`FORM_SUBMISSION_NOT_AUTHORIZED`). Form submission and result confirmation belong to Brick 34.
+    - **No Multi-Step Sequences / Plans**: Requests with multiple actions, action arrays, or action sequences are strictly rejected (`MULTI_ACTION_NOT_SUPPORTED`). Multi-step browser execution belongs to Brick 40.
+    - **No Arbitrary Keyboard System**: Arbitrary key combinations, function keys, and shortcut execution (`Enter`, `Ctrl+Enter`, etc.) are prohibited in Brick 30.
+    - **No Tabs / Windows / Popups**: Popups and new tabs are blocked (`POPUP_NOT_SUPPORTED`). Tab and window management belongs to Brick 31.
+    - **No Authentication**: Password input interactions are blocked (`PASSWORD_INTERACTION_NOT_AUTHORIZED`). Authentication workflows belong to Brick 35.
+    - **No File Upload / Download**: File input interactions are blocked (`FILE_INTERACTION_NOT_AUTHORIZED`) and file downloads are blocked (`DOWNLOAD_NOT_AUTHORIZED`). File handling belongs to Brick 37.
+    - **No Iframe Orchestration / Shadow DOM**: Operates strictly on the main document of the single managed page.
+    - **No Autonomous Browser Planner**: Performs 0 OpenRouter, 0 LLM, 0 Exa, and 0 web search calls. Webpage content cannot alter JARVIS action policy.
+    - **No Consequential-Action Policy Engine Yet**: Safety/permissions gating belongs to Brick 43.
+    - **Snapshot Staleness Requirement**: Actions require `expectedSnapshotToken` matching the active page snapshot. Any document mutation or navigation invalidates previous snapshots (`TARGET_STALE`).
+    - **High-Confidence Re-Resolution Prerequisite**: Semantic targets are immediately re-resolved against the active DOM immediately prior to action. Targets resolving with medium or low confidence are rejected (`TARGET_CONFIDENCE_TOO_LOW`).
+    - **Decoupled from Existing Subsystems**: `/api/auto`, `/api/browser-decision`, STT, TTS, and Voice Turn remain completely disconnected from browser action execution.
+    - **Production Milestone**: The browser subsystem is not yet production-ready; GREEN-045 remains the production-ready milestone.
+
+
+
 
 
 

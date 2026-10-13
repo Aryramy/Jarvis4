@@ -18,6 +18,9 @@ import { defaultPlaywrightLauncher } from './playwrightBrowser.js';
 import { validateUrlSafety, PageReaderError } from '../webpage/urlSafety.js';
 import { extractDomSnapshot } from './pageInspection.js';
 import { generateSnapshotToken, resolveTargetFromElements, TargetResolutionError } from './targetResolver.js';
+import { executeSemanticAction, ActionExecutionError } from './actionExecutor.js';
+
+export { ActionExecutionError };
 
 export class BrowserManagerError extends Error {
   /**
@@ -1333,6 +1336,41 @@ export class BrowserManager {
       throw new BrowserManagerError(
         'Target resolution failed.',
         'TARGET_RESOLUTION_FAILED'
+      );
+    }
+  }
+
+  /**
+   * Safely executes exactly ONE bounded action on ONE semantically resolved target (Brick 30).
+   *
+   * @param {Object} actionRequest
+   * @param {Object} [options={}]
+   * @returns {Promise<Object>}
+   */
+  async executeAction(actionRequest, options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError(
+        'Browser is not running. Please launch the browser first.',
+        'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    try {
+      return await executeSemanticAction(this._page, this, actionRequest, options);
+    } catch (err) {
+      if (err instanceof BrowserManagerError || err instanceof ActionExecutionError) {
+        throw err;
+      }
+      let safeMsg = 'Browser action failed.';
+      if (err && typeof err.message === 'string') {
+        const firstLine = err.message.split('\n')[0].trim();
+        safeMsg = firstLine.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').trim();
+      }
+      throw new BrowserManagerError(
+        safeMsg || 'Browser action failed.',
+        'ACTION_EXECUTION_FAILED'
       );
     }
   }

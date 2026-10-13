@@ -326,6 +326,39 @@
       <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; display: none;" id="browser-target-result-label">Resolution Result:</div>
       <div id="browser-target-result" class="response-area" style="display: none; max-height: 240px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
     </div>
+
+    <!-- Brick 30 Basic Real Browser Interactions Section (Execute Action) -->
+    <div id="browser-action-section" class="mic-section">
+      <div style="font-size: 0.95rem; font-weight: 600; color: #38bdf8; text-align: left; margin-bottom: 4px;">Browser Actions</div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <select id="browser-action-type" style="padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;">
+          <option value="click">click</option>
+          <option value="fill">fill</option>
+          <option value="check">check</option>
+          <option value="uncheck">uncheck</option>
+          <option value="select">select</option>
+        </select>
+        <select id="browser-action-target-kind" style="padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;">
+          <option value="">(Any Kind)</option>
+          <option value="button">button</option>
+          <option value="link">link</option>
+          <option value="input">input</option>
+          <option value="textarea">textarea</option>
+          <option value="select">select</option>
+        </select>
+        <input type="text" id="browser-action-target-name" placeholder="Target Name / Label / Text" style="flex: 1; min-width: 160px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <input type="text" id="browser-action-snapshot-token" placeholder="Expected Snapshot Token" style="flex: 1; min-width: 160px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+      </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <input type="text" id="browser-action-value" placeholder="Action Value (for fill)" style="flex: 1; min-width: 160px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <input type="text" id="browser-action-option" placeholder="Select Option Label (for select)" style="flex: 1; min-width: 160px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <button type="button" id="browser-action-btn">Execute One Action</button>
+      </div>
+      <div id="browser-action-status" class="mic-status">Action: Idle</div>
+      <div id="browser-action-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
+      <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; display: none;" id="browser-action-result-label">Action Result:</div>
+      <div id="browser-action-result" class="response-area" style="display: none; max-height: 240px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
+    </div>
   </div>
 
   <script type="module">
@@ -2183,6 +2216,107 @@
           }
         } finally {
           browserTargetBtn.disabled = false;
+        }
+      });
+    }
+
+    // Brick 30 Basic Real Browser Interactions
+    const browserActionType = document.getElementById('browser-action-type');
+    const browserActionTargetKind = document.getElementById('browser-action-target-kind');
+    const browserActionTargetName = document.getElementById('browser-action-target-name');
+    const browserActionSnapshotToken = document.getElementById('browser-action-snapshot-token');
+    const browserActionValue = document.getElementById('browser-action-value');
+    const browserActionOption = document.getElementById('browser-action-option');
+    const browserActionBtn = document.getElementById('browser-action-btn');
+    const browserActionStatus = document.getElementById('browser-action-status');
+    const browserActionMeta = document.getElementById('browser-action-meta');
+    const browserActionResultLabel = document.getElementById('browser-action-result-label');
+    const browserActionResult = document.getElementById('browser-action-result');
+
+    if (browserActionBtn) {
+      browserActionBtn.addEventListener('click', async () => {
+        const action = (browserActionType ? browserActionType.value : '').trim();
+        const kind = (browserActionTargetKind ? browserActionTargetKind.value : '').trim();
+        const name = (browserActionTargetName ? browserActionTargetName.value : '').trim();
+        const token = (browserActionSnapshotToken ? browserActionSnapshotToken.value : '').trim();
+        const value = browserActionValue ? browserActionValue.value : '';
+        const option = (browserActionOption ? browserActionOption.value : '').trim();
+
+        if (!token) {
+          if (browserActionStatus) browserActionStatus.textContent = 'Action: Please enter expected snapshot token';
+          return;
+        }
+
+        if (!name && !kind) {
+          if (browserActionStatus) browserActionStatus.textContent = 'Action: Please specify target name or kind';
+          return;
+        }
+
+        browserActionBtn.disabled = true;
+        if (browserActionStatus) browserActionStatus.textContent = 'Action: Executing...';
+        if (browserActionMeta) browserActionMeta.style.display = 'none';
+        if (browserActionResultLabel) browserActionResultLabel.style.display = 'none';
+        if (browserActionResult) browserActionResult.style.display = 'none';
+
+        const payload = {
+          action,
+          target: {},
+          expectedSnapshotToken: token
+        };
+        if (kind) payload.target.kind = kind;
+        if (name) payload.target.name = name;
+        if (action === 'fill') payload.value = value;
+        if (action === 'select') payload.option = { label: option };
+
+        try {
+          const res = await fetch('/api/browser/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+
+          if (res.ok && data.success) {
+            if (browserActionStatus) browserActionStatus.textContent = `Action: Completed (${data.action})`;
+            if (browserActionMeta) {
+              browserActionMeta.style.display = 'block';
+              browserActionMeta.textContent = [
+                `Action: ${data.action}`,
+                `Pre Snapshot: ${data.preSnapshotToken}`,
+                `Post Snapshot: ${data.postSnapshotToken}`,
+                `Snapshot Changed: ${data.snapshotChanged ? 'true' : 'false'}`,
+                `Navigation Occurred: ${data.navigationOccurred ? 'true' : 'false'}`,
+                `Current URL: ${data.currentUrl}`,
+                `Title: ${data.title}`,
+                `Duration: ${data.actionDurationMs} ms`
+              ].join('\n');
+            }
+            if (browserActionResultLabel) browserActionResultLabel.style.display = 'block';
+            if (browserActionResult) {
+              browserActionResult.style.display = 'block';
+              browserActionResult.textContent = JSON.stringify({
+                target: data.target,
+                verification: data.verification
+              }, null, 2);
+            }
+          } else {
+            if (browserActionStatus) browserActionStatus.textContent = 'Action: Error';
+            if (browserActionMeta) {
+              browserActionMeta.style.display = 'block';
+              browserActionMeta.textContent = [
+                `Error Code: ${data.code || data.error || 'ACTION_EXECUTION_FAILED'}`,
+                `Message: ${data.message || 'Browser action failed'}`
+              ].join('\n');
+            }
+          }
+        } catch (err) {
+          if (browserActionStatus) browserActionStatus.textContent = 'Action: Error';
+          if (browserActionMeta) {
+            browserActionMeta.style.display = 'block';
+            browserActionMeta.textContent = `Error Code: ACTION_EXECUTION_FAILED\nMessage: ${err.message || 'Network request failed'}`;
+          }
+        } finally {
+          browserActionBtn.disabled = false;
         }
       });
     }

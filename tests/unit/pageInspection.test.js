@@ -575,4 +575,93 @@ describe('Page Inspection Unit Tests (Brick 28)', () => {
       }
     });
   });
+
+  describe('Live Fix D: Native Select Accessible-Name & Label Contamination', () => {
+    test('enclosing <label> does not contaminate native select accessibleName or label with option texts', () => {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <body>
+          <label class="form-label">
+            Dropdown (select)
+            <select class="form-select" name="my-select">
+              <option selected>Open this select menu</option>
+              <option value="1">One</option>
+              <option value="2">Two</option>
+              <option value="3">Three</option>
+            </select>
+          </label>
+        </body>
+        </html>
+      `;
+
+      const snap = inspectHtmlString(html);
+      const sel = snap.elements.find(e => e.kind === 'select');
+      assert.ok(sel, 'select element must be found');
+      assert.equal(sel.label, 'Dropdown (select)');
+      assert.equal(sel.accessibleName, 'Dropdown (select)');
+      assert.ok(!sel.accessibleName.includes('Open this select menu'));
+      assert.ok(!sel.accessibleName.includes('One'));
+      assert.ok(!sel.accessibleName.includes('Two'));
+      assert.ok(!sel.accessibleName.includes('Three'));
+      assert.ok(!sel.label.includes('Open this select menu'));
+      assert.ok(!sel.label.includes('One'));
+      assert.ok(!sel.label.includes('Two'));
+      assert.ok(!sel.label.includes('Three'));
+      assert.equal(sel.selectedText, 'Open this select menu');
+    });
+
+    test('preserves multilingual Unicode text for enclosing <label> without option contamination', () => {
+      const arabicHtml = `
+        <label>
+          اختر لغة
+          <select name="lang">
+            <option selected>العربية</option>
+            <option value="en">الإنجليزية</option>
+          </select>
+        </label>
+      `;
+      const arSnap = inspectHtmlString(arabicHtml);
+      const arSel = arSnap.elements.find(e => e.kind === 'select');
+      assert.ok(arSel);
+      assert.equal(arSel.label, 'اختر لغة');
+      assert.equal(arSel.accessibleName, 'اختر لغة');
+      assert.equal(arSel.selectedText, 'العربية');
+      assert.ok(!arSel.label.includes('العربية'));
+      assert.ok(!arSel.accessibleName.includes('العربية'));
+
+      const urduHtml = `
+        <label>
+          شہر منتخب کریں
+          <select name="city">
+            <option selected>لاہور</option>
+            <option value="khi">کراچی</option>
+          </select>
+        </label>
+      `;
+      const urSnap = inspectHtmlString(urduHtml);
+      const urSel = urSnap.elements.find(e => e.kind === 'select');
+      assert.ok(urSel);
+      assert.equal(urSel.label, 'شہر منتخب کریں');
+      assert.equal(urSel.accessibleName, 'شہر منتخب کریں');
+      assert.equal(urSel.selectedText, 'لاہور');
+
+      const jaHtml = `
+        <label>
+          言語選択
+          <select name="ja-lang">
+            <option selected>日本語</option>
+            <option value="en">英語</option>
+          </select>
+        </label>
+      `;
+      const jaSnap = inspectHtmlString(jaHtml);
+      const jaSel = jaSnap.elements.find(e => e.kind === 'select');
+      assert.ok(jaSel);
+      assert.equal(jaSel.label, '言語選択');
+      assert.equal(jaSel.accessibleName, '言語選択');
+      assert.equal(jaSel.selectedText, '日本語');
+    });
+  });
 });
+

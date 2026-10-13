@@ -88,3 +88,6 @@ Status: VERIFIED
 BRICK-029 — Reliable Element Targeting v1 (Semantic Target Resolution Without Interaction)
 Status: VERIFIED
 
+BRICK-030 — Basic Real Browser Interactions v1 (Safe Semantic Action Execution)
+Status: VERIFIED
+
