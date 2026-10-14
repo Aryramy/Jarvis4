@@ -25,7 +25,8 @@ describe('Configuration Utility', () => {
     'BROWSER_CHANNEL',
     'BROWSER_HEADLESS',
     'BROWSER_LAUNCH_TIMEOUT_MS',
-    'BROWSER_NAVIGATION_TIMEOUT_MS'
+    'BROWSER_NAVIGATION_TIMEOUT_MS',
+    'BROWSER_POPUP_SETTLE_MS'
   ];
 
   let originalEnv = {};
@@ -287,7 +288,8 @@ describe('Configuration Utility', () => {
       BROWSER_NAVIGATION_TIMEOUT_MS: '25000',
       BROWSER_INSPECTION_MAX_TEXT_CHARS: '8000',
       BROWSER_INSPECTION_MAX_ELEMENTS: '50',
-      BROWSER_INSPECTION_MAX_ELEMENT_TEXT_CHARS: '150'
+      BROWSER_INSPECTION_MAX_ELEMENT_TEXT_CHARS: '150',
+      BROWSER_POPUP_SETTLE_MS: '650'
     });
     assert.equal(customCfg.browser.channel, 'chrome');
     assert.equal(customCfg.browser.headless, true);
@@ -296,6 +298,7 @@ describe('Configuration Utility', () => {
     assert.equal(customCfg.browser.inspectionMaxTextChars, 8000);
     assert.equal(customCfg.browser.inspectionMaxElements, 50);
     assert.equal(customCfg.browser.inspectionMaxElementTextChars, 150);
+    assert.equal(customCfg.browser.popupSettleMs, 650);
   });
 
   test('should load browser config from environment variables when overrides not provided', () => {
@@ -306,6 +309,7 @@ describe('Configuration Utility', () => {
     process.env.BROWSER_INSPECTION_MAX_TEXT_CHARS = '15000';
     process.env.BROWSER_INSPECTION_MAX_ELEMENTS = '200';
     process.env.BROWSER_INSPECTION_MAX_ELEMENT_TEXT_CHARS = '400';
+    process.env.BROWSER_POPUP_SETTLE_MS = '700';
 
     const envCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
     assert.equal(envCfg.browser.channel, 'msedge');
@@ -315,6 +319,7 @@ describe('Configuration Utility', () => {
     assert.equal(envCfg.browser.inspectionMaxTextChars, 15000);
     assert.equal(envCfg.browser.inspectionMaxElements, 200);
     assert.equal(envCfg.browser.inspectionMaxElementTextChars, 400);
+    assert.equal(envCfg.browser.popupSettleMs, 700);
   });
 
   test('should handle invalid and bound inspection config values safely', () => {
@@ -323,11 +328,18 @@ describe('Configuration Utility', () => {
       LOG_LEVEL: 'info',
       BROWSER_INSPECTION_MAX_TEXT_CHARS: '-5',
       BROWSER_INSPECTION_MAX_ELEMENTS: '0',
-      BROWSER_INSPECTION_MAX_ELEMENT_TEXT_CHARS: 'invalid'
+      BROWSER_INSPECTION_MAX_ELEMENT_TEXT_CHARS: 'invalid',
+      BROWSER_POPUP_SETTLE_MS: '-10'
     });
     assert.equal(clampedCfg.browser.inspectionMaxTextChars, 1);
     assert.equal(clampedCfg.browser.inspectionMaxElements, 1);
     assert.equal(clampedCfg.browser.inspectionMaxElementTextChars, 300);
+    assert.equal(clampedCfg.browser.popupSettleMs, 1);
+  });
+
+  test('should default popupSettleMs to 500ms when not specified', () => {
+    const defaultCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
+    assert.equal(defaultCfg.browser.popupSettleMs, 500);
   });
 });
 

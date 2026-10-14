@@ -104,10 +104,12 @@ function createMockBrowserEnvironment() {
     },
     removeListener: (event, cb) => page.off(event, cb),
     route: async () => {},
-    unroute: async () => {}
+    unroute: async () => {},
+    context: () => context
   };
 
   const context = {
+    pages: () => [page].filter(p => !p.closed),
     newPage: async () => page,
     close: async () => {}
   };

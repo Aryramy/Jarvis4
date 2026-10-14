@@ -1788,7 +1788,291 @@ export function createRequestListener(options = {}) {
       return;
     }
 
-    // Route: POST /api/browser/action (Brick 30 Basic Real Browser Interactions v1)
+    // Route: GET /api/browser/pages (Brick 31 Tabs, Windows & Popups v1)
+    if (url.pathname === '/api/browser/pages') {
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      (async () => {
+        try {
+          const result = await browserManager.listPages();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'BROWSER_PAGE_LIST_FAILED';
+          const statusCode = errorCode === 'BROWSER_NOT_RUNNING' ? 400 : 500;
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: err.message || 'Failed to list managed browser pages'
+          }));
+        }
+      })();
+
+      return;
+    }
+
+    // Route: POST /api/browser/open-page (Brick 31 Tabs, Windows & Popups v1)
+    if (url.pathname === '/api/browser/open-page') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      let isTooLarge = false;
+
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 1e6) {
+          isTooLarge = true;
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Payload Too Large' }));
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        if (isTooLarge) return;
+
+        let parsedBody = {};
+        if (body && body.trim().length > 0) {
+          try {
+            parsedBody = JSON.parse(body);
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: false,
+              error: 'INVALID_REQUEST',
+              code: 'INVALID_REQUEST',
+              message: 'Invalid JSON request body'
+            }));
+            return;
+          }
+        }
+
+        if (parsedBody && typeof parsedBody !== 'object') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_REQUEST',
+            code: 'INVALID_REQUEST',
+            message: 'Request body must be an object'
+          }));
+          return;
+        }
+
+        const inputUrl = parsedBody.url;
+        if (typeof inputUrl !== 'undefined' && typeof inputUrl !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_URL',
+            code: 'INVALID_URL',
+            message: 'URL must be a string'
+          }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.openPage(inputUrl, {
+            dnsLookup: options.dnsLookup
+          });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'BROWSER_PAGE_CREATION_FAILED';
+          let statusCode = 500;
+          if ([
+            'INVALID_URL',
+            'UNSUPPORTED_PROTOCOL',
+            'URL_CREDENTIALS_NOT_ALLOWED',
+            'PORT_NOT_ALLOWED',
+            'LOCAL_OR_PRIVATE_HOST_BLOCKED',
+            'DNS_RESOLUTION_FAILED',
+            'BROWSER_NOT_RUNNING',
+            'PAGE_LIMIT_REACHED',
+            'INSECURE_REDIRECT_DOWNGRADE'
+          ].includes(errorCode)) {
+            statusCode = 400;
+          } else if (errorCode === 'BROWSER_NAVIGATION_TIMEOUT') {
+            statusCode = 504;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: err.message || 'Failed to open new browser page'
+          }));
+        }
+      });
+
+      return;
+    }
+
+    // Route: POST /api/browser/switch-page (Brick 31 Tabs, Windows & Popups v1)
+    if (url.pathname === '/api/browser/switch-page') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) {
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_REQUEST',
+            code: 'INVALID_REQUEST',
+            message: 'Invalid JSON request body'
+          }));
+          return;
+        }
+
+        if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_REQUEST',
+            code: 'INVALID_REQUEST',
+            message: 'Request body must be an object'
+          }));
+          return;
+        }
+
+        if (!parsedBody.pageId || typeof parsedBody.pageId !== 'string' || parsedBody.pageId.trim().length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'PAGE_NOT_FOUND',
+            code: 'PAGE_NOT_FOUND',
+            message: 'Valid pageId is required.'
+          }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.switchPage(parsedBody.pageId);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'PAGE_SWITCH_FAILED';
+          let statusCode = 500;
+          if (errorCode === 'PAGE_NOT_FOUND' || errorCode === 'BROWSER_NOT_RUNNING') {
+            statusCode = 400;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: err.message || 'Failed to switch page'
+          }));
+        }
+      });
+
+      return;
+    }
+
+    // Route: POST /api/browser/close-page (Brick 31 Tabs, Windows & Popups v1)
+    if (url.pathname === '/api/browser/close-page') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) {
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_REQUEST',
+            code: 'INVALID_REQUEST',
+            message: 'Invalid JSON request body'
+          }));
+          return;
+        }
+
+        if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_REQUEST',
+            code: 'INVALID_REQUEST',
+            message: 'Request body must be an object'
+          }));
+          return;
+        }
+
+        if (!parsedBody.pageId || typeof parsedBody.pageId !== 'string' || parsedBody.pageId.trim().length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'PAGE_NOT_FOUND',
+            code: 'PAGE_NOT_FOUND',
+            message: 'Valid pageId is required.'
+          }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.closePage(parsedBody.pageId);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'PAGE_CLOSE_FAILED';
+          let statusCode = 500;
+          if (errorCode === 'PAGE_NOT_FOUND' || errorCode === 'BROWSER_NOT_RUNNING') {
+            statusCode = 400;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: err.message || 'Failed to close page'
+          }));
+        }
+      });
+
+      return;
+    }
+
+    // Route: POST /api/browser/action (Brick 30 Basic Real Browser Interactions v1 & Brick 31 Popup Policy)
     if (url.pathname === '/api/browser/action') {
       if (req.method !== 'POST') {
         res.writeHead(405, { 'Content-Type': 'application/json' });
@@ -1911,7 +2195,13 @@ export function createRequestListener(options = {}) {
           } else if (errorCode === 'DOWNLOAD_NOT_AUTHORIZED') {
             safeMessage = 'File downloads are not authorized in Brick 30.';
           } else if (errorCode === 'POPUP_NOT_SUPPORTED') {
-            safeMessage = 'Opening popups or new tabs is not supported in Brick 30.';
+            safeMessage = 'Popup/new-page creation is blocked by the current popup policy.';
+          } else if (errorCode === 'PAGE_LIMIT_REACHED') {
+            safeMessage = 'Maximum page limit reached.';
+          } else if (errorCode === 'MULTIPLE_POPUPS_NOT_SUPPORTED') {
+            safeMessage = 'Multiple popups are not supported.';
+          } else if (errorCode === 'INVALID_POPUP_POLICY') {
+            safeMessage = 'Invalid popup policy. Allowed values: "block", "allow-single".';
           } else if (err instanceof ActionExecutionError || err instanceof BrowserManagerError) {
             safeMessage = typeof err.message === 'string'
               ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()

@@ -48,6 +48,138 @@ export const SUPPORTED_ACTIONS = Object.freeze([
 ]);
 
 /**
+ * Event-aware popup settlement helper (Brick 31 Live Fix C).
+ * Keeps action popup observation alive for a bounded grace period post-click
+ * so real asynchronous Playwright / Edge popup/Page events can be captured
+ * and attributed to the action that caused them.
+ *
+ * @param {Object} params
+ * @param {Object} params.actionWindow - Action popup observation window
+ * @param {number} [params.timeoutMs=500] - Bounded settlement timeout in ms
+ * @param {Function} [params.sleeper] - Optional sleeper function (ms => Promise) for deterministic tests
+ * @param {Promise} [params.settleSignal] - Optional settle signal promise for deterministic tests
+ * @param {Array|Object} [params.diagnostics] - Optional diagnostic collection object
+ * @returns {Promise<{ settled: boolean, eventCount: number, elapsedMs: number }>}
+ */
+export async function settleActionPopups({
+  actionWindow,
+  timeoutMs = 500,
+  sleeper = null,
+  settleSignal = null,
+  diagnostics = null
+} = {}) {
+  const startTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+    ? performance.now()
+    : Date.now();
+
+  const boundedTimeoutMs = Math.max(0, Number(timeoutMs) || 0);
+
+  if (diagnostics && Array.isArray(diagnostics)) {
+    diagnostics.push({ stage: 'popupWindowStarted', timeoutMs: boundedTimeoutMs, timestamp: Date.now() });
+  }
+
+  if (!actionWindow || boundedTimeoutMs === 0) {
+    if (diagnostics && Array.isArray(diagnostics)) {
+      diagnostics.push({ stage: 'popupSettlementCompleted', elapsedMs: 0, eventCount: actionWindow?.capturedPopups?.length || 0 });
+    }
+    return {
+      settled: true,
+      eventCount: actionWindow?.capturedPopups?.length || 0,
+      elapsedMs: 0
+    };
+  }
+
+  return new Promise((resolve) => {
+    let timerId = null;
+    let settled = false;
+
+    const cleanup = () => {
+      if (timerId !== null) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+      if (actionWindow?._settleResolvers) {
+        actionWindow._settleResolvers.delete(onSettled);
+      }
+      if (typeof actionWindow?.offPopup === 'function') {
+        actionWindow.offPopup(onPopupNotification);
+      }
+    };
+
+    const onSettled = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const endTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+      const elapsedMs = Math.max(0, endTime - startTime);
+      if (diagnostics && Array.isArray(diagnostics)) {
+        diagnostics.push({
+          stage: 'popupSettlementCompleted',
+          reason: 'signal',
+          elapsedMs,
+          eventCount: actionWindow?.capturedPopups?.length || 0
+        });
+      }
+      resolve({
+        settled: true,
+        eventCount: actionWindow?.capturedPopups?.length || 0,
+        elapsedMs
+      });
+    };
+
+    const onPopupNotification = (popup) => {
+      if (diagnostics && Array.isArray(diagnostics)) {
+        diagnostics.push({
+          stage: 'popupEventCaptured',
+          timestamp: Date.now(),
+          eventCount: actionWindow?.capturedPopups?.length || 0
+        });
+      }
+    };
+
+    if (typeof actionWindow?.onPopup === 'function') {
+      actionWindow.onPopup(onPopupNotification);
+    }
+    if (actionWindow?._settleResolvers) {
+      actionWindow._settleResolvers.add(onSettled);
+    }
+
+    if (settleSignal && typeof settleSignal.then === 'function') {
+      settleSignal.then(onSettled, onSettled);
+    }
+
+    if (typeof sleeper === 'function') {
+      sleeper(boundedTimeoutMs).then(onSettled, onSettled);
+    } else {
+      timerId = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        const endTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+          ? performance.now()
+          : Date.now();
+        const elapsedMs = Math.max(0, endTime - startTime);
+        if (diagnostics && Array.isArray(diagnostics)) {
+          diagnostics.push({
+            stage: 'popupSettlementCompleted',
+            reason: 'timeout',
+            elapsedMs,
+            eventCount: actionWindow?.capturedPopups?.length || 0
+          });
+        }
+        resolve({
+          settled: true,
+          eventCount: actionWindow?.capturedPopups?.length || 0,
+          elapsedMs
+        });
+      }, boundedTimeoutMs);
+    }
+  });
+}
+
+/**
  * Self-contained DOM lookup function serialized into browser via page.evaluateHandle.
  * Uses identical candidate collection and visibility logic as extractDomSnapshot.
  *
@@ -155,6 +287,16 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
     throw new ActionExecutionError(`Unsupported action: "${actionRequest.action}".`, 'INVALID_ACTION');
   }
 
+  // Popup policy validation (Brick 31)
+  const rawPopupPolicy = actionRequest.popupPolicy ?? 'block';
+  if (typeof rawPopupPolicy !== 'string') {
+    throw new ActionExecutionError('Invalid popup policy. Allowed values: "block", "allow-single".', 'INVALID_POPUP_POLICY');
+  }
+  const popupPolicy = rawPopupPolicy.trim().toLowerCase();
+  if (!['block', 'allow-single'].includes(popupPolicy)) {
+    throw new ActionExecutionError('Invalid popup policy. Allowed values: "block", "allow-single".', 'INVALID_POPUP_POLICY');
+  }
+
   // Snapshot token validation (Section 8)
   const expectedSnapshotToken = actionRequest.expectedSnapshotToken;
   if (!expectedSnapshotToken || typeof expectedSnapshotToken !== 'string' || expectedSnapshotToken.trim().length === 0) {
@@ -162,7 +304,7 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
   }
 
   const currentSnapshotToken = browserManager.snapshotToken;
-  if (!currentSnapshotToken || expectedSnapshotToken !== currentSnapshotToken) {
+  if (!currentSnapshotToken || !browserManager.isSnapshotTokenValid(expectedSnapshotToken)) {
     throw new ActionExecutionError('Snapshot token is stale or invalid.', 'TARGET_STALE');
   }
 
@@ -236,6 +378,17 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
     throw new ActionExecutionError('Target element is disabled.', 'TARGET_DISABLED');
   }
 
+  // Sensitive input protection across all actions (Section 54 & Section 66)
+  if (matched.kind === 'input') {
+    const itype = (matched.inputType || '').toLowerCase();
+    if (itype === 'password') {
+      throw new ActionExecutionError('Password interaction is not authorized in Brick 30.', 'PASSWORD_INTERACTION_NOT_AUTHORIZED');
+    }
+    if (itype === 'file') {
+      throw new ActionExecutionError('File interaction is not authorized in Brick 30.', 'FILE_INTERACTION_NOT_AUTHORIZED');
+    }
+  }
+
   // 3. Pre-Action Checks by Action Type
   let valueToFill = null;
   let optionLabel = null;
@@ -250,12 +403,6 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
 
     if (matched.kind === 'input') {
       const itype = (matched.inputType || 'text').toLowerCase();
-      if (itype === 'password') {
-        throw new ActionExecutionError('Password interaction is not authorized in Brick 30.', 'PASSWORD_INTERACTION_NOT_AUTHORIZED');
-      }
-      if (itype === 'file') {
-        throw new ActionExecutionError('File interaction is not authorized in Brick 30.', 'FILE_INTERACTION_NOT_AUTHORIZED');
-      }
       if (itype === 'hidden') {
         throw new ActionExecutionError('Hidden input interaction is not authorized.', 'ACTION_NOT_SUPPORTED_FOR_TARGET');
       }
@@ -335,11 +482,6 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
       throw new ActionExecutionError('File downloads are not authorized in Brick 30.', 'DOWNLOAD_NOT_AUTHORIZED');
     }
 
-    // Popup blocking (Section 27)
-    if (matched.target === '_blank' || (typeof matched.target === 'string' && matched.target.toLowerCase() === '_blank')) {
-      throw new ActionExecutionError('Opening popups or new tabs is not supported in Brick 30.', 'POPUP_NOT_SUPPORTED');
-    }
-
     // Link protocol and destination URL safety (Sections 28 & 29)
     if (matched.kind === 'link' && matched.href) {
       const rawHref = matched.href.trim();
@@ -363,7 +505,7 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
         throw new ActionExecutionError(`Invalid link URL "${rawHref}".`, 'INVALID_URL');
       }
 
-      const dnsLookup = options.dnsLookup || browserManager._dnsLookup;
+      const dnsLookup = options.dnsLookup || actionRequest.dnsLookup || browserManager._dnsLookup;
       try {
         await validateUrlSafety(resolvedUrl, { dnsLookup });
       } catch (valErr) {
@@ -453,6 +595,7 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
     let navigationOccurred = false;
     let postSnapshotToken = expectedSnapshotToken;
     let snapshotChanged = false;
+    let popupEvidence = null;
 
     if (action === 'fill') {
       await elementHandle.fill(valueToFill, { timeout: actionTimeoutMs });
@@ -559,20 +702,55 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
 
       verification = { selectedText };
     } else if (action === 'click') {
-      let popupBlocked = false;
-      let transientPopup = null;
+      const transientPopups = [];
       let downloadBlocked = false;
       let navSecurityError = null;
 
+      const popupSettleMs = options.popupSettleMs !== undefined
+        ? Math.max(0, Number(options.popupSettleMs))
+        : (browserManager?.popupSettleMs !== undefined
+            ? Math.max(0, Number(browserManager.popupSettleMs))
+            : (config.browser?.popupSettleMs ?? 500));
+
+      const actionWindow = (browserManager && typeof browserManager.beginActionPopupWindow === 'function')
+        ? browserManager.beginActionPopupWindow({ policy: popupPolicy, openerPage: page })
+        : {
+            active: true,
+            policy: popupPolicy,
+            openerPage: page,
+            capturedPopups: transientPopups,
+            _popupListeners: new Set(),
+            _settleResolvers: new Set(),
+            onPopup(cb) { if (typeof cb === 'function') this._popupListeners.add(cb); },
+            offPopup(cb) { this._popupListeners.delete(cb); },
+            notifyPopup(p) { for (const cb of this._popupListeners) { try { cb(p); } catch {} } },
+            signalSettled() { for (const r of this._settleResolvers) { try { r(); } catch {} } this._settleResolvers.clear(); }
+          };
+
+      actionWindow.capturedPopups = transientPopups;
+
       const onPopup = (popup) => {
-        popupBlocked = true;
-        transientPopup = popup;
+        if (!transientPopups.includes(popup)) {
+          transientPopups.push(popup);
+        }
+        if (typeof actionWindow.notifyPopup === 'function') {
+          actionWindow.notifyPopup(popup);
+        }
       };
       const onDownload = () => {
         downloadBlocked = true;
       };
 
-      const dnsLookup = options.dnsLookup || browserManager._dnsLookup;
+      const onContextPage = (newPage) => {
+        if (!transientPopups.includes(newPage)) {
+          transientPopups.push(newPage);
+        }
+        if (typeof actionWindow.notifyPopup === 'function') {
+          actionWindow.notifyPopup(newPage);
+        }
+      };
+
+      const dnsLookup = options.dnsLookup || actionRequest.dnsLookup || browserManager?._dnsLookup;
       const routeHandler = async (route) => {
         try {
           const req = typeof route.request === 'function' ? route.request() : null;
@@ -619,9 +797,200 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
         await page.route('**/*', routeHandler).catch(() => {});
       }
 
+      if (browserManager?.context && typeof browserManager.context.on === 'function') {
+        browserManager.context.on('page', onContextPage);
+      }
+
       try {
         await elementHandle.click({ timeout: actionTimeoutMs });
+
+        // Settle action popups for bounded grace period (Brick 31 Live Fix C)
+        await settleActionPopups({
+          actionWindow,
+          timeoutMs: popupSettleMs,
+          sleeper: options.popupSleeper,
+          settleSignal: options.popupSettleSignal,
+          diagnostics: options.diagnostics
+        });
+
+        if (downloadBlocked) {
+          throw new ActionExecutionError('File downloads are not authorized in Brick 30.', 'DOWNLOAD_NOT_AUTHORIZED');
+        }
+
+        if (navSecurityError) {
+          if (typeof page.goto === 'function') {
+            await page.goto('about:blank').catch(() => {});
+          }
+          throw (navSecurityError instanceof ActionExecutionError
+            ? navSecurityError
+            : new ActionExecutionError(navSecurityError.message, navSecurityError.code || 'LOCAL_OR_PRIVATE_HOST_BLOCKED'));
+        }
+
+        // Reconcile and filter transientPopups: verify opener binding where available
+        const relevantPopups = [];
+        for (const p of transientPopups) {
+          let isFromOpener = true;
+          if (typeof p.opener === 'function') {
+            try {
+              const op = await p.opener().catch(() => null);
+              if (op && op !== page) {
+                isFromOpener = false;
+              }
+            } catch {}
+          }
+          if (isFromOpener) {
+            relevantPopups.push(p);
+          } else {
+            if (p && typeof p.close === 'function') {
+              await p.close().catch(() => {});
+            }
+          }
+        }
+
+        if (popupPolicy === 'block') {
+          if (relevantPopups.length > 0) {
+            for (const p of relevantPopups) {
+              if (p && typeof p.close === 'function') {
+                await p.close().catch(() => {});
+              }
+            }
+            throw new ActionExecutionError(
+              'Popup/new-page creation is blocked by the current popup policy.',
+              'POPUP_NOT_SUPPORTED'
+            );
+          }
+        }
+
+        if (popupPolicy === 'allow-single') {
+          if (relevantPopups.length > 1) {
+            for (const p of relevantPopups) {
+              if (p && typeof p.close === 'function') await p.close().catch(() => {});
+            }
+            throw new ActionExecutionError('Multiple popups are not supported.', 'MULTIPLE_POPUPS_NOT_SUPPORTED');
+          }
+
+          if (relevantPopups.length === 1) {
+            const capturedPopup = relevantPopups[0];
+
+            if (browserManager._pages && browserManager._pages.size >= browserManager._maxPages) {
+              if (capturedPopup && typeof capturedPopup.close === 'function') {
+                await capturedPopup.close().catch(() => {});
+              }
+              throw new ActionExecutionError(
+                `Maximum page limit of ${browserManager._maxPages} reached.`,
+                'PAGE_LIMIT_REACHED'
+              );
+            }
+
+            let popupUrl = typeof capturedPopup.url === 'function' ? capturedPopup.url() : 'about:blank';
+            if (popupUrl === 'about:blank') {
+              try {
+                if (typeof capturedPopup.waitForURL === 'function') {
+                  await Promise.race([
+                    capturedPopup.waitForURL((u) => u.toString() !== 'about:blank', { timeout: 2000 }),
+                    new Promise((resolve) => setTimeout(resolve, 300))
+                  ]);
+                }
+                popupUrl = typeof capturedPopup.url === 'function' ? capturedPopup.url() : popupUrl;
+              } catch {
+                popupUrl = typeof capturedPopup.url === 'function' ? capturedPopup.url() : popupUrl;
+              }
+            }
+
+            if (!popupUrl || popupUrl === 'about:blank') {
+              if (typeof capturedPopup.close === 'function') await capturedPopup.close().catch(() => {});
+              throw new ActionExecutionError('Popup did not settle to a valid destination URL.', 'UNSUPPORTED_POPUP_DESTINATION');
+            }
+
+            const lowerUrl = popupUrl.toLowerCase().trim();
+            if (
+              lowerUrl.startsWith('javascript:') ||
+              lowerUrl.startsWith('file:') ||
+              lowerUrl.startsWith('data:') ||
+              lowerUrl.startsWith('ftp:') ||
+              lowerUrl.startsWith('mailto:') ||
+              lowerUrl.startsWith('tel:')
+            ) {
+              if (typeof capturedPopup.close === 'function') await capturedPopup.close().catch(() => {});
+              throw new ActionExecutionError(`Unsupported popup protocol in "${popupUrl}".`, 'UNSUPPORTED_PROTOCOL');
+            }
+
+            if (preActionUrl.startsWith('https:') && popupUrl.startsWith('http:')) {
+              if (typeof capturedPopup.close === 'function') await capturedPopup.close().catch(() => {});
+              throw new ActionExecutionError(
+                `Insecure popup downgrade from HTTPS to HTTP blocked: "${popupUrl}"`,
+                'INSECURE_REDIRECT_DOWNGRADE'
+              );
+            }
+
+            try {
+              await validateUrlSafety(popupUrl, { dnsLookup });
+            } catch (valErr) {
+              if (typeof capturedPopup.close === 'function') await capturedPopup.close().catch(() => {});
+              throw new ActionExecutionError(valErr.message, valErr.code || 'LOCAL_OR_PRIVATE_HOST_BLOCKED', valErr.details || {});
+            }
+
+            const openerPageId = browserManager.activePageId;
+            const entry = typeof browserManager._registerPage === 'function'
+              ? browserManager._registerPage(capturedPopup, {
+                  openerPageId,
+                  creationType: 'popup',
+                  activate: true
+                })
+              : { pageId: 'pg_mock' };
+
+            if (typeof capturedPopup.bringToFront === 'function') {
+              await capturedPopup.bringToFront().catch(() => {});
+            }
+
+            let popupTitle = '';
+            try {
+              if (typeof capturedPopup.title === 'function') {
+                popupTitle = (await capturedPopup.title()) || '';
+              }
+            } catch {}
+
+            popupEvidence = {
+              popupCreated: true,
+              newPageCreated: true,
+              newPageId: entry.pageId,
+              openerPageId,
+              activePageId: entry.pageId,
+              pageCount: browserManager._pages ? browserManager._pages.size : 2,
+              url: popupUrl,
+              title: popupTitle,
+              creationType: entry.creationType || 'popup'
+            };
+          } else {
+            popupEvidence = { popupCreated: false, newPageCreated: false };
+          }
+        }
+
+        if (typeof page.waitForLoadState === 'function') {
+          await page.waitForLoadState('domcontentloaded', { timeout: Math.min(3000, actionTimeoutMs) }).catch(() => {});
+        }
+
+        const postActionUrl = typeof page.url === 'function' ? page.url() : preActionUrl;
+        navigationOccurred = postActionUrl !== preActionUrl;
+
+        if (navigationOccurred) {
+          browserManager._invalidateSnapshot();
+          postSnapshotToken = browserManager.snapshotToken;
+          snapshotChanged = true;
+        }
+
+        verification = { completed: true };
       } finally {
+        if (browserManager && typeof browserManager.endActionPopupWindow === 'function') {
+          browserManager.endActionPopupWindow(actionWindow);
+        }
+
+        if (browserManager?.context && typeof browserManager.context.off === 'function') {
+          browserManager.context.off('page', onContextPage);
+        } else if (browserManager?.context && typeof browserManager.context.removeListener === 'function') {
+          browserManager.context.removeListener('page', onContextPage);
+        }
+
         if (typeof page.unroute === 'function') {
           await page.unroute('**/*', routeHandler).catch(() => {});
         }
@@ -633,41 +1002,6 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
           page.removeListener('download', onDownload);
         }
       }
-
-      if (popupBlocked) {
-        if (transientPopup && typeof transientPopup.close === 'function') {
-          await transientPopup.close().catch(() => {});
-        }
-        throw new ActionExecutionError('Opening popups or new tabs is not supported in Brick 30.', 'POPUP_NOT_SUPPORTED');
-      }
-
-      if (downloadBlocked) {
-        throw new ActionExecutionError('File downloads are not authorized in Brick 30.', 'DOWNLOAD_NOT_AUTHORIZED');
-      }
-
-      if (navSecurityError) {
-        if (typeof page.goto === 'function') {
-          await page.goto('about:blank').catch(() => {});
-        }
-        throw (navSecurityError instanceof ActionExecutionError
-          ? navSecurityError
-          : new ActionExecutionError(navSecurityError.message, navSecurityError.code || 'LOCAL_OR_PRIVATE_HOST_BLOCKED'));
-      }
-
-      if (typeof page.waitForLoadState === 'function') {
-        await page.waitForLoadState('domcontentloaded', { timeout: Math.min(3000, actionTimeoutMs) }).catch(() => {});
-      }
-
-      const postActionUrl = typeof page.url === 'function' ? page.url() : preActionUrl;
-      navigationOccurred = postActionUrl !== preActionUrl;
-
-      if (navigationOccurred) {
-        browserManager._invalidateSnapshot();
-        postSnapshotToken = browserManager.snapshotToken;
-        snapshotChanged = true;
-      }
-
-      verification = { completed: true };
     }
 
     const currentUrl = typeof page.url === 'function' ? page.url() : 'about:blank';
@@ -689,8 +1023,23 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
       verification,
       currentUrl,
       title: currentTitle,
-      actionDurationMs
+      actionDurationMs,
+      popupCreated: Boolean(popupEvidence?.popupCreated),
+      newPageCreated: Boolean(popupEvidence?.newPageCreated ?? popupEvidence?.popupCreated)
     };
+
+    if (popupEvidence?.popupCreated) {
+      result.newPageId = popupEvidence.newPageId;
+      result.openerPageId = popupEvidence.openerPageId;
+      result.activePageId = popupEvidence.activePageId;
+      result.pageCount = popupEvidence.pageCount;
+      result.newUrl = popupEvidence.url;
+      result.newTitle = popupEvidence.title;
+      result.url = popupEvidence.url;
+      result.currentUrl = popupEvidence.url;
+      result.title = popupEvidence.title;
+      result.creationType = popupEvidence.creationType || 'popup';
+    }
 
     if (navigationOccurred) {
       result.preActionUrl = preActionUrl;

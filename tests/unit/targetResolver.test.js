@@ -471,11 +471,13 @@ describe('Target Resolver Unit Tests (Brick 29)', () => {
         },
         isClosed() { return this._closed; },
         on(event, cb) { pageListeners[event] = cb; },
+        context() { return mockContext; },
         async route() {},
         async unroute() {}
       };
       const mockContext = {
         async newPage() { return mockPage; },
+        pages() { return [mockPage].filter(p => !p._closed); },
         async close() {},
         on() {}
       };

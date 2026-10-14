@@ -91,3 +91,7 @@ Status: VERIFIED
 BRICK-030 — Basic Real Browser Interactions v1 (Safe Semantic Action Execution)
 Status: VERIFIED
 
+BRICK-031 — Tabs, Windows & Popups v1 (Safe Multi-Page Browser Lifecycle)
+Status: VERIFIED
+
+BRICK-032 — NOT STARTED / NOT AUTHORIZED

@@ -4,162 +4,193 @@ import { BrowserManager, BrowserManagerError, BROWSER_STATES } from '../../src/b
 import { defaultPlaywrightLauncher, chromium } from '../../src/browser/playwrightBrowser.js';
 
 function createMockBrowserEnvironment(options = {}) {
-  const pageListeners = new Map();
-  let currentUrl = 'about:blank';
-  let currentTitle = 'Example Domain';
-  const routes = [];
+  function createMockPageInstance(initialUrl = 'about:blank', initialTitle = 'Example Domain') {
+    const pageListeners = new Map();
+    let currentUrl = initialUrl;
+    let currentTitle = initialTitle;
+    const routes = [];
 
-  const page = {
-    gotoCalls: [],
-    goBackCalls: [],
-    goForwardCalls: [],
-    reloadCalls: [],
-    routes,
-    route: async (pattern, handler) => {
-      routes.push({ pattern, handler });
-    },
-    unroute: async (pattern, handler) => {
-      const idx = routes.findIndex(r => r.pattern === pattern && (!handler || r.handler === handler));
-      if (idx !== -1) routes.splice(idx, 1);
-    },
-    goto: async (...args) => {
-      page.gotoCalls.push(args);
-      const url = args[0];
-      const opts = args[1];
-      if (options.gotoHandler) {
-        return await options.gotoHandler(url, opts, page);
+    const p = {
+      gotoCalls: [],
+      goBackCalls: [],
+      goForwardCalls: [],
+      reloadCalls: [],
+      routes,
+      route: async (pattern, handler) => {
+        routes.push({ pattern, handler });
+      },
+      unroute: async (pattern, handler) => {
+        const idx = routes.findIndex(r => r.pattern === pattern && (!handler || r.handler === handler));
+        if (idx !== -1) routes.splice(idx, 1);
+      },
+      bringToFrontCalls: 0,
+      bringToFront: async () => {
+        p.bringToFrontCalls++;
+      },
+      goto: async (...args) => {
+        p.gotoCalls.push(args);
+        const url = args[0];
+        const opts = args[1];
+        if (options.gotoHandler) {
+          return await options.gotoHandler(url, opts, p);
+        }
+        currentUrl = url;
+        return {
+          status: () => 200,
+          request: () => ({
+            url: () => url,
+            redirectedFrom: () => null
+          })
+        };
+      },
+      goBack: async (opts) => {
+        p.goBackCalls.push(opts);
+        if (options.goBackHandler) {
+          return await options.goBackHandler(opts, p);
+        }
+        return {
+          status: () => 200
+        };
+      },
+      goForward: async (opts) => {
+        p.goForwardCalls.push(opts);
+        if (options.goForwardHandler) {
+          return await options.goForwardHandler(opts, p);
+        }
+        return {
+          status: () => 200
+        };
+      },
+      reload: async (opts) => {
+        p.reloadCalls.push(opts);
+        if (options.reloadHandler) {
+          return await options.reloadHandler(opts, p);
+        }
+        return {
+          status: () => 200
+        };
+      },
+      clickCalls: [],
+      click: async (...args) => {
+        p.clickCalls.push(args);
+        if (options.clickHandler) {
+          await options.clickHandler(args, p);
+        }
+        if (typeof p.onClick === 'function') {
+          await p.onClick(p);
+        }
+      },
+      typeCalls: [],
+      type: async (...args) => {
+        p.typeCalls.push(args);
+      },
+      fillCalls: [],
+      fill: async (...args) => {
+        p.fillCalls.push(args);
+      },
+      checkCalls: [],
+      check: async (...args) => {
+        p.checkCalls.push(args);
+      },
+      uncheckCalls: [],
+      uncheck: async (...args) => {
+        p.uncheckCalls.push(args);
+      },
+      selectOptionCalls: [],
+      selectOption: async (...args) => {
+        p.selectOptionCalls.push(args);
+      },
+      evaluateHandleCalls: [],
+      evaluateHandle: async (fn, args) => {
+        p.evaluateHandleCalls.push({ fn, args });
+        if (options.evaluateHandleHandler) {
+          return await options.evaluateHandleHandler(fn, args, p);
+        }
+        return {
+          asElement: () => p,
+          click: async (...a) => p.click(...a),
+          fill: async (...a) => p.fill(...a),
+          check: async (...a) => p.check(...a),
+          uncheck: async (...a) => p.uncheck(...a),
+          selectOption: async (...a) => p.selectOption(...a),
+          isDisabled: async () => false,
+          isVisible: async () => true,
+          dispose: async () => {}
+        };
+      },
+      waitForLoadStateCalls: [],
+      waitForLoadState: async (state, opts) => {
+        p.waitForLoadStateCalls.push({ state, opts });
+        if (options.waitForLoadStateHandler) {
+          return await options.waitForLoadStateHandler(state, opts, p);
+        }
+      },
+      evaluateCalls: [],
+      evaluate: async (fn, args) => {
+        p.evaluateCalls.push({ fn, args });
+        if (options.evaluateHandler) {
+          return await options.evaluateHandler(fn, args, p);
+        }
+        return {
+          visibleText: options.mockVisibleText ?? 'Example Domain text content.',
+          textTruncated: false,
+          elements: options.mockElements ?? [
+            { kind: 'heading', tag: 'h1', text: 'Example Domain' },
+            { kind: 'link', tag: 'a', text: 'More information...', href: 'https://example.com' }
+          ],
+          returnedElementCount: 2,
+          totalEligibleElementCount: 2,
+          elementsTruncated: false
+        };
+      },
+      title: async () => currentTitle,
+      setTitle: (t) => { currentTitle = t; },
+      url: () => currentUrl,
+      setUrl: (u) => { currentUrl = u; },
+      close: async () => {
+        p.closed = true;
+        const cbs = pageListeners.get('close') || [];
+        for (const cb of cbs) cb();
+      },
+      closed: false,
+      isClosed: () => p.closed,
+      on: (event, cb) => {
+        if (!pageListeners.has(event)) pageListeners.set(event, []);
+        pageListeners.get(event).push(cb);
+      },
+      context: () => context,
+      simulateClose: () => {
+        p.closed = true;
+        const cbs = pageListeners.get('close') || [];
+        for (const cb of cbs) cb();
       }
-      currentUrl = url;
-      return {
-        status: () => 200,
-        request: () => ({
-          url: () => url,
-          redirectedFrom: () => null
-        })
-      };
-    },
-    goBack: async (opts) => {
-      page.goBackCalls.push(opts);
-      if (options.goBackHandler) {
-        return await options.goBackHandler(opts, page);
-      }
-      return {
-        status: () => 200
-      };
-    },
-    goForward: async (opts) => {
-      page.goForwardCalls.push(opts);
-      if (options.goForwardHandler) {
-        return await options.goForwardHandler(opts, page);
-      }
-      return {
-        status: () => 200
-      };
-    },
-    reload: async (opts) => {
-      page.reloadCalls.push(opts);
-      if (options.reloadHandler) {
-        return await options.reloadHandler(opts, page);
-      }
-      return {
-        status: () => 200
-      };
-    },
-    clickCalls: [],
-    click: async (...args) => {
-      page.clickCalls.push(args);
-    },
-    typeCalls: [],
-    type: async (...args) => {
-      page.typeCalls.push(args);
-    },
-    fillCalls: [],
-    fill: async (...args) => {
-      page.fillCalls.push(args);
-    },
-    checkCalls: [],
-    check: async (...args) => {
-      page.checkCalls.push(args);
-    },
-    uncheckCalls: [],
-    uncheck: async (...args) => {
-      page.uncheckCalls.push(args);
-    },
-    selectOptionCalls: [],
-    selectOption: async (...args) => {
-      page.selectOptionCalls.push(args);
-    },
-    evaluateHandleCalls: [],
-    evaluateHandle: async (fn, args) => {
-      page.evaluateHandleCalls.push({ fn, args });
-      if (options.evaluateHandleHandler) {
-        return await options.evaluateHandleHandler(fn, args, page);
-      }
-      return {
-        asElement: () => page,
-        click: async (...a) => page.click(...a),
-        fill: async (...a) => page.fill(...a),
-        check: async (...a) => page.check(...a),
-        uncheck: async (...a) => page.uncheck(...a),
-        selectOption: async (...a) => page.selectOption(...a),
-        isDisabled: async () => false,
-        isVisible: async () => true,
-        dispose: async () => {}
-      };
-    },
-    waitForLoadStateCalls: [],
-    waitForLoadState: async (state, opts) => {
-      page.waitForLoadStateCalls.push({ state, opts });
-      if (options.waitForLoadStateHandler) {
-        return await options.waitForLoadStateHandler(state, opts, page);
-      }
-    },
-    evaluateCalls: [],
-    evaluate: async (fn, args) => {
-      page.evaluateCalls.push({ fn, args });
-      if (options.evaluateHandler) {
-        return await options.evaluateHandler(fn, args, page);
-      }
-      return {
-        visibleText: options.mockVisibleText ?? 'Example Domain text content.',
-        textTruncated: false,
-        elements: options.mockElements ?? [
-          { kind: 'heading', tag: 'h1', text: 'Example Domain' },
-          { kind: 'link', tag: 'a', text: 'More information...', href: 'https://example.com' }
-        ],
-        returnedElementCount: 2,
-        totalEligibleElementCount: 2,
-        elementsTruncated: false
-      };
-    },
-    title: async () => currentTitle,
-    setTitle: (t) => { currentTitle = t; },
-    url: () => currentUrl,
-    setUrl: (u) => { currentUrl = u; },
-    close: async () => {
-      page.closed = true;
-      const cbs = pageListeners.get('close') || [];
-      for (const cb of cbs) cb();
-    },
-    closed: false,
-    isClosed: () => page.closed,
-    on: (event, cb) => {
-      if (!pageListeners.has(event)) pageListeners.set(event, []);
-      pageListeners.get(event).push(cb);
-    },
-    simulateClose: () => {
-      page.closed = true;
-      const cbs = pageListeners.get('close') || [];
-      for (const cb of cbs) cb();
-    }
-  };
+    };
+    return p;
+  }
 
+  const page = createMockPageInstance();
+  const createdPages = [page];
   const contextListeners = new Map();
   const context = {
     newPageCalls: 0,
+    createdPages,
+    createMockPageInstance,
+    pages: () => createdPages.filter(p => !p.closed),
     newPage: async () => {
       context.newPageCalls++;
-      return page;
+      let pToReturn;
+      if (options.newPageHandler) {
+        pToReturn = await options.newPageHandler(context.newPageCalls);
+      } else if (context.newPageCalls === 1) {
+        pToReturn = page;
+      } else {
+        pToReturn = createMockPageInstance();
+        createdPages.push(pToReturn);
+      }
+      if (pToReturn) {
+        context.emit('page', pToReturn);
+      }
+      return pToReturn;
     },
     close: async () => {
       context.closed = true;
@@ -170,6 +201,10 @@ function createMockBrowserEnvironment(options = {}) {
     on: (event, cb) => {
       if (!contextListeners.has(event)) contextListeners.set(event, []);
       contextListeners.get(event).push(cb);
+    },
+    emit: (event, data) => {
+      const cbs = contextListeners.get(event) || [];
+      for (const cb of cbs) cb(data);
     },
     simulateClose: () => {
       context.closed = true;
@@ -1915,6 +1950,1206 @@ describe('Playwright Browser Lifecycle Foundation (Brick 26)', () => {
         (err) => err.code === 'BROWSER_NOT_RUNNING'
       );
       assert.equal(launches, 1, '26. recovery does not auto-launch browser');
+    });
+  });
+
+  // =========================================================================
+  // BRICK 31: Tabs, Windows & Popups V1 - Safe Multi-Page Browser Lifecycle
+  // =========================================================================
+  describe('Brick 31: Multi-Page Browser Lifecycle & Registry', () => {
+    // -----------------------------------------------------------------------
+    // Section 54: Unit Tests — Registry (Tests 1 - 10)
+    // -----------------------------------------------------------------------
+    describe('Registry Management (Section 54)', () => {
+      test('1. initial launch registers exactly one page', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        assert.equal(manager.pageCount, 1);
+        const listing = await manager.listPages();
+        assert.equal(listing.pages.length, 1);
+        await manager.close();
+      });
+
+      test('2. initial page has opaque pageId', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const { pages } = await manager.listPages();
+        assert.ok(pages[0].pageId.startsWith('pg_'), 'pageId should start with pg_');
+        assert.match(pages[0].pageId, /^pg_[a-z0-9]+_[a-z0-9]+_[a-z0-9]+$/, 'pageId should be opaque generated ID');
+        await manager.close();
+      });
+
+      test('3. initial page is active', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const initialPageId = manager.activePageId;
+        assert.ok(initialPageId);
+        const { activePageId, pages } = await manager.listPages();
+        assert.equal(activePageId, initialPageId);
+        assert.equal(pages[0].active, true);
+        await manager.close();
+      });
+
+      test('4. page IDs are not array indexes', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        assert.notEqual(p1, '0');
+        assert.notEqual(p1, 0);
+        assert.notEqual(p1, '1');
+
+        await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+        const p2 = manager.activePageId;
+        assert.notEqual(p2, '1');
+        assert.notEqual(p2, 1);
+        assert.notEqual(p1, p2);
+        await manager.close();
+      });
+
+      test('5. opening second page registers it', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const res = await manager.openPage('https://example.com/page2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+        assert.ok(res.pageId);
+        assert.equal(manager.pageCount, 2);
+        await manager.close();
+      });
+
+      test('6. second page becomes active', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        const res = await manager.openPage('https://example.com/page2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+        assert.equal(manager.activePageId, res.pageId);
+        assert.equal(res.previousActivePageId, p1);
+        await manager.close();
+      });
+
+      test('7. first page remains managed', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        await manager.openPage('https://example.com/page2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+
+        const { pages } = await manager.listPages();
+        const page1Entry = pages.find((p) => p.pageId === p1);
+        assert.ok(page1Entry, 'first page must still exist in registry');
+        assert.equal(page1Entry.active, false);
+        await manager.close();
+      });
+
+      test('8. registry contains both pages', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        await manager.openPage('https://example.com/page2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+
+        assert.equal(manager.pageCount, 2);
+        const { pages } = await manager.listPages();
+        assert.equal(pages.length, 2);
+        await manager.close();
+      });
+
+      test('9. page limit enforced', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({
+          launcher: async () => mockEnv.browser,
+          maxPages: 3
+        });
+        await manager.launch();
+
+        const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+        await manager.openPage('https://example.com/2', { dnsLookup: safeDns });
+        await manager.openPage('https://example.com/3', { dnsLookup: safeDns });
+        assert.equal(manager.pageCount, 3);
+
+        await assert.rejects(
+          async () => manager.openPage('https://example.com/4', { dnsLookup: safeDns }),
+          (err) => err.code === 'PAGE_LIMIT_REACHED'
+        );
+        await manager.close();
+      });
+
+      test('10. PAGE_LIMIT_REACHED performs no hidden close', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({
+          launcher: async () => mockEnv.browser,
+          maxPages: 2
+        });
+        await manager.launch();
+
+        const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+        await manager.openPage('https://example.com/2', { dnsLookup: safeDns });
+        assert.equal(manager.pageCount, 2);
+
+        await assert.rejects(
+          async () => manager.openPage('https://example.com/3', { dnsLookup: safeDns }),
+          (err) => err.code === 'PAGE_LIMIT_REACHED'
+        );
+
+        // Still exactly 2 pages
+        assert.equal(manager.pageCount, 2);
+        const { pages } = await manager.listPages();
+        assert.equal(pages.length, 2);
+        await manager.close();
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Section 55: Unit Tests — Listing (Tests 11 - 17)
+    // -----------------------------------------------------------------------
+    describe('Page Listing (Section 55)', () => {
+      test('11. listPages lists only managed pages', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const listing = await manager.listPages();
+        assert.equal(listing.success, true);
+        assert.equal(listing.pages.length, 1);
+        await manager.close();
+      });
+
+      test('12. activePageId correct', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const listing = await manager.listPages();
+        assert.equal(listing.activePageId, manager.activePageId);
+        await manager.close();
+      });
+
+      test('13. safe URL/title returned', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const listing = await manager.listPages();
+        assert.equal(typeof listing.pages[0].url, 'string');
+        assert.equal(typeof listing.pages[0].title, 'string');
+        await manager.close();
+      });
+
+      test('14. opener metadata safe', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+        const listing = await manager.listPages();
+        const p2 = listing.pages.find((p) => p.pageId !== p1);
+        assert.equal(p2.openerPageId, p1);
+        assert.equal(p2.creationType, 'new-page');
+        await manager.close();
+      });
+
+      test('15. no handles returned', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const listing = await manager.listPages();
+        for (const p of listing.pages) {
+          assert.equal(p.page, undefined);
+          assert.equal(p._page, undefined);
+          assert.equal(p.handle, undefined);
+        }
+        await manager.close();
+      });
+
+      test('16. no cookies/storage returned', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const listing = await manager.listPages();
+        for (const p of listing.pages) {
+          assert.equal(p.cookies, undefined);
+          assert.equal(p.localStorage, undefined);
+          assert.equal(p.sessionStorage, undefined);
+          assert.equal(p.storage, undefined);
+        }
+        await manager.close();
+      });
+
+      test('17. no input values returned', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const listing = await manager.listPages();
+        for (const p of listing.pages) {
+          assert.equal(p.inputs, undefined);
+          assert.equal(p.values, undefined);
+          assert.equal(p.html, undefined);
+          assert.equal(p.passwords, undefined);
+        }
+        await manager.close();
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Section 56: Unit Tests — Switching (Tests 18 - 25)
+    // -----------------------------------------------------------------------
+    describe('Page Switching (Section 56)', () => {
+      test('18. switch to managed page succeeds', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        const p2Res = await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+        assert.equal(manager.activePageId, p2Res.pageId);
+
+        const switchRes = await manager.switchPage(p1);
+        assert.equal(switchRes.success, true);
+        assert.equal(switchRes.activePageId, p1);
+        await manager.close();
+      });
+
+      test('19. activePageId changes', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        const p2Res = await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+        await manager.switchPage(p1);
+        assert.equal(manager.activePageId, p1);
+        assert.notEqual(manager.activePageId, p2Res.pageId);
+        await manager.close();
+      });
+
+      test('20. bring-to-front invoked where expected', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+
+        const initialPage = mockEnv.page;
+        const beforeCalls = initialPage.bringToFrontCalls;
+        await manager.switchPage(p1);
+        assert.ok(initialPage.bringToFrontCalls > beforeCalls, 'bringToFront should be invoked on switched page');
+        await manager.close();
+      });
+
+      test('21. switch does not reload', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+
+        const reloadCallsBefore = mockEnv.page.reloadCalls.length;
+        await manager.switchPage(p1);
+        assert.equal(mockEnv.page.reloadCalls.length, reloadCallsBefore);
+        await manager.close();
+      });
+
+      test('22. switch does not navigate', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+
+        const gotoCallsBefore = mockEnv.page.gotoCalls.length;
+        await manager.switchPage(p1);
+        assert.equal(mockEnv.page.gotoCalls.length, gotoCallsBefore);
+        await manager.close();
+      });
+
+      test('23. invalid pageId rejected', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        await assert.rejects(
+          async () => manager.switchPage('pg_nonexistent_123'),
+          (err) => err.code === 'PAGE_NOT_FOUND'
+        );
+        await manager.close();
+      });
+
+      test('24. closed pageId rejected', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        const p2Res = await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+
+        await manager.closePage(p2Res.pageId);
+        await assert.rejects(
+          async () => manager.switchPage(p2Res.pageId),
+          (err) => err.code === 'PAGE_NOT_FOUND'
+        );
+        await manager.close();
+      });
+
+      test('25. old lifecycle pageId rejected', async () => {
+        const manager = new BrowserManager({
+          launcher: async () => createMockBrowserEnvironment().browser
+        });
+        await manager.launch();
+        const oldId = manager.activePageId;
+
+        await manager.close();
+        await manager.launch();
+
+        await assert.rejects(
+          async () => manager.switchPage(oldId),
+          (err) => err.code === 'PAGE_NOT_FOUND'
+        );
+        await manager.close();
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Section 57: Unit Tests — Closing (Tests 26 - 32)
+    // -----------------------------------------------------------------------
+    describe('Page Closing & Reconciliation (Section 57)', () => {
+      test('26. background page close removes only that page', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        const p2Res = await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+        // p2 is active, p1 is background
+        assert.equal(manager.activePageId, p2Res.pageId);
+        assert.equal(manager.pageCount, 2);
+
+        await manager.closePage(p1);
+        assert.equal(manager.pageCount, 1);
+        const { pages } = await manager.listPages();
+        assert.equal(pages[0].pageId, p2Res.pageId);
+        await manager.close();
+      });
+
+      test('27. active page unchanged when background closes', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        const p2Res = await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+
+        await manager.closePage(p1);
+        assert.equal(manager.activePageId, p2Res.pageId);
+        await manager.close();
+      });
+
+      test('28. active page close selects deterministic survivor', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        const p2Res = await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+        // p2 is active
+        const closeRes = await manager.closePage(p2Res.pageId);
+        assert.equal(closeRes.closedPageId, p2Res.pageId);
+        assert.equal(closeRes.activePageId, p1);
+        assert.equal(manager.activePageId, p1);
+        await manager.close();
+      });
+
+      test('29. survivor becomes active', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+        const p2Res = await manager.openPage('https://example.com/2', { dnsLookup: safeDns });
+        const p3Res = await manager.openPage('https://example.com/3', { dnsLookup: safeDns });
+
+        // p3 is active. Switch to p2 so p2 is most recently activated
+        await manager.switchPage(p2Res.pageId);
+        // Now close p2. Survivor should be p3 (or p1 based on lastActivatedAt)
+        await manager.closePage(p2Res.pageId);
+        assert.ok(manager.activePageId === p3Res.pageId || manager.activePageId === p1);
+        assert.equal(manager.pageCount, 2);
+        await manager.close();
+      });
+
+      test('30. manual page close reconciles registry', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        const p2Res = await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+        assert.equal(manager.pageCount, 2);
+
+        // Simulate manual tab close on p2 mock page
+        const p2Mock = mockEnv.context.createdPages[1];
+        p2Mock.simulateClose();
+
+        assert.equal(manager.pageCount, 1);
+        assert.equal(manager.activePageId, p1);
+        await manager.close();
+      });
+
+      test('31. last page close leaves no stale activePageId', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        await manager.closePage(p1);
+
+        assert.equal(manager.activePageId, null);
+        assert.equal(manager.pageCount, 0);
+        await manager.close();
+      });
+
+      test('32. browser/context status reconciles safely', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const p1 = manager.activePageId;
+        await manager.closePage(p1);
+
+        const status = manager.getStatus();
+        assert.equal(status.state, 'stopped');
+        assert.equal(status.activePageId, null);
+        assert.equal(status.pageCount, 0);
+        assert.equal(status.pageOpen, false);
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Section 58: Unit Tests — Restart (Tests 33 - 36)
+    // -----------------------------------------------------------------------
+    describe('Browser Restart Invalidation (Section 58)', () => {
+      test('33. browser close clears page registry', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+        assert.equal(manager.pageCount, 2);
+
+        await manager.close();
+        assert.equal(manager.pageCount, 0);
+        assert.equal(manager.activePageId, null);
+      });
+
+      test('34. browser relaunch creates new lifecycle', async () => {
+        const manager = new BrowserManager({
+          launcher: async () => createMockBrowserEnvironment().browser
+        });
+        await manager.launch();
+        const cycle1 = manager.activePageId;
+
+        await manager.close();
+        await manager.launch();
+        const cycle2 = manager.activePageId;
+
+        assert.ok(cycle1);
+        assert.ok(cycle2);
+        assert.notEqual(cycle1, cycle2);
+        await manager.close();
+      });
+
+      test('35. old page IDs invalid after relaunch', async () => {
+        const manager = new BrowserManager({
+          launcher: async () => createMockBrowserEnvironment().browser
+        });
+        await manager.launch();
+        const oldPageId = manager.activePageId;
+
+        await manager.close();
+        await manager.launch();
+
+        await assert.rejects(
+          async () => manager.switchPage(oldPageId),
+          (err) => err.code === 'PAGE_NOT_FOUND'
+        );
+        await manager.close();
+      });
+
+      test('36. old snapshot cannot authorize new lifecycle', async () => {
+        const manager = new BrowserManager({
+          launcher: async () => createMockBrowserEnvironment().browser
+        });
+        await manager.launch();
+        await manager.inspectPage();
+        const oldSnapshot = manager.snapshotToken;
+
+        await manager.close();
+        await manager.launch();
+
+        assert.equal(manager.isSnapshotTokenValid(oldSnapshot), false);
+        await manager.close();
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Section 59: Unit Tests — Page-Aware Snapshots (Tests 37 - 42)
+    // -----------------------------------------------------------------------
+    describe('Page-Aware Snapshots (Section 59)', () => {
+      test('37. snapshot from Page A rejected on Page B', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const pageA = manager.activePageId;
+        await manager.inspectPage();
+        const snapA = manager.snapshotToken;
+        assert.ok(snapA);
+
+        const pageBRes = await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+        assert.equal(manager.activePageId, pageBRes.pageId);
+
+        // Validating snapA against active page B must be false
+        assert.equal(manager.isSnapshotTokenValid(snapA), false);
+        assert.equal(manager.isSnapshotTokenValid(snapA, pageBRes.pageId), false);
+        await manager.close();
+      });
+
+      test('38. action on B with A snapshot performs zero interaction', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const pageA = manager.activePageId;
+        await manager.inspectPage();
+        const snapA = manager.snapshotToken;
+
+        await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+
+        // Attempting to validate snapA on current active page B fails
+        assert.equal(manager.isSnapshotTokenValid(snapA), false);
+        await manager.close();
+      });
+
+      test('39. targetId from A does not authorize B', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        await manager.inspectPage();
+        const snapA = manager.snapshotToken;
+
+        const pageBRes = await manager.openPage('https://example.com/2', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+
+        // Target authorization on page B must require page B snapshot
+        assert.equal(manager.isSnapshotTokenValid(snapA, pageBRes.pageId), false);
+        await manager.close();
+      });
+
+      test('40. navigation on A invalidates A old snapshot', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const pA = manager.activePageId;
+        await manager.inspectPage();
+        const oldSnapA = manager.snapshotToken;
+        assert.ok(oldSnapA);
+
+        await manager.navigate('https://example.com/new', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+
+        assert.equal(manager.isSnapshotTokenValid(oldSnapA), false);
+        await manager.close();
+      });
+
+      test('41. navigation on A does not incorrectly invalidate B document identity', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const pA = manager.activePageId;
+        const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+        const pBRes = await manager.openPage('https://example.com/b', { dnsLookup: safeDns });
+
+        // Inspect page B
+        await manager.inspectPage();
+        const snapB = manager.snapshotToken;
+        assert.ok(snapB);
+
+        // Switch to A and navigate on A
+        await manager.switchPage(pA);
+        await manager.navigate('https://example.com/a2', { dnsLookup: safeDns });
+
+        // Switch back to B: snapB for page B should still be valid
+        await manager.switchPage(pBRes.pageId);
+        assert.equal(manager.isSnapshotTokenValid(snapB), true);
+        await manager.close();
+      });
+
+      test('42. immediate semantic re-resolution still required', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        await manager.inspectPage();
+        const res = await manager.resolveTarget({ name: 'Example Domain' });
+        assert.ok(res);
+        assert.equal(res.resolution, 'unique');
+        await manager.close();
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Section 60: Unit Tests — Open Page Safety (Tests 43 - 53)
+    // -----------------------------------------------------------------------
+    describe('Open Page Safety (Section 60)', () => {
+      test('43. safe public https URL allowed', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        const res = await manager.openPage('https://example.com/', {
+          dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+        });
+        assert.ok(res.pageId);
+        assert.equal(manager.pageCount, 2);
+        await manager.close();
+      });
+
+      test('44. http/https validation reused', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        await assert.rejects(
+          async () => manager.openPage('ftp://example.com/'),
+          (err) => err.code === 'UNSUPPORTED_PROTOCOL'
+        );
+        await manager.close();
+      });
+
+      test('45. localhost blocked', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        await assert.rejects(
+          async () => manager.openPage('http://localhost:3000/'),
+          (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+        );
+        await manager.close();
+      });
+
+      test('46. 127.0.0.1 blocked', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        await assert.rejects(
+          async () => manager.openPage('http://127.0.0.1/'),
+          (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+        );
+        await manager.close();
+      });
+
+      test('47. RFC1918 blocked', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        await assert.rejects(
+          async () => manager.openPage('http://192.168.1.1/'),
+          (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+        );
+        await manager.close();
+      });
+
+      test('48. link-local blocked', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        await assert.rejects(
+          async () => manager.openPage('http://169.254.169.254/latest/meta-data/'),
+          (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+        );
+        await manager.close();
+      });
+
+      test('49. private IPv6 blocked', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        await assert.rejects(
+          async () => manager.openPage('http://[::1]:80/'),
+          (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+        );
+        await manager.close();
+      });
+
+      test('50. metadata endpoint blocked', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        await assert.rejects(
+          async () => manager.openPage('http://metadata.google.internal/'),
+          (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+        );
+        await manager.close();
+      });
+
+      test('51. unsafe protocol blocked', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        await assert.rejects(
+          async () => manager.openPage('javascript:alert(1)'),
+          (err) => err.code === 'UNSUPPORTED_PROTOCOL'
+        );
+        await assert.rejects(
+          async () => manager.openPage('file:///etc/passwd'),
+          (err) => err.code === 'UNSUPPORTED_PROTOCOL'
+        );
+        await assert.rejects(
+          async () => manager.openPage('data:text/html,<h1>hi</h1>'),
+          (err) => err.code === 'UNSUPPORTED_PROTOCOL'
+        );
+        await manager.close();
+      });
+
+      test('52. redirect-to-private blocked', async () => {
+        const mockEnv = createMockBrowserEnvironment({
+          gotoHandler: async (url, opts, p) => {
+            return {
+              status: () => 302,
+              request: () => ({
+                url: () => 'http://192.168.1.1/',
+                redirectedFrom: () => ({ url: () => url })
+              })
+            };
+          }
+        });
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        await assert.rejects(
+          async () => manager.openPage('http://example.com/redirect', {
+            dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+          }),
+          (err) => err.code === 'LOCAL_OR_PRIVATE_HOST_BLOCKED'
+        );
+        await manager.close();
+      });
+
+      test('53. HTTPS downgrade protection preserved', async () => {
+        const mockEnv = createMockBrowserEnvironment({
+          gotoHandler: async (url, opts, p) => {
+            return {
+              status: () => 302,
+              request: () => ({
+                url: () => 'http://example.com/insecure',
+                redirectedFrom: () => ({ url: () => url })
+              })
+            };
+          }
+        });
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+
+        await assert.rejects(
+          async () => manager.openPage('https://example.com/secure', {
+            dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }]
+          }),
+          (err) => err.code === 'INSECURE_REDIRECT_DOWNGRADE'
+        );
+        await manager.close();
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Section 61: BRICK-031 LIVE FIX A — Deterministic Page Lifecycle & Status Truthfulness
+    // -----------------------------------------------------------------------
+    describe('BRICK-031 LIVE FIX A: Deterministic Page Lifecycle & Status Truthfulness (Tests 1 - 26)', () => {
+      // TESTS — INITIAL PAGE
+      test('1. Browser launch intentionally creates initial page', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        assert.equal(manager.pageCount, 0);
+        await manager.launch();
+        assert.equal(mockEnv.context.newPageCalls, 1);
+        assert.equal(manager.pageCount, 1);
+        await manager.close();
+      });
+
+      test('2. Initial context Page event is NOT treated as spontaneous popup', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        let closeCalled = false;
+        const origClose = mockEnv.page.close;
+        mockEnv.page.close = async () => {
+          closeCalled = true;
+          return await origClose();
+        };
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        assert.equal(closeCalled, false, 'initial page close must not be called during launch');
+        assert.equal(mockEnv.page.isClosed(), false, 'initial page must not be closed');
+        await manager.close();
+      });
+
+      test('3. Initial page remains open after launch', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        assert.equal(mockEnv.page.isClosed(), false);
+        const status = manager.getStatus();
+        assert.equal(status.pageOpen, true);
+        assert.equal(status.browserConnected, true);
+        assert.equal(status.contextOpen, true);
+        await manager.close();
+      });
+
+      test('4. Initial page is registered exactly once', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const listing = await manager.listPages();
+        assert.equal(listing.pages.length, 1);
+        assert.equal(manager.pageCount, 1);
+        await manager.close();
+      });
+
+      test('5. Initial page receives opaque pageId', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const pageId = manager.activePageId;
+        assert.ok(pageId);
+        assert.match(pageId, /^pg_[a-z0-9]+_[a-z0-9]+_[a-z0-9]+$/);
+        const { pages } = await manager.listPages();
+        assert.equal(pages[0].pageId, pageId);
+        assert.equal(pages[0].creationType, 'initial');
+        await manager.close();
+      });
+
+      test('6. Initial page becomes active', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        assert.ok(manager.activePageId);
+        const { activePageId, pages } = await manager.listPages();
+        assert.equal(activePageId, manager.activePageId);
+        assert.equal(pages[0].active, true);
+        await manager.close();
+      });
+
+      test('7. Exactly one managed page exists after launch', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        assert.equal(manager.pageCount, 1);
+        assert.equal(manager.pages.length, 1);
+        await manager.close();
+      });
+
+      test('8. No duplicate registration from both newPage() and context "page" event', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        mockEnv.context.emit('page', mockEnv.page);
+        assert.equal(manager.pageCount, 1);
+        const { pages } = await manager.listPages();
+        assert.equal(pages.length, 1);
+        await manager.close();
+      });
+
+      test('9. Browser remains connected', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        assert.equal(manager.isBrowserConnected(), true);
+        assert.equal(manager.getStatus().browserConnected, true);
+        await manager.close();
+      });
+
+      test('10. Context remains open', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        assert.ok(manager.context);
+        assert.equal(mockEnv.context.closed, false);
+        assert.equal(manager.getStatus().contextOpen, true);
+        await manager.close();
+      });
+
+      // TESTS — OPEN PAGE
+      test('11. POST /api/browser/open-page intentionally creates authorized second page', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+        const res = await manager.openPage('https://example.com/2', { dnsLookup: safeDns });
+        assert.ok(res.pageId);
+        assert.equal(res.pageCount, 2);
+        assert.equal(mockEnv.context.newPageCalls, 2);
+        await manager.close();
+      });
+
+      test('12. That page is not treated as unsolicited popup', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+        await manager.openPage('https://example.com/2', { dnsLookup: safeDns });
+        const secondPage = mockEnv.context.createdPages[1];
+        assert.ok(secondPage);
+        assert.equal(secondPage.isClosed(), false, 'second authorized page must not be closed');
+        await manager.close();
+      });
+
+      test('13. It remains open', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+        await manager.openPage('https://example.com/2', { dnsLookup: safeDns });
+        const secondPage = mockEnv.context.createdPages[1];
+        assert.equal(secondPage.isClosed(), false);
+        assert.equal(manager.getStatus().pageOpen, true);
+        await manager.close();
+      });
+
+      test('14. It is registered once', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+        const res = await manager.openPage('https://example.com/2', { dnsLookup: safeDns });
+        const { pages } = await manager.listPages();
+        const matches = pages.filter(p => p.pageId === res.pageId);
+        assert.equal(matches.length, 1);
+        await manager.close();
+      });
+
+      test('15. It becomes active', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const p1 = manager.activePageId;
+        const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+        const res = await manager.openPage('https://example.com/2', { dnsLookup: safeDns });
+        assert.equal(manager.activePageId, res.pageId);
+        assert.notEqual(manager.activePageId, p1);
+        await manager.close();
+      });
+
+      test('16. Original page remains managed', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const p1 = manager.activePageId;
+        const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+        await manager.openPage('https://example.com/2', { dnsLookup: safeDns });
+        const { pages } = await manager.listPages();
+        assert.equal(pages.length, 2);
+        assert.ok(pages.some(p => p.pageId === p1 && p.active === false));
+        await manager.close();
+      });
+
+      // TESTS — SPONTANEOUS PAGE
+      test('17. A truly spontaneous context Page outside an authorized creation window is closed safely', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const spontaneousPage = mockEnv.context.createMockPageInstance('https://rogue-ad.com');
+        mockEnv.context.emit('page', spontaneousPage);
+        assert.equal(spontaneousPage.isClosed(), true, 'spontaneous page must be closed immediately');
+        await manager.close();
+      });
+
+      test('18. It is not registered', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const spontaneousPage = mockEnv.context.createMockPageInstance('https://rogue-ad.com');
+        mockEnv.context.emit('page', spontaneousPage);
+        assert.equal(manager.pageCount, 1);
+        const { pages } = await manager.listPages();
+        assert.equal(pages.length, 1);
+        await manager.close();
+      });
+
+      test('19. It does not become active', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const initialActiveId = manager.activePageId;
+        const spontaneousPage = mockEnv.context.createMockPageInstance('https://rogue-ad.com');
+        mockEnv.context.emit('page', spontaneousPage);
+        assert.equal(manager.activePageId, initialActiveId);
+        await manager.close();
+      });
+
+      test('20. It cannot hijack activePageId', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const p1 = manager.activePageId;
+        for (let i = 0; i < 5; i++) {
+          const sp = mockEnv.context.createMockPageInstance(`https://rogue-${i}.com`);
+          mockEnv.context.emit('page', sp);
+          assert.equal(sp.isClosed(), true);
+        }
+        assert.equal(manager.activePageId, p1);
+        assert.equal(manager.pageCount, 1);
+        await manager.close();
+      });
+
+      // TESTS — STATUS TRUTHFULNESS
+      test('21. Open managed page -> Page Open = true', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const status = manager.getStatus();
+        assert.equal(status.state, 'running');
+        assert.equal(status.pageOpen, true);
+        assert.equal(status.browserConnected, true);
+        assert.equal(status.contextOpen, true);
+        await manager.close();
+      });
+
+      test('22. Closed managed page -> Page Open must not remain true because of stale pointer', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        mockEnv.page.closed = true;
+        const status = manager.getStatus();
+        assert.equal(status.pageOpen, false, 'pageOpen must be false when underlying page is closed');
+        await manager.close();
+      });
+
+      test('23. Manual close removes page from registry', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+        const p2Res = await manager.openPage('https://example.com/2', { dnsLookup: safeDns });
+        assert.equal(manager.pageCount, 2);
+        const p2Mock = mockEnv.context.createdPages[1];
+        p2Mock.simulateClose();
+        assert.equal(manager.pageCount, 1);
+        const { pages } = await manager.listPages();
+        assert.equal(pages.length, 1);
+        assert.ok(!pages.some(p => p.pageId === p2Res.pageId));
+        await manager.close();
+      });
+
+      test('24. Closed active page causes deterministic fallback when another page exists', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const p1 = manager.activePageId;
+        const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+        await manager.openPage('https://example.com/2', { dnsLookup: safeDns });
+        const p2Mock = mockEnv.context.createdPages[1];
+        p2Mock.simulateClose();
+        assert.equal(manager.activePageId, p1, 'activePageId must fall back to survivor p1');
+        assert.equal(manager.pageCount, 1);
+        await manager.close();
+      });
+
+      test('25. No surviving page -> activePageId cleared', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        mockEnv.page.simulateClose();
+        assert.equal(manager.activePageId, null);
+        assert.equal(manager.pageCount, 0);
+        const status = manager.getStatus();
+        assert.equal(status.pageOpen, false);
+        assert.equal(status.state, 'stopped');
+        await manager.close();
+      });
+
+      test('26. Old snapshots from closed page invalid', async () => {
+        const mockEnv = createMockBrowserEnvironment();
+        const manager = new BrowserManager({ launcher: async () => mockEnv.browser });
+        await manager.launch();
+        const p1 = manager.activePageId;
+        await manager.inspectPage();
+        const snap1 = manager.snapshotToken;
+        assert.ok(snap1);
+        assert.equal(manager.isSnapshotTokenValid(snap1, p1), true);
+
+        const safeDns = async () => [{ address: '93.184.216.34', family: 4 }];
+        const p2Res = await manager.openPage('https://example.com/2', { dnsLookup: safeDns });
+
+        await manager.closePage(p1);
+
+        assert.equal(manager.isSnapshotTokenValid(snap1, p1), false, 'snapshot for closed page must be invalid');
+        assert.equal(manager.isSnapshotTokenValid(snap1, p2Res.pageId), false, 'page 1 snapshot must not validate for page 2');
+        await manager.close();
+      });
     });
   });
 });

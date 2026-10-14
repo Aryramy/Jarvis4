@@ -329,6 +329,45 @@ Currently tracked issues in JARVIS4:
     - **Decoupled from Existing Subsystems**: `/api/auto`, `/api/browser-decision`, STT, TTS, and Voice Turn remain completely disconnected from browser action execution.
     - **Production Milestone**: The browser subsystem is not yet production-ready; GREEN-045 remains the production-ready milestone.
 
+24. **Tabs, Windows & Popups v1 Observations & Limitations (Brick 31 Verified)**:
+    - **Human Live Verification Completed**: Verified across 16 real browser lifecycle and interaction tests (Tests A through P):
+      - Test A (Initial browser lifecycle): Edge remained open after launch (`Browser Connected = Yes`, `Context Open = Yes`, `Page Open = Yes`, `URL = about:blank`). PASS.
+      - Test B (Initial page registry): Managed page count = 1, opaque pageId assigned, initial page active, creationType = 'initial'. PASS.
+      - Test C (Open second managed page): Opened `https://example.com/`; managed page count = 2; Example.com became active; original page remained managed. PASS.
+      - Test D (Switch page): Switched back to initial page without reload or navigation; both pages remained managed. PASS.
+      - Test E (Active-page endpoint routing): Page status followed active page (`https://example.com/`, "Example Domain"). PASS.
+      - Test F (Close background page): Closed background `about:blank`; Example.com remained active; managed page count = 1. PASS.
+      - Test G (Close active page fallback): Opened Example.org, closed active Example.org; Example.com became active fallback. PASS.
+      - Test H (Manual tab close reconciliation): User manually closed tab in Edge; registry reconciled; closed page removed; no ghost page; survivor active. PASS.
+      - Test I (Block new page): Selenium "Open new window" link clicked with `popupPolicy = block`; returned controlled `POPUP_NOT_SUPPORTED` (`Popup/new-page creation is blocked by the current popup policy.`); managed count remained 1; opener remained active; no new tab remained. PASS.
+      - Test J (Allow-single new page): Selenium "Open new window" clicked with `popupPolicy = allow-single`; adopted exactly 1 new tab; `New Page Created = Yes`, `Popup Created = Yes`, `Creation Type = popup`, total pages = 2; new tab active with matching URL (`simple_page.html`) and title ("Simple Page"). PASS.
+      - Test K (Switch back to opener): Opener became active; Simple Page remained managed in background; page status followed opener. PASS.
+      - Test L (Close background new page): Closed Simple Page; count = 1; opener remained active; no ghost page. PASS.
+      - Test M (Cross-page snapshot block): Snapshot from Selenium page rejected on Example.com with `TARGET_STALE`. PASS.
+      - Test N (Active page fallback): Closed active Example.com; Selenium page became active; count = 1. PASS.
+      - Test O (Final page shutdown): Closed final page; browser reconciled to stopped (`Browser State = stopped`, `Page Open = No`); endpoints rejected safely. PASS.
+      - Test P (Old page ID invalidation): Attempted `switch-page` with old lifecycle ID; returned `PAGE_NOT_FOUND` (`Page "pg_..." not found`). PASS.
+    - **Live Fixes Discovered & Resolved**:
+      - *Fix A (Initial Page Self-Close)*: Legitimate initial page created by `context.newPage()` was misclassified by context listener as an unsolicited popup and immediately closed. Fixed with explicit internal page-creation tickets, live-page lifecycle reconciliation, and listener detachment.
+      - *Fix B (Blocked New Page False Success)*: Action-created pages under `popupPolicy = block` were swallowed by spontaneous cleanup before the action layer could observe them, reporting false success. Fixed with action-scoped observation windows for both `block` and `allow-single`.
+      - *Fix C (Real Playwright Event Timing Race)*: Edge CDP delivered page lifecycle events slightly after `click()` promise resolved, causing listeners to be detached prematurely. Fixed with bounded post-click event settlement window (`BROWSER_POPUP_SETTLE_MS = 500 ms`) before policy evaluation and cleanup.
+      - *Fix D (URL/Title Cross-Page Mixing & Terminology)*: `result.currentUrl` was retained from the opener while `result.title` was updated to the new tab. Fixed so `currentUrl` and `title` always refer strictly to the same active Page; introduced preferred generic `New Page Created` terminology alongside backward-compatible `Popup Created`.
+    - **Terminology**: Playwright represents tabs, popup windows, and separate browser windows uniformly as `Page` objects. Brick 31 manages these uniformly. External/user-facing terminology prefers "new page" or "new tab/page" rather than assuming every new Page is literally a popup. Preserves `creationType` metadata where available. Does NOT claim OS-level window classification.
+    - **No Autonomous Tab Planning**: Page switching, opening, and closing require explicit caller or user action. JARVIS does not autonomously determine which tab to visit.
+    - **No Dynamic SPA Recovery**: Dynamic SPA orchestration and mutation-driven planning belong to Brick 32.
+    - **No Form Submission Workflow**: Form submissions remain strictly blocked (`FORM_SUBMISSION_NOT_AUTHORIZED`). Belongs to Brick 34.
+    - **No Authentication Persistence**: No persistent cookies, `storageState`, login flows, or session replay. Belongs to Brick 35.
+    - **No MFA / CAPTCHA Handling**: Multi-factor authentication and CAPTCHA solving are not implemented.
+    - **No Upload / Download**: File uploads and downloads remain blocked (`FILE_INTERACTION_NOT_AUTHORIZED`, `DOWNLOAD_NOT_AUTHORIZED`). Belongs to Brick 37.
+    - **No Iframe Orchestration / Shadow DOM**: Multi-page lifecycle manages top-level Pages only; nested frames and shadow DOMs remain unmanaged.
+    - **No General JavaScript Dialog Workflow**: No alert, confirm, or prompt interaction agents. Dismissal is minimal lifecycle cleanup only.
+    - **No OS-Level Window Positioning**: Pages are managed strictly through Playwright Page abstractions; OS-level window coordinates and native window handles are not tracked.
+    - **No Multi-Step Browser Agent**: No multi-action chains, planner loops, or autonomous goal decomposition. Belongs to Brick 40.
+    - **No Voice-Driven Page Switching**: Voice Turn, STT, and TTS are not connected to browser page management.
+    - **Zero AI / Zero Search**: Page management, switching, and adoption perform 0 LLM calls and 0 search calls.
+    - **Production Milestone**: Infrastructure towards GREEN-045; Brick 31 alone is not production-ready. Brick 32 is not started.
+
+
 
 
 

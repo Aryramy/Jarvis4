@@ -1,11 +1,53 @@
 Project: JARVIS4
-Current Brick: 30
-Status: BRICK-030 VERIFIED
-Last Verified Brick: BRICK-030
-Current Feature: Basic Real Browser Interactions v1 (Safe Semantic Action Execution)
+Current Brick: 31
+Status: BRICK-031 VERIFIED
+Last Verified Brick: BRICK-031
+Current Feature: Tabs, Windows & Popups v1 (Safe Multi-Page Browser Lifecycle)
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
+
+- Tabs, Windows & Popups v1 (Brick 31) safe multi-page browser lifecycle subsystem (`BrowserManager` in `src/browser/browserManager.js`, `actionExecutor.js`, `server.js`, `index.html`):
+  - Architecture: Exactly ONE Playwright browser process, ONE isolated temporary `BrowserContext`, and 1..N managed pages within that context bounded by `BROWSER_MAX_PAGES` (default 8, returns `PAGE_LIMIT_REACHED` on overflow).
+  - Production Milestone Clarification: Tabs / windows / popup-like new Page management v1 has passed automated + real Edge verification. The browser subsystem as a whole is NOT production-ready; GREEN-045 remains the production-ready browser milestone. Brick 32 is NOT started.
+  - Terminology: Playwright represents tabs, popup windows, and separate browser windows uniformly as `Page` objects. Brick 31 manages these uniformly. External/user-facing terminology prefers generic "new page" or "new tab/page" rather than assuming every new Page is literally a popup. Preserves `creationType` metadata where available. Does NOT attempt OS-level window classification in Brick 31.
+  - Human Live Verification Completed (Tests A through P):
+    - Test A (Initial browser lifecycle): Edge remained open after launch (`Browser Connected = Yes`, `Context Open = Yes`, `Page Open = Yes`, `URL = about:blank`). PASS.
+    - Test B (Initial page registry): Managed Page Count = 1, opaque pageId assigned, initial page active, `creationType = 'initial'`. PASS.
+    - Test C (Open second managed page): Opened `https://example.com/`; Managed Page Count = 2; Example.com became active; original page remained managed. PASS.
+    - Test D (Switch page): Switched back to initial page without reload or navigation; both pages remained managed. PASS.
+    - Test E (Active-page endpoint routing): Page status followed active page (`https://example.com/`, "Example Domain"). PASS.
+    - Test F (Close background page): Closed background `about:blank`; Example.com remained active; Managed Page Count = 1. PASS.
+    - Test G (Close active page fallback): Opened Example.org, closed active Example.org; Example.com became active fallback. PASS.
+    - Test H (Manual tab close reconciliation): User manually closed tab in Edge; registry reconciled; closed page removed; no ghost page; survivor active. PASS.
+    - Test I (Block new page): Selenium "Open new window" link clicked with `popupPolicy = block`; returned controlled `POPUP_NOT_SUPPORTED` (`Popup/new-page creation is blocked by the current popup policy.`); managed count remained 1; opener remained active; no new tab remained. PASS.
+    - Test J (Allow-single new page): Selenium "Open new window" clicked with `popupPolicy = allow-single`; adopted exactly 1 new tab; `New Page Created = Yes`, `Popup Created = Yes`, `Creation Type = popup`, Total Pages = 2; new tab active with matching URL (`https://www.selenium.dev/selenium/web/window_switching_tests/simple_page.html`) and title ("Simple Page"). PASS.
+    - Test K (Switch back to opener): Managed Page Count = 2; opener became active; Simple Page remained managed in background; page status followed opener correctly. PASS.
+    - Test L (Close background new page): Closed Simple Page; count = 1; opener remained active; no ghost page. PASS.
+    - Test M (Cross-page snapshot block): Snapshot created on Selenium Page A; opened `https://example.com/` as active Page B; attempted action on B with A's snapshot; returned `TARGET_STALE`; Example.com remained unchanged. PASS.
+    - Test N (Active page fallback): Closed active Example.com; Selenium page became active; count = 1. PASS.
+    - Test O (Final page shutdown): Closed final page; browser reconciled to stopped (`Browser State = stopped`, `Page Open = No`, `Current URL = None`, `Title = None`); subsequent endpoints reported browser not running; no stale registry/page state. PASS.
+    - Test P (Old page ID invalidation): Attempted `POST /api/browser/switch-page` with old lifecycle ID `pg_mv7r66bm_u7sfeb_1`; returned `PAGE_NOT_FOUND` (`Page "pg_mv7r66bm_u7sfeb_1" not found`); old page ID did not map to new lifecycle. PASS.
+  - Live Fixes Discovered & Resolved (Fixes A through D):
+    - *Fix A (Initial Page Self-Close)*: Legitimate initial page created by `context.newPage()` was misclassified by context listener as an unsolicited popup and immediately closed. Fixed with explicit internal page-creation tickets, live-page lifecycle reconciliation, and listener detachment. PASS.
+    - *Fix B (Blocked New Page False Success)*: Action-created pages under `popupPolicy = block` were swallowed by spontaneous cleanup before the action layer could observe them, reporting false success. Fixed with action-scoped observation windows for both `block` and `allow-single`. PASS.
+    - *Fix C (Real Playwright Event Timing Race)*: Edge CDP delivered page lifecycle events slightly after `click()` promise resolved, causing listeners to be detached prematurely. Fixed with bounded post-click event settlement window (`BROWSER_POPUP_SETTLE_MS = 500 ms`) before policy evaluation and cleanup. PASS.
+    - *Fix D (URL/Title Cross-Page Mixing & Terminology)*: `result.currentUrl` was retained from the opener while `result.title` was updated to the new tab. Fixed so `currentUrl` and `title` always refer strictly to the same active Page; introduced preferred generic `New Page Created` terminology alongside backward-compatible `Popup Created`. PASS.
+  - Opaque Page IDs: Every managed page is assigned an internally generated opaque ID (`pg_...`), stable for its lifetime, invalid after close/browser restart, never exposing internal Playwright target IDs or array indexes.
+  - Active Page Tracking: Explicit `activePageId` maintained; all existing page-scoped endpoints (`navigate`, `page-status`, `back`, `forward`, `refresh`, `inspect-page`, `resolve-target`, `action`) operate strictly on the active managed page.
+  - Page Registry: Safe bounded metadata stored (`pageId`, internal page ref, `createdAt`, `lastActivatedAt`, `openerPageId`, `creationType`, active status). Zero HTML, cookies, storage, or input values stored.
+  - Endpoints:
+    - `GET /api/browser/pages`: Lists all managed pages with safe metadata (`pageId`, `active`, `url`, `title`, `openerPageId`, `creationType`).
+    - `POST /api/browser/open-page`: Opens a new managed page with full GREEN-027 URL safety (SSRF/private IP blocking, scheme restrictions, redirect safety, HTTPS->HTTP downgrade protection), activates it, and returns safe metadata.
+    - `POST /api/browser/switch-page`: Switches `activePageId` to specified managed page without navigating or reloading; brings page to front; rejects invalid/closed page IDs with `PAGE_NOT_FOUND`.
+    - `POST /api/browser/close-page`: Closes specified managed page; closing background page retains current active page; closing active page chooses deterministic survivor (most recently activated); closing final page reconciles browser state safely.
+  - Manual Close Reconciliation: Listens for page close events (`page.on('close')`); automatically reconciles registry and active page; no stale IDs.
+  - Browser Restart Invalidation: Closing or restarting browser clears registry and invalidates all old page IDs and old snapshots.
+  - Page-Aware Snapshots: Snapshot tokens and target IDs bind strictly to page identity. Using a snapshot token from Page A to act on Page B is rejected with `TARGET_STALE`. Navigation on Page A invalidates only Page A's snapshot.
+  - Popup Policy & Contract: Default popup policy is `block`. When `popupPolicy = block`, action-scoped observation windows with bounded post-click event settlement (`BROWSER_POPUP_SETTLE_MS`, default 500 ms in real browser environments) detect asynchronous Playwright popup/context `page` lifecycle events arriving after click promise resolution. All action-created popup pages under block policy are closed safely, none are adopted/registered, opener remains active and manageable, and the action returns controlled `POPUP_NOT_SUPPORTED` (`Popup/new-page creation is blocked by the current popup policy.`) without claiming click completion. Clicks creating zero popups under block policy succeed normally without false rejection based on HTML `target` attributes. Explicit `popupPolicy: 'allow-single'` on semantic click allows adopting at most 1 popup created within the bounded settlement window, enforcing all network/SSRF safety and HTTPS->HTTP downgrade protections. On adoption, both `currentUrl` and `title` refer strictly to the newly active page/tab, with generic `newPageCreated` and `creationType` metadata exposed alongside backward-compatible `popupCreated`. Multiple popups under allow-single return `MULTIPLE_POPUPS_NOT_SUPPORTED`. Truly spontaneous popups outside authorized action windows and excess popups are closed safely without adoption.
+  - Web UI: Added "Browser Pages" panel with URL input, "Open New Page", "Refresh Page List", safe `.textContent` page listing, and "Switch" / "Close" controls. Added "Popup Policy" selector ("Block" / "Allow Single") to Browser Actions UI. Displays "New Page Created" and "Creation Type" alongside "Popup Created".
+  - Zero AI / LLM calls. Zero search calls. No `/api/auto` integration. No voice integration.
+  - Subsystem remains infrastructure towards GREEN-045. Brick 32 is not started.
 
 - Basic Real Browser Interactions v1 (Brick 30) safe semantic action execution subsystem on top of managed page understanding and semantic target resolution (`executeAction` in `src/browser/browserManager.js`, `executeSemanticAction`, `ActionExecutionError` in `src/browser/actionExecutor.js`):
   - Human live verification completed and verified across all real-page interaction tests:

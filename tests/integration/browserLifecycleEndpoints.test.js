@@ -69,14 +69,17 @@ function createMockBrowserEnvironment() {
       page.closed = true;
       const cbs = pageListeners.get('close') || [];
       for (const cb of cbs) cb();
-    }
+    },
+    context: () => context
   };
 
   const contextListeners = new Map();
   const context = {
     newPageCalls: 0,
+    pages: () => [page].filter(p => !p.closed),
     newPage: async () => {
       context.newPageCalls++;
+      context.emit('page', page);
       return page;
     },
     close: async () => {
@@ -88,6 +91,10 @@ function createMockBrowserEnvironment() {
     on: (event, cb) => {
       if (!contextListeners.has(event)) contextListeners.set(event, []);
       contextListeners.get(event).push(cb);
+    },
+    emit: (event, data) => {
+      const cbs = contextListeners.get(event) || [];
+      for (const cb of cbs) cb(data);
     }
   };
 
@@ -111,6 +118,7 @@ function createMockBrowserEnvironment() {
       closed = false;
       page.closed = false;
       context.closed = false;
+      contextListeners.clear();
     },
     close: async () => {
       closed = true;

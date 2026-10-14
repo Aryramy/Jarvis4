@@ -352,12 +352,29 @@
       <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
         <input type="text" id="browser-action-value" placeholder="Action Value (for fill)" style="flex: 1; min-width: 160px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
         <input type="text" id="browser-action-option" placeholder="Select Option Label (for select)" style="flex: 1; min-width: 160px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <select id="browser-action-popup-policy" style="padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;">
+          <option value="block">Popup Policy: Block</option>
+          <option value="allow-single">Popup Policy: Allow Single</option>
+        </select>
         <button type="button" id="browser-action-btn">Execute One Action</button>
       </div>
       <div id="browser-action-status" class="mic-status">Action: Idle</div>
       <div id="browser-action-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
       <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; display: none;" id="browser-action-result-label">Action Result:</div>
       <div id="browser-action-result" class="response-area" style="display: none; max-height: 240px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
+    </div>
+
+    <!-- Brick 31 Tabs, Windows & Popups Section (Browser Pages) -->
+    <div id="browser-pages-section" class="mic-section">
+      <div style="font-size: 0.95rem; font-weight: 600; color: #38bdf8; text-align: left; margin-bottom: 4px;">Browser Pages</div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <input type="text" id="browser-open-page-url" placeholder="URL (e.g. https://example.com/)" style="flex: 1; min-width: 200px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <button type="button" id="browser-open-page-btn">Open New Page</button>
+        <button type="button" id="browser-refresh-pages-btn" class="secondary">Refresh Page List</button>
+      </div>
+      <div id="browser-pages-status" class="mic-status">Pages: Idle</div>
+      <div id="browser-pages-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
+      <div id="browser-pages-list" style="margin-top: 8px; display: flex; flex-direction: column; gap: 8px;"></div>
     </div>
   </div>
 
@@ -2227,6 +2244,7 @@
     const browserActionSnapshotToken = document.getElementById('browser-action-snapshot-token');
     const browserActionValue = document.getElementById('browser-action-value');
     const browserActionOption = document.getElementById('browser-action-option');
+    const browserActionPopupPolicy = document.getElementById('browser-action-popup-policy');
     const browserActionBtn = document.getElementById('browser-action-btn');
     const browserActionStatus = document.getElementById('browser-action-status');
     const browserActionMeta = document.getElementById('browser-action-meta');
@@ -2241,6 +2259,7 @@
         const token = (browserActionSnapshotToken ? browserActionSnapshotToken.value : '').trim();
         const value = browserActionValue ? browserActionValue.value : '';
         const option = (browserActionOption ? browserActionOption.value : '').trim();
+        const popupPolicy = (browserActionPopupPolicy ? browserActionPopupPolicy.value : 'block').trim();
 
         if (!token) {
           if (browserActionStatus) browserActionStatus.textContent = 'Action: Please enter expected snapshot token';
@@ -2261,7 +2280,8 @@
         const payload = {
           action,
           target: {},
-          expectedSnapshotToken: token
+          expectedSnapshotToken: token,
+          popupPolicy
         };
         if (kind) payload.target.kind = kind;
         if (name) payload.target.name = name;
@@ -2280,7 +2300,7 @@
             if (browserActionStatus) browserActionStatus.textContent = `Action: Completed (${data.action})`;
             if (browserActionMeta) {
               browserActionMeta.style.display = 'block';
-              browserActionMeta.textContent = [
+              const metaLines = [
                 `Action: ${data.action}`,
                 `Pre Snapshot: ${data.preSnapshotToken}`,
                 `Post Snapshot: ${data.postSnapshotToken}`,
@@ -2289,7 +2309,27 @@
                 `Current URL: ${data.currentUrl}`,
                 `Title: ${data.title}`,
                 `Duration: ${data.actionDurationMs} ms`
-              ].join('\n');
+              ];
+              if (data.newPageCreated !== undefined || data.popupCreated !== undefined) {
+                const isCreated = Boolean(data.newPageCreated ?? data.popupCreated);
+                metaLines.push(`New Page Created: ${isCreated ? 'Yes' : 'No'}`);
+                if (data.popupCreated !== undefined) {
+                  metaLines.push(`Popup Created: ${data.popupCreated ? 'Yes' : 'No'}`);
+                }
+              }
+              if (data.creationType) {
+                metaLines.push(`Creation Type: ${data.creationType}`);
+              }
+              if (data.newPageId) {
+                metaLines.push(`New Page ID: ${data.newPageId}`);
+              }
+              if (data.openerPageId) {
+                metaLines.push(`Opener Page ID: ${data.openerPageId}`);
+              }
+              if (data.pageCount !== undefined) {
+                metaLines.push(`Total Pages: ${data.pageCount}`);
+              }
+              browserActionMeta.textContent = metaLines.join('\n');
             }
             if (browserActionResultLabel) browserActionResultLabel.style.display = 'block';
             if (browserActionResult) {
@@ -2318,6 +2358,227 @@
         } finally {
           browserActionBtn.disabled = false;
         }
+      });
+    }
+
+    // Brick 31 Tabs, Windows & Popups Handler (Browser Pages)
+    const browserOpenPageUrl = document.getElementById('browser-open-page-url');
+    const browserOpenPageBtn = document.getElementById('browser-open-page-btn');
+    const browserRefreshPagesBtn = document.getElementById('browser-refresh-pages-btn');
+    const browserPagesStatus = document.getElementById('browser-pages-status');
+    const browserPagesMeta = document.getElementById('browser-pages-meta');
+    const browserPagesList = document.getElementById('browser-pages-list');
+
+    function renderPagesList(data) {
+      if (!browserPagesStatus || !browserPagesMeta || !browserPagesList) return;
+      const count = Array.isArray(data.pages) ? data.pages.length : (data.pageCount || 0);
+      browserPagesStatus.textContent = `Pages: ${count} open (Active: ${data.activePageId || 'None'})`;
+      browserPagesMeta.style.display = 'block';
+      browserPagesMeta.textContent = [
+        `Active Page ID: ${data.activePageId || 'None'}`,
+        `Managed Page Count: ${count}`
+      ].join('\n');
+
+      browserPagesList.innerHTML = '';
+      if (!Array.isArray(data.pages) || data.pages.length === 0) {
+        const emptyDiv = document.createElement('div');
+        emptyDiv.textContent = '(No managed pages open)';
+        emptyDiv.style.color = '#94a3b8';
+        emptyDiv.style.fontSize = '0.85rem';
+        browserPagesList.appendChild(emptyDiv);
+        return;
+      }
+
+      data.pages.forEach((p) => {
+        const itemCard = document.createElement('div');
+        itemCard.style.padding = '8px 12px';
+        itemCard.style.background = p.active ? '#1e293b' : '#0f172a';
+        itemCard.style.border = p.active ? '1px solid #38bdf8' : '1px solid #334155';
+        itemCard.style.borderRadius = '6px';
+        itemCard.style.display = 'flex';
+        itemCard.style.flexDirection = 'column';
+        itemCard.style.gap = '4px';
+
+        const headerRow = document.createElement('div');
+        headerRow.style.display = 'flex';
+        headerRow.style.justifyContent = 'space-between';
+        headerRow.style.alignItems = 'center';
+
+        const idSpan = document.createElement('span');
+        idSpan.style.fontWeight = '600';
+        idSpan.style.color = p.active ? '#38bdf8' : '#e2e8f0';
+        idSpan.textContent = `${p.pageId} ${p.active ? '(ACTIVE)' : ''}`;
+        headerRow.appendChild(idSpan);
+
+        const btnGroup = document.createElement('div');
+        btnGroup.style.display = 'flex';
+        btnGroup.style.gap = '6px';
+
+        if (!p.active) {
+          const switchBtn = document.createElement('button');
+          switchBtn.type = 'button';
+          switchBtn.textContent = 'Switch';
+          switchBtn.style.padding = '3px 8px';
+          switchBtn.style.fontSize = '0.8rem';
+          switchBtn.addEventListener('click', async () => {
+            await switchBrowserPage(p.pageId);
+          });
+          btnGroup.appendChild(switchBtn);
+        }
+
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.textContent = 'Close';
+        closeBtn.className = 'secondary';
+        closeBtn.style.padding = '3px 8px';
+        closeBtn.style.fontSize = '0.8rem';
+        closeBtn.addEventListener('click', async () => {
+          await closeBrowserPage(p.pageId);
+        });
+        btnGroup.appendChild(closeBtn);
+
+        headerRow.appendChild(btnGroup);
+        itemCard.appendChild(headerRow);
+
+        const titleDiv = document.createElement('div');
+        titleDiv.style.fontSize = '0.85rem';
+        titleDiv.style.color = '#cbd5e1';
+        titleDiv.textContent = `Title: ${p.title || '(No title)'}`;
+        itemCard.appendChild(titleDiv);
+
+        const urlDiv = document.createElement('div');
+        urlDiv.style.fontSize = '0.8rem';
+        urlDiv.style.color = '#94a3b8';
+        urlDiv.style.wordBreak = 'break-all';
+        urlDiv.textContent = `URL: ${p.url || 'about:blank'}`;
+        itemCard.appendChild(urlDiv);
+
+        const metaDiv = document.createElement('div');
+        metaDiv.style.fontSize = '0.75rem';
+        metaDiv.style.color = '#64748b';
+        metaDiv.textContent = `Type: ${p.creationType || 'unknown'} | Opener: ${p.openerPageId || 'none'}`;
+        itemCard.appendChild(metaDiv);
+
+        browserPagesList.appendChild(itemCard);
+      });
+    }
+
+    async function loadBrowserPages() {
+      if (browserPagesStatus) browserPagesStatus.textContent = 'Pages: Loading...';
+      try {
+        const res = await fetch('/api/browser/pages');
+        const data = await res.json();
+        if (res.ok && data.success) {
+          renderPagesList(data);
+        } else {
+          if (browserPagesStatus) browserPagesStatus.textContent = 'Pages: Error';
+          if (browserPagesMeta) {
+            browserPagesMeta.style.display = 'block';
+            browserPagesMeta.textContent = `Error: ${data.message || data.error || 'Failed to list pages'}`;
+          }
+        }
+      } catch (err) {
+        if (browserPagesStatus) browserPagesStatus.textContent = 'Pages: Error';
+        if (browserPagesMeta) {
+          browserPagesMeta.style.display = 'block';
+          browserPagesMeta.textContent = `Error: ${err.message || 'Network request failed'}`;
+        }
+      }
+    }
+
+    async function switchBrowserPage(pageId) {
+      if (browserPagesStatus) browserPagesStatus.textContent = `Pages: Switching to ${pageId}...`;
+      try {
+        const res = await fetch('/api/browser/switch-page', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pageId })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          await loadBrowserPages();
+        } else {
+          if (browserPagesStatus) browserPagesStatus.textContent = 'Pages: Error switching';
+          if (browserPagesMeta) {
+            browserPagesMeta.style.display = 'block';
+            browserPagesMeta.textContent = `Error Code: ${data.code || data.error || 'SWITCH_PAGE_FAILED'}\nMessage: ${data.message || 'Failed to switch page'}`;
+          }
+        }
+      } catch (err) {
+        if (browserPagesStatus) browserPagesStatus.textContent = 'Pages: Error switching';
+        if (browserPagesMeta) {
+          browserPagesMeta.style.display = 'block';
+          browserPagesMeta.textContent = `Error: ${err.message || 'Network request failed'}`;
+        }
+      }
+    }
+
+    async function closeBrowserPage(pageId) {
+      if (browserPagesStatus) browserPagesStatus.textContent = `Pages: Closing ${pageId}...`;
+      try {
+        const res = await fetch('/api/browser/close-page', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pageId })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          await loadBrowserPages();
+        } else {
+          if (browserPagesStatus) browserPagesStatus.textContent = 'Pages: Error closing';
+          if (browserPagesMeta) {
+            browserPagesMeta.style.display = 'block';
+            browserPagesMeta.textContent = `Error Code: ${data.code || data.error || 'CLOSE_PAGE_FAILED'}\nMessage: ${data.message || 'Failed to close page'}`;
+          }
+        }
+      } catch (err) {
+        if (browserPagesStatus) browserPagesStatus.textContent = 'Pages: Error closing';
+        if (browserPagesMeta) {
+          browserPagesMeta.style.display = 'block';
+          browserPagesMeta.textContent = `Error: ${err.message || 'Network request failed'}`;
+        }
+      }
+    }
+
+    if (browserOpenPageBtn) {
+      browserOpenPageBtn.addEventListener('click', async () => {
+        const rawUrl = (browserOpenPageUrl ? browserOpenPageUrl.value : '').trim();
+        browserOpenPageBtn.disabled = true;
+        if (browserPagesStatus) browserPagesStatus.textContent = 'Pages: Opening new page...';
+        try {
+          const body = {};
+          if (rawUrl) body.url = rawUrl;
+          const res = await fetch('/api/browser/open-page', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            if (browserOpenPageUrl) browserOpenPageUrl.value = '';
+            await loadBrowserPages();
+          } else {
+            if (browserPagesStatus) browserPagesStatus.textContent = 'Pages: Error opening page';
+            if (browserPagesMeta) {
+              browserPagesMeta.style.display = 'block';
+              browserPagesMeta.textContent = `Error Code: ${data.code || data.error || 'OPEN_PAGE_FAILED'}\nMessage: ${data.message || 'Failed to open page'}`;
+            }
+          }
+        } catch (err) {
+          if (browserPagesStatus) browserPagesStatus.textContent = 'Pages: Error opening page';
+          if (browserPagesMeta) {
+            browserPagesMeta.style.display = 'block';
+            browserPagesMeta.textContent = `Error Code: OPEN_PAGE_FAILED\nMessage: ${err.message || 'Network request failed'}`;
+          }
+        } finally {
+          browserOpenPageBtn.disabled = false;
+        }
+      });
+    }
+
+    if (browserRefreshPagesBtn) {
+      browserRefreshPagesBtn.addEventListener('click', () => {
+        loadBrowserPages();
       });
     }
   </script>

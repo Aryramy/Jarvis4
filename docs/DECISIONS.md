@@ -736,15 +736,116 @@
   - All safety boundaries (passwords, files, form submission, downloads, popups, SSRF) strictly enforced.
   - Native select label contamination diagnosed live and fixed cleanly without weakening high-confidence requirements.
   - Browser subsystem is NOT yet production-ready; GREEN-045 remains the production-ready milestone.
-  - Zero AI, zero voice, zero auto-chaining; Brick 31 not started.
+  - Zero AI, zero voice, zero auto-chaining.
 
+## ADR-0039: Safe Multi-Page Browser Lifecycle V1
+- **Status**: Accepted
+- **Context**: Bricks 26–30 established single-page browser lifecycle, navigation, page inspection, semantic element targeting, and primitive action execution. However, realistic web workflows often involve multiple tabs, new windows, and popups. Brick 31 allows one JARVIS browser/context to safely manage multiple browser pages while preserving all existing navigation, snapshot, privacy, and action guarantees.
+- **Decision**:
+  1. **Single Browser & Context Invariant**: JARVIS continues to own exactly ONE Playwright browser process and ONE isolated temporary `BrowserContext`. Multiple pages (1..N) exist strictly inside that ONE context. No separate processes, profiles, or persistent Edge profiles are created.
+  2. **Page Registry & Bounded Capacity**: `BrowserManager` maintains a managed-page registry bounded by `BROWSER_MAX_PAGES` (default 8, configurable via `BROWSER_MAX_PAGES`). Exceeding the limit rejects with `PAGE_LIMIT_REACHED` without silently evicting existing pages.
+  3. **Opaque Page IDs**: Every managed page receives an opaque identifier (`pg_...`) generated internally, stable for the page's lifetime, invalid after page close or browser restart, and not based on URLs, DOM indexes, or Playwright target handles.
+  4. **Active Page Tracking**: Explicit `activePageId` is maintained. All existing page-scoped endpoints (`/api/browser/navigate`, `/api/browser/page-status`, `/api/browser/back`, `/api/browser/forward`, `/api/browser/refresh`, `/api/browser/inspect-page`, `/api/browser/resolve-target`, `/api/browser/action`) operate strictly on the active page.
+  5. **Page Management Endpoints**:
+     - `GET /api/browser/pages`: Returns safe bounded metadata for managed pages (`pageId`, `active`, `url`, `title`, `openerPageId`, `creationType`). No HTML, cookies, storage, or internal handles.
+     - `POST /api/browser/open-page`: Explicitly creates a new managed page with full GREEN-027 URL safety (SSRF/private IP blocking, scheme restrictions, redirect safety, HTTPS->HTTP downgrade protection), activates it, and brings it to front.
+     - `POST /api/browser/switch-page`: Switches `activePageId` to an existing open managed page without navigating or reloading. Invalid or closed IDs return `PAGE_NOT_FOUND`.
+     - `POST /api/browser/close-page`: Closes specified managed page. Background close leaves active page unchanged; active page close deterministically falls back to the most recently activated survivor; closing the final page reconciles browser state safely.
+  6. **Manual Close Reconciliation**: Event listener `page.on('close')` reconciles the registry when a user closes a tab manually in Edge, electing a survivor if active.
+  7. **Page-Aware Snapshots**: Document snapshots and target IDs bind to page identity. Using a snapshot token from Page A to authorize an action on Page B returns `TARGET_STALE`.
+  8. **Popup Policy & Adoption**: Popups remain blocked by default (`popupPolicy: 'block'`). An explicit `popupPolicy: 'allow-single'` on semantic click allows adopting at most 1 popup created within the bounded click window, enforcing full destination URL and network safety. Excess popups are closed safely (`MULTIPLE_POPUPS_NOT_SUPPORTED`). Spontaneous popups outside authorized actions are closed immediately without adoption.
+  9. **Zero AI / Zero Voice**: Page switching and adoption are 100% deterministic with zero AI/LLM or voice involvement.
+- **Consequences**:
+  - Provides a safe multi-page browser foundation for tabs, windows, and popups.
+  - Subsystem is not yet production-ready (GREEN-045 target). Brick 32 is not started.
 
+## ADR-0040: Brick 31 Live Fix A — Deterministic Page Creation Authorization & Truthful Lifecycle Reconciliation
+- **Status**: Accepted
+- **Context**: Real live browser testing exposed that Microsoft Edge visibly opened and immediately self-closed within ~1 second after launch via Web UI, while status initially reported `Page Open: Yes`.
+- **Root Cause**:
+  1. Playwright's `BrowserContext.newPage()` emits a `page` event on the context. The Brick 31 context-level safety listener saw `_popupAdoptionWindowActive === false` and classified the initial page created by `contextInstance.newPage()` as an unsolicited popup, immediately calling `newPage.close()`.
+  2. Status reconciliation in `getStatus()`, `isBrowserConnected()`, and `get page()` relied on non-null variables rather than verifying actual page lifecycle (`!page.isClosed()` and `page.context() === this._context`), leading to ghost "Page Open: Yes" reports when Edge had closed.
+  3. Reused context/browser instances across test harnesses accumulated multiple `context.on('page')` listeners, causing re-entrant closures.
+- **Decision**:
+  1. **Deterministic Creation Authorization**: Internal page creation requests (`launch()`, `openPage()`) issue tightly-scoped temporary authorization tickets (`_pendingAuthorizedCreation`) and track authorized instances in a `_authorizedPages` WeakSet.
+  2. **Three-Way Creation Classification in Context Listener**:
+     - *Case A (JARVIS-Internal Authorized)*: Consumes pending creation ticket, tracks instance in `_authorizedPages`, allows registration.
+     - *Case B (Action Popup Adoption Window)*: If `popupPolicy === 'allow-single'` and action window active, permits adoption check.
+     - *Case C (Unsolicited / Spontaneous)*: Closed immediately with `newPage.close().catch(() => {})`.
+  3. **Strict Truthfulness & Lifecycle Reconciliation**: `_isPageReallyOpen()` requires `!page.isClosed()` and `page.context() === this._context`. Closed pages are immediately pruned from registry, snapshots invalidated, and active page deterministically fallen back or cleared.
+  4. **Listener Hygiene**: On session termination and `_cleanupReferences()`, all context and browser listeners (`page`, `close`, `disconnected`) are explicitly detached.
+- **Consequences**:
+  - Edge initial page remains open at `about:blank`, registered exactly once, active, and stable.
+  - Spontaneous popup blocking remains 100% active and secure.
+  - Zero ghost page states reported.
 
+## ADR-0041: Brick 31 Live Fix B — Action-Scoped Blocked Popup Detection & Contract
+- **Status**: Accepted
+- **Context**: Real live browser testing exposed that clicking `<a target="newWindow" href="simple_page.html">Open new window</a>` with `popupPolicy = block` on `https://www.selenium.dev/selenium/web/window_switching_tests/page_with_frame.html` resulted in `Action: Completed (click)`, `Popup Created: No`, `verification.completed = true` despite a popup page being created by Edge.
+- **Root Cause**:
+  1. The action executor's popup adoption window was only activated when `popupPolicy === 'allow-single'`. When `popupPolicy === 'block'`, no action window was registered with `BrowserManager`.
+  2. The BrowserContext `context.on('page')` listener saw `_popupAdoptionWindowActive === false` and immediately classified the click-created popup as spontaneous, closing it before the action executor could detect it.
+  3. Action executor saw no surviving popup and incorrectly reported ordinary click success.
+  4. Static attribute checking (`target === '_blank'`) failed to capture `target="newWindow"` and falsely rejected links with `target="_blank"` where no popup was actually created.
+- **Decision**:
+  1. **Action-Scoped Observation Window for All Policies**: `BrowserManager` exposes `beginActionPopupWindow({ policy, openerPage })` and `endActionPopupWindow(windowState)`. The window is active for both `block` and `allow-single` policies immediately surrounding the click action and cleaned up in a `finally` block.
+  2. **Context-Level Page Classification**: The `context.on('page')` listener captures action-created pages into the active action popup window (Cases B & C) instead of prematurely closing them as generic spontaneous popups. Truly spontaneous popups outside an active action window (Case D) remain immediately closed.
+  3. **Opener Verification & Strict Contract**:
+     - When `popupPolicy === 'block'` and one or more popup Pages are created by the click: all created popup pages are safely closed, none are registered/adopted, opener remains manageable and active, and the action throws controlled `POPUP_NOT_SUPPORTED` (`Popup/new-page creation is blocked by the current popup policy.`). Ordinary click success is NEVER reported.
+     - When `popupPolicy === 'block'` and ZERO popup Pages are created: ordinary click proceeds and succeeds normally without false rejection based on HTML attributes.
+     - When `popupPolicy === 'allow-single'`: at most one popup is adopted and registered with opaque ID and openerPageId; multiple popups return `MULTIPLE_POPUPS_NOT_SUPPORTED`; unsafe popups are rejected.
+  4. **Snapshot Preservation**: The opener document snapshot remains valid if the opener did not navigate.
+- **Consequences**:
+  - Live Edge click-created popups under `popupPolicy = block` are reliably detected, closed, and reported as `POPUP_NOT_SUPPORTED`.
+  - Normal clicks without popups succeed normally.
+  - Zero false rejections solely from HTML `target` attributes.
+  - All 1224 tests pass deterministically.
 
+## ADR-0042: Brick 31 Live Fix C — Bounded Action Popup Event Settlement Race Resolution
+- **Status**: Accepted
+- **Context**: Real live browser testing with Microsoft Edge on `https://www.selenium.dev/selenium/web/window_switching_tests/page_with_frame.html` clicking `<a target="newWindow" href="simple_page.html">Open new window</a>` under `popupPolicy = block` resulted in:
+  `Action: Completed (click)`, `Popup Created: No`, `verification.completed = true` (no popup remained visible), when expected result was `POPUP_NOT_SUPPORTED`.
+- **Root Cause**:
+  1. In pre-Fix-C code, `actionExecutor.js` registered page/context listeners, executed `await elementHandle.click()`, and immediately tore down the action window and listeners inside a `finally` block as soon as `click()` resolved.
+  2. In real browser engines (Playwright over CDP/IPC with Edge), the `popup` or context `page` lifecycle event can arrive asynchronously a few milliseconds AFTER `elementHandle.click()` resolves.
+  3. Consequently, by the time the real browser emitted the popup event, the action window was already closed and listeners detached.
+  4. The BrowserContext `context.on('page')` listener saw no active action window and classified the late-arriving click popup as spontaneous, closing it immediately.
+  5. `actionExecutor` saw zero popups collected during the click promise itself and erroneously reported ordinary click success.
+  6. Deterministic tests did not reproduce this race because mock harnesses emitted events synchronously during the click mock.
+- **Decision**:
+  1. **Bounded Event Settlement**: Introduce a dedicated configuration `BROWSER_POPUP_SETTLE_MS` (default: 500 ms in real browser environments, clamped to >= 1 ms; 0 ms in mock/custom unit testing environments to preserve rapid test execution). 500 ms is selected within the 300–750 ms range to reliably absorb browser IPC delays on loaded operating systems while remaining bounded.
+  2. **Revised Execution Order**:
+     - `beginActionPopupWindow({ policy, openerPage })`
+     - Attach popup, page, download, and route listeners.
+     - `await elementHandle.click()`
+     - `await settleActionPopups({ actionWindow, timeoutMs, ... })`: Keeps observation alive and event listeners active for the bounded settlement grace period.
+     - Evaluate collected popups and apply popup policy (`block` vs `allow-single`).
+     - `finally`: Detach all listeners and call `endActionPopupWindow()`.
+  3. **Event Notification & Multi-Popup Collection**: The action window is enhanced with event notification and settlement signaling. Multiple popups can be observed during the bounded window so that `allow-single` can correctly detect `MULTIPLE_POPUPS_NOT_SUPPORTED`.
+  4. **Strict Policy Contract**:
+     - `popupPolicy = block`: If one or more popup Pages are created during or settled after click, close all safely, register none, keep opener active/manageable, and return `POPUP_NOT_SUPPORTED`. Never return `completed = true`. If zero popups occur, normal click success is returned.
+     - `popupPolicy = allow-single`: Zero popups -> click success; exactly 1 safe popup -> adopted and activated; >1 popups -> extras closed, returns `MULTIPLE_POPUPS_NOT_SUPPORTED`.
+     - Spontaneous popups outside the action window remain blocked and closed immediately.
+  5. **Truthful Action Latency**: `actionDurationMs` measures actual elapsed time including the bounded settlement grace period without concealment.
+- **Consequences**:
+  - Eliminates the real Playwright/Edge popup event settlement race.
+  - Fixes the live failure: clicking a link that spawns a popup with `popupPolicy = block` correctly returns `POPUP_NOT_SUPPORTED`.
+  - All 1249 tests pass completely offline with 0 failures, 0 skipped.
 
-
-
-
-
+## ADR-0043: Brick 31 Live Fix D — New Page / Tab Terminology & URL/Title Alignment
+- **Status**: Accepted
+- **Context**: Real live browser testing with Microsoft Edge opening a new tab under `popupPolicy = allow-single` revealed:
+  1. `currentUrl` in the action response and UI was extracted from the opener page, while `title` was extracted from the newly active tab. Both fields referred to two different pages.
+  2. In browser engines (Playwright, Edge/Chromium), tabs, popups, and windows are all represented uniformly as `Page` objects. Describing every created Page to the user as a literal "popup" is imprecise when a click creates a new tab.
+- **Root Cause**:
+  In `actionExecutor.js`, when a new page was adopted under `allow-single`, `result.url` and `result.title` were overwritten with `popupEvidence.url` and `popupEvidence.title`, but `result.currentUrl` was left as the pre-click opener URL.
+- **Decision**:
+  1. **Strict URL/Title Alignment**: On new page creation and adoption, both `result.currentUrl` and `result.title` are updated to match the newly active page (`popupEvidence.url` and `popupEvidence.title`).
+  2. **Generic Terminology**: Expose `newPageCreated: Boolean` alongside `popupCreated: Boolean` in action responses and update Web UI metadata to display `New Page Created: Yes/No` while preserving `Popup Created: Yes/No` for backward compatibility.
+  3. **Preservation of Creation Type**: Preserve and expose `creationType` (e.g. `'popup'`, `'new-page'`, `'initial'`, `'manual'`) in metadata so later bricks can differentiate tab vs popup vs window when reliably distinguishable, without performing premature OS-level window classification in Brick 31.
+- **Consequences**:
+  - `currentUrl` and `title` always refer to the same active Page across all action results.
+  - Generic "new page" terminology is presented in response metadata while maintaining strict backward compatibility.
+  - Zero weakening of security or popup policy rules.
 
 

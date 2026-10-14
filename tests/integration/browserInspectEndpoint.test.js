@@ -37,10 +37,12 @@ function createMockBrowserEnvironment() {
     on: (event, cb) => {
       if (!pageListeners.has(event)) pageListeners.set(event, []);
       pageListeners.get(event).push(cb);
-    }
+    },
+    context: () => context
   };
 
   const context = {
+    pages: () => [page].filter(p => !p.closed),
     newPage: async () => page,
     close: async () => {}
   };
