@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>File Upload Form Fixture</title>
+</head>
+<body>
+  <h1>Upload Document</h1>
+  <form id="upload-form" action="/submit-form-target" method="POST">
+    <div>
+      <label for="doc-upload">Select File</label>
+      <input type="file" id="doc-upload" name="docFile" required>
+    </div>
+    <div style="margin-top: 15px;">
+      <button type="submit" id="upload-btn">Upload</button>
+    </div>
+  </form>
+</body>
+</html>

@@ -97,8 +97,11 @@ BRICK-032 — Dynamic Sites & SPAs v1 (Semantic DOM Revision + SPA Route Awarene
 Status: VERIFIED
 
 BRICK-033 — Forms v1 (Understand, Map & Safely Populate)
-Status: IN PROGRESS (Automated Real-Browser Verification Passed; Level 1: 1391/1391, Level 2: 48/48)
+Status: VERIFIED
 
-BRICK-034 — Form Submission & Confirmation v1
+BRICK-034 — Confirmed Form Submission & Result Verification v1
+Status: IN PROGRESS (Automated Real-Browser Verification Harness)
+
+BRICK-035 — Authentication & Saved Credentials v1
 Status: NOT STARTED / NOT AUTHORIZED
 

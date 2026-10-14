@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>SPA Form Submit</title>
+</head>
+<body>
+  <div id="app">
+    <h1>Place Order</h1>
+    <form id="spa-order-form">
+      <div>
+        <label for="item-qty">Quantity</label>
+        <input type="number" id="item-qty" name="quantity" value="2" required>
+      </div>
+      <div>
+        <label for="delivery-note">Instructions</label>
+        <input type="text" id="delivery-note" name="instructions" value="Leave at door">
+      </div>
+      <div style="margin-top: 15px;">
+        <button type="submit" id="place-order-btn">Confirm Order</button>
+      </div>
+    </form>
+    <div id="spa-confirmation" style="display: none; margin-top: 20px;">
+      <h2 id="order-success-title">Order Placed Successfully</h2>
+      <p id="order-message">Thank you for your order! Your confirmation code is #98765.</p>
+    </div>
+  </div>
+
+  <script>
+    document.getElementById('spa-order-form').addEventListener('submit', function(e) {
+      e.preventDefault();
+      document.getElementById('spa-order-form').style.display = 'none';
+      document.getElementById('spa-confirmation').style.display = 'block';
+      window.location.hash = '#order-completed';
+      // Post to loopback server endpoint to increment submit counter
+      fetch('/api/test/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item: 'order', timestamp: Date.now() })
+      }).catch(function() {});
+    });
+  </script>
+</body>
+</html>

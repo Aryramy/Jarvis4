@@ -440,6 +440,35 @@
       </div>
       <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; display: none;" id="forms-result-label">Population Result:</div>
       <div id="forms-result" class="response-area" style="display: none; max-height: 240px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
+
+      <!-- Brick 34 Confirmed Form Submission Section -->
+      <div style="font-size: 0.9rem; font-weight: 600; color: #38bdf8; text-align: left; margin-top: 14px; margin-bottom: 4px;">Submit Form</div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <input type="text" id="submit-snapshot-token" placeholder="Expected Snapshot Token" style="flex: 1; min-width: 180px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <input type="text" id="submit-form-id" placeholder="Form ID (optional)" style="width: 160px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <input type="text" id="submitter-name" placeholder="Submitter Button (e.g. Send)" style="width: 180px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+      </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <select id="submit-verify-type" style="padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;">
+          <option value="url-changed">Verify: URL Changed</option>
+          <option value="url-contains">Verify: URL Contains</option>
+          <option value="url-equals">Verify: URL Equals</option>
+          <option value="text-present">Verify: Text Present</option>
+          <option value="target-present">Verify: Target Present</option>
+          <option value="spa-route-changed">Verify: SPA Route Changed</option>
+          <option value="document-navigation">Verify: Document Navigation</option>
+        </select>
+        <input type="text" id="submit-verify-value" placeholder="Verification Value / Text" style="flex: 1; min-width: 160px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+      </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+        <button type="button" id="prepare-submit-btn">Prepare Submission</button>
+        <button type="button" id="confirm-submit-btn" disabled>Confirm & Submit</button>
+      </div>
+      <div id="submit-token-status" style="font-size: 0.85rem; color: #94a3b8; text-align: left; margin-bottom: 4px;">Confirmation Token: (None)</div>
+      <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; display: none;" id="submit-preview-label">Submission Preview:</div>
+      <div id="submit-preview" class="response-area" style="display: none; max-height: 160px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
+      <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; display: none;" id="submit-result-label">Verification Result:</div>
+      <div id="submit-result" class="response-area" style="display: none; max-height: 240px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
     </div>
   </div>
 
@@ -3074,6 +3103,130 @@
           }
         } finally {
           populateFormBtn.disabled = false;
+        }
+      });
+    }
+
+    // Brick 34 Form Submission Section Handlers
+    const submitSnapshotToken = document.getElementById('submit-snapshot-token');
+    const submitFormId = document.getElementById('submit-form-id');
+    const submitterName = document.getElementById('submitter-name');
+    const submitVerifyType = document.getElementById('submit-verify-type');
+    const submitVerifyValue = document.getElementById('submit-verify-value');
+    const prepareSubmitBtn = document.getElementById('prepare-submit-btn');
+    const confirmSubmitBtn = document.getElementById('confirm-submit-btn');
+    const submitTokenStatus = document.getElementById('submit-token-status');
+    const submitPreviewLabel = document.getElementById('submit-preview-label');
+    const submitPreview = document.getElementById('submit-preview');
+    const submitResultLabel = document.getElementById('submit-result-label');
+    const submitResult = document.getElementById('submit-result');
+
+    let activeConfirmationToken = null;
+
+    if (prepareSubmitBtn) {
+      prepareSubmitBtn.addEventListener('click', async () => {
+        prepareSubmitBtn.disabled = true;
+        if (confirmSubmitBtn) confirmSubmitBtn.disabled = true;
+        activeConfirmationToken = null;
+        if (submitPreview) submitPreview.style.display = 'none';
+        if (submitPreviewLabel) submitPreviewLabel.style.display = 'none';
+        if (submitResult) submitResult.style.display = 'none';
+        if (submitResultLabel) submitResultLabel.style.display = 'none';
+
+        const expectedSnapshotToken = (submitSnapshotToken ? submitSnapshotToken.value : '').trim();
+        const formId = (submitFormId ? submitFormId.value : '').trim();
+        const submitter = (submitterName ? submitterName.value : '').trim();
+        const verifyType = (submitVerifyType ? submitVerifyType.value : 'url-changed').trim();
+        const verifyVal = (submitVerifyValue ? submitVerifyValue.value : '').trim();
+
+        const verification = { type: verifyType };
+        if (verifyType === 'url-equals' || verifyType === 'url-contains') {
+          verification.value = verifyVal;
+        } else if (verifyType === 'text-present') {
+          verification.text = verifyVal;
+        } else if (verifyType === 'target-present' || verifyType === 'target-absent') {
+          verification.target = { text: verifyVal };
+        }
+
+        const payload = {
+          expectedSnapshotToken,
+          verification
+        };
+        if (formId) payload.formId = formId;
+        if (submitter) payload.submitter = submitter;
+
+        try {
+          const res = await fetch('/api/browser/prepare-form-submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+          if (submitPreviewLabel) submitPreviewLabel.style.display = 'block';
+          if (submitPreview) {
+            submitPreview.style.display = 'block';
+            submitPreview.textContent = JSON.stringify(data, null, 2);
+          }
+          if (res.ok && data.success && data.confirmationToken) {
+            activeConfirmationToken = data.confirmationToken;
+            if (submitTokenStatus) {
+              submitTokenStatus.textContent = `Confirmation Token: Valid (Expires in ${Math.round(data.expiresInMs / 1000)}s)`;
+            }
+            if (confirmSubmitBtn) confirmSubmitBtn.disabled = false;
+          } else {
+            if (submitTokenStatus) {
+              submitTokenStatus.textContent = `Confirmation Token: Failed (${data.code || data.error || 'ERROR'})`;
+            }
+            if (confirmSubmitBtn) confirmSubmitBtn.disabled = true;
+          }
+        } catch (err) {
+          if (submitTokenStatus) submitTokenStatus.textContent = 'Confirmation Token: Error';
+          if (submitPreviewLabel) submitPreviewLabel.style.display = 'block';
+          if (submitPreview) {
+            submitPreview.style.display = 'block';
+            submitPreview.textContent = `Network Error: ${err.message || 'Request failed'}`;
+          }
+        } finally {
+          prepareSubmitBtn.disabled = false;
+        }
+      });
+    }
+
+    if (confirmSubmitBtn) {
+      confirmSubmitBtn.addEventListener('click', async () => {
+        confirmSubmitBtn.disabled = true;
+        const tokenToUse = activeConfirmationToken;
+        activeConfirmationToken = null;
+        if (submitTokenStatus) submitTokenStatus.textContent = 'Confirmation Token: Submitting...';
+        if (submitResult) submitResult.style.display = 'none';
+        if (submitResultLabel) submitResultLabel.style.display = 'none';
+
+        try {
+          const res = await fetch('/api/browser/submit-form', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ confirmationToken: tokenToUse })
+          });
+          const data = await res.json();
+          if (submitResultLabel) submitResultLabel.style.display = 'block';
+          if (submitResult) {
+            submitResult.style.display = 'block';
+            submitResult.textContent = JSON.stringify(data, null, 2);
+          }
+          if (res.ok && data.success && data.verified) {
+            if (submitTokenStatus) submitTokenStatus.textContent = 'Confirmation Token: Consumed & Verified';
+          } else if (data.submissionAttempted && !data.verified) {
+            if (submitTokenStatus) submitTokenStatus.textContent = 'Confirmation Token: Consumed (Attempted but Unverified)';
+          } else {
+            if (submitTokenStatus) submitTokenStatus.textContent = `Confirmation Token: Consumed / Failed (${data.code || data.error || 'FAILED'})`;
+          }
+        } catch (err) {
+          if (submitTokenStatus) submitTokenStatus.textContent = 'Confirmation Token: Submission Error';
+          if (submitResultLabel) submitResultLabel.style.display = 'block';
+          if (submitResult) {
+            submitResult.style.display = 'block';
+            submitResult.textContent = `Network Error: ${err.message || 'Request failed'}`;
+          }
         }
       });
     }

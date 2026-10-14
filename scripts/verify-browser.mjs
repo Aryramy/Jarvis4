@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { BrowserManager, FormInspectionError, FormPopulationError } from '../src/browser/browserManager.js';
+import { BrowserManager, FormInspectionError, FormPopulationError, FormSubmissionError } from '../src/browser/browserManager.js';
 import { startFixtureServer } from '../tests/browser-fixtures/server.js';
 import { TargetResolutionError } from '../src/browser/targetResolver.js';
 import { ActionExecutionError } from '../src/browser/actionExecutor.js';
@@ -893,8 +893,342 @@ async function main() {
       assert.equal(bm.activePageId, pageAId);
     });
 
-    // 48. Cleanup succeeds
-    await runTest(48, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
+    // 48. Prepare submission does not submit (forms-submit-success.html)
+    let submitSuccessToken = null;
+    await runTest(48, 'Prepare Form Submission Does Not Submit', 'Prepare Submission', async () => {
+      fixtureServer.resetSubmitCount();
+      await bm.navigate(`${baseUrl}/forms-submit-success.html`);
+      await bm.syncDynamicState();
+
+      const insp = await bm.inspectForms();
+      assert.equal(insp.forms.length, 1);
+      assert.equal(insp.forms[0].buttons.length, 1);
+
+      const prepRes = await bm.prepareFormSubmission({
+        expectedSnapshotToken: insp.snapshotToken,
+        submitter: 'Send Message',
+        verification: { type: 'url-contains', value: 'submitted.html' }
+      });
+
+      assert.equal(prepRes.success, true);
+      assert.equal(prepRes.validation.valid, true);
+      assert.ok(typeof prepRes.confirmationToken === 'string' && prepRes.confirmationToken.startsWith('conf_'));
+      submitSuccessToken = prepRes.confirmationToken;
+
+      // Invariant: MUST NOT SUBMIT during preparation
+      assert.equal(fixtureServer.getSubmitCount(), 0, 'Server must have received 0 submissions during prepare');
+      assert.ok(bm.page.url().includes('forms-submit-success.html'), 'Page must remain on form page during prepare');
+    });
+
+    // 49. Valid confirmed submission & URL verification
+    await runTest(49, 'Confirmed Form Submission With Evidence Verification', 'Submission Execution', async () => {
+      assert.ok(submitSuccessToken, 'Must have valid confirmation token from prepare');
+
+      const submitRes = await bm.submitForm({
+        confirmationToken: submitSuccessToken
+      });
+
+      assert.equal(submitRes.success, true);
+      assert.equal(submitRes.submissionAttempted, true);
+      assert.equal(submitRes.verified, true);
+      assert.equal(submitRes.state, 'SUBMISSION_VERIFIED');
+      assert.equal(submitRes.verification.matched, true);
+      assert.ok(submitRes.currentUrl.includes('submitted.html'));
+
+      // Loopback server received exactly one submission
+      assert.equal(fixtureServer.getSubmitCount(), 1, 'Server must have received exactly 1 submission');
+    });
+
+    // 50. Single-use token & duplicate submission prevention
+    await runTest(50, 'Single-Use Confirmation Token Blocks Duplicate Submit', 'Single-Use & Duplicate Prevention', async () => {
+      let duplicateError = null;
+      try {
+        await bm.submitForm({
+          confirmationToken: submitSuccessToken
+        });
+      } catch (err) {
+        duplicateError = err;
+      }
+
+      assert.ok(duplicateError, 'Duplicate submit with used token must throw');
+      assert.equal(duplicateError.code, 'CONFIRMATION_ALREADY_USED');
+      // Server count must NOT increment
+      assert.equal(fixtureServer.getSubmitCount(), 1, 'Server counter must remain 1 after blocked duplicate attempt');
+    });
+
+    // 51. Browser native HTML5 form validation precheck
+    await runTest(51, 'Native Form Validation Blocks Unvalidated Preparation', 'Form Validation', async () => {
+      await bm.navigate(`${baseUrl}/forms-submit-validation.html`);
+      await bm.syncDynamicState();
+
+      const insp = await bm.inspectForms();
+      assert.equal(insp.forms.length, 1);
+
+      let valError = null;
+      try {
+        await bm.prepareFormSubmission({
+          expectedSnapshotToken: insp.snapshotToken,
+          submitter: 'Register'
+        });
+      } catch (err) {
+        valError = err;
+      }
+
+      assert.ok(valError, 'Preparation must fail on invalid form');
+      assert.equal(valError.code, 'FORM_VALIDATION_FAILED');
+      assert.ok(Array.isArray(valError.details?.issues) && valError.details.issues.length > 0);
+      assert.equal(fixtureServer.getSubmitCount(), 1, 'Server counter must not increment on validation failure');
+    });
+
+    // 52. SPA form submission & text/route verification
+    await runTest(52, 'SPA Form Submission & Text/Route Verification', 'Submission Verification', async () => {
+      await bm.navigate(`${baseUrl}/forms-submit-spa.html`);
+      await bm.syncDynamicState();
+
+      const insp = await bm.inspectForms();
+      assert.equal(insp.forms.length, 1);
+
+      const prepRes = await bm.prepareFormSubmission({
+        expectedSnapshotToken: insp.snapshotToken,
+        submitter: 'Confirm Order',
+        verification: { type: 'text-present', text: 'Order Placed Successfully' }
+      });
+
+      assert.equal(prepRes.success, true);
+      assert.ok(prepRes.confirmationToken);
+
+      const submitRes = await bm.submitForm({
+        confirmationToken: prepRes.confirmationToken
+      });
+
+      assert.equal(submitRes.success, true);
+      assert.equal(submitRes.verified, true);
+      assert.equal(submitRes.state, 'SUBMISSION_VERIFIED');
+      assert.equal(submitRes.verification.matched, true);
+
+      // Verify DOM updated in browser
+      const confVisible = await bm.page.evaluate(() => {
+        const el = document.getElementById('spa-confirmation');
+        return el && el.style.display !== 'none';
+      });
+      assert.equal(confVisible, true, 'SPA confirmation container must be displayed');
+
+      // Server counter should now be 2
+      assert.equal(fixtureServer.getSubmitCount(), 2);
+    });
+
+    // 53. Truthful unverified result on timeout (no auto-retry)
+    await runTest(53, 'Truthful Failure Reporting Without Auto-Retry on Timeout', 'Submission Verification', async () => {
+      await bm.navigate(`${baseUrl}/forms-submit-failure.html`);
+      await bm.syncDynamicState();
+
+      const insp = await bm.inspectForms();
+      const prepRes = await bm.prepareFormSubmission({
+        expectedSnapshotToken: insp.snapshotToken,
+        submitter: 'Process Transaction',
+        verification: { type: 'url-changed' }
+      });
+
+      assert.equal(prepRes.success, true);
+      const token = prepRes.confirmationToken;
+
+      let timeoutError = null;
+      try {
+        await bm.submitForm({
+          confirmationToken: token
+        }, { verifyTimeoutMs: 600 });
+      } catch (err) {
+        timeoutError = err;
+      }
+
+      assert.ok(timeoutError, 'Must throw when verification fails to observe evidence');
+      assert.equal(timeoutError.code, 'SUBMISSION_ATTEMPTED_BUT_NOT_VERIFIED');
+      assert.equal(timeoutError.details?.submissionAttempted, true);
+      assert.equal(timeoutError.details?.verified, false);
+      assert.equal(timeoutError.details?.state, 'SUBMISSION_ATTEMPTED_BUT_NOT_VERIFIED');
+
+      // Confirm token was consumed and cannot be retried
+      let retryError = null;
+      try {
+        await bm.submitForm({ confirmationToken: token });
+      } catch (err) {
+        retryError = err;
+      }
+      assert.ok(retryError);
+      assert.equal(retryError.code, 'CONFIRMATION_ALREADY_USED');
+    });
+
+    // 54. Stale confirmation detection on dynamic change
+    await runTest(54, 'Stale Confirmation Invalidation on State Change', 'Submission Verification', async () => {
+      await bm.navigate(`${baseUrl}/forms-submit-success.html`);
+      await bm.syncDynamicState();
+
+      const insp = await bm.inspectForms();
+      const prepRes = await bm.prepareFormSubmission({
+        expectedSnapshotToken: insp.snapshotToken,
+        submitter: 'Send Message'
+      });
+
+      // Cause a dynamic semantic mutation to bump semanticRevision
+      await bm.page.evaluate(() => {
+        const btn = document.createElement('button');
+        btn.textContent = 'Dynamic Control Added';
+        document.body.appendChild(btn);
+      });
+      await bm.syncDynamicState();
+
+      let staleError = null;
+      try {
+        await bm.submitForm({
+          confirmationToken: prepRes.confirmationToken
+        });
+      } catch (err) {
+        staleError = err;
+      }
+
+      assert.ok(staleError, 'Must reject submission if DOM mutated since preparation');
+      assert.equal(staleError.code, 'SUBMISSION_STALE');
+    });
+
+    // 55. Expired confirmation token detection
+    await runTest(55, 'Confirmation Token Expiration Enforcement', 'Prepare Submission', async () => {
+      await bm.navigate(`${baseUrl}/forms-submit-success.html`);
+      await bm.syncDynamicState();
+
+      const insp = await bm.inspectForms();
+      const prepRes = await bm.prepareFormSubmission({
+        expectedSnapshotToken: insp.snapshotToken,
+        submitter: 'Send Message'
+      }, { ttlMs: 1000 });
+
+      // Wait 1200ms to ensure expiration
+      await new Promise(r => setTimeout(r, 1200));
+
+      let expError = null;
+      try {
+        await bm.submitForm({
+          confirmationToken: prepRes.confirmationToken
+        });
+      } catch (err) {
+        expError = err;
+      }
+
+      assert.ok(expError, 'Must reject expired confirmation token');
+      assert.equal(expError.code, 'CONFIRMATION_EXPIRED');
+    });
+
+    // 56. Password/auth form submission blocked
+    await runTest(56, 'Password / Authentication Form Submission Blocked', 'Submission Security & Safety', async () => {
+      await bm.navigate(`${baseUrl}/forms-basic.html`);
+      await bm.syncDynamicState();
+
+      const insp = await bm.inspectForms();
+      assert.ok(insp.forms.length > 0);
+      const formWithPassword = insp.forms.find(f => f.fields.some(fld => fld.type === 'password' || fld.sensitive));
+      assert.ok(formWithPassword, 'Must discover form with password');
+
+      let authError = null;
+      try {
+        await bm.prepareFormSubmission({
+          expectedSnapshotToken: insp.snapshotToken,
+          formId: formWithPassword.formId,
+          submitter: 'Submit Order'
+        });
+      } catch (err) {
+        authError = err;
+      }
+
+      assert.ok(authError, 'Must block password form submission preparation');
+      assert.equal(authError.code, 'AUTH_FORM_NOT_SUPPORTED');
+    });
+
+    // 57. File upload form submission blocked
+    await runTest(57, 'File Upload Form Submission Blocked', 'Submission Security & Safety', async () => {
+      await bm.navigate(`${baseUrl}/forms-submit-file.html`);
+      await bm.syncDynamicState();
+
+      const insp = await bm.inspectForms();
+      assert.ok(insp.forms.length > 0);
+      const fileForm = insp.forms[0];
+
+      let fileError = null;
+      try {
+        await bm.prepareFormSubmission({
+          expectedSnapshotToken: insp.snapshotToken,
+          formId: fileForm.formId,
+          submitter: 'Upload'
+        });
+      } catch (err) {
+        fileError = err;
+      }
+
+      assert.ok(fileError, 'Must block file form submission preparation');
+      assert.equal(fileError.code, 'FILE_FORM_NOT_SUPPORTED');
+    });
+
+    // 58. Cross-page submission isolation
+    await runTest(58, 'Cross-Page Form Submission Isolation', 'Cross-Page Submission Isolation', async () => {
+      // Navigate Page A to forms-submit-success.html
+      await bm.navigate(`${baseUrl}/forms-submit-success.html`);
+      await bm.syncDynamicState();
+      const pageAId = bm.activePageId;
+      const inspA = await bm.inspectForms();
+      const prepA = await bm.prepareFormSubmission({
+        pageId: pageAId,
+        expectedSnapshotToken: inspA.snapshotToken,
+        submitter: 'Send Message',
+        verification: { type: 'url-contains', value: 'submitted.html' }
+      });
+
+      // Open Page B with forms-submit-spa.html
+      const pageBRes = await bm.openPage(`${baseUrl}/forms-submit-spa.html`);
+      const pageBId = pageBRes.pageId;
+      await bm.syncDynamicState();
+      const inspB = await bm.inspectForms();
+      const prepB = await bm.prepareFormSubmission({
+        pageId: pageBId,
+        expectedSnapshotToken: inspB.snapshotToken,
+        submitter: 'Confirm Order',
+        verification: { type: 'text-present', text: 'Order Placed Successfully' }
+      });
+
+      // Attempt submitting Page B using Token A -> Must fail with CROSS_PAGE_TOKEN_BLOCKED
+      let crossError = null;
+      try {
+        await bm.submitForm({
+          pageId: pageBId,
+          confirmationToken: prepA.confirmationToken
+        });
+      } catch (err) {
+        crossError = err;
+      }
+      assert.ok(crossError);
+      assert.equal(crossError.code, 'CROSS_PAGE_TOKEN_BLOCKED');
+
+      // Submit Page A with Token A
+      await bm.switchPage(pageAId);
+      const submitARes = await bm.submitForm({
+        pageId: pageAId,
+        confirmationToken: prepA.confirmationToken
+      });
+      assert.equal(submitARes.success, true);
+      assert.equal(submitARes.verified, true);
+
+      // Verify Page B is untouched
+      await bm.switchPage(pageBId);
+      const bUnsubmitted = await bm.page.evaluate(() => {
+        const orderForm = document.getElementById('spa-order-form');
+        return orderForm && orderForm.style.display !== 'none';
+      });
+      assert.equal(bUnsubmitted, true, 'Page B form must remain unsubmitted and visible');
+
+      // Close Page B
+      await bm.closePage(pageBId);
+      assert.equal(bm.activePageId, pageAId);
+    });
+
+    // 59. Cleanup succeeds
+    await runTest(59, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
       await bm.close();
       assert.equal(bm.isBrowserConnected(), false);
       assert.equal(bm.pageCount, 0);
@@ -942,6 +1276,12 @@ async function main() {
     'Submission Blocking',
     'Dynamic Forms & Atomicity',
     'Cross-Page Form Isolation',
+    'Prepare Submission',
+    'Submission Execution',
+    'Submission Verification',
+    'Submission Security & Safety',
+    'Single-Use & Duplicate Prevention',
+    'Cross-Page Submission Isolation',
     'Cleanup'
   ];
 
@@ -959,10 +1299,10 @@ async function main() {
 
   console.log('--------------------------------------------------');
   console.log(`Tests:\n${passed}/${total} PASS\n`);
-  console.log(`Exit Code:\n${passed === total && total >= 48 ? 0 : 1}`);
+  console.log(`Exit Code:\n${passed === total && total >= 59 ? 0 : 1}`);
   console.log('==================================================');
 
-  if (passed !== total || total < 48) {
+  if (passed !== total || total < 59) {
     process.exit(1);
   }
 }

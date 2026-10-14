@@ -1,11 +1,41 @@
 Project: JARVIS4
-Current Brick: 33
-Status: BRICK-033 IN PROGRESS (Forms v1 — Understand, Map & Safely Populate; Automated Real-Browser Verification Passed)
-Last Verified Brick: BRICK-032
-Current Feature: Forms v1 (Understand, Map & Safely Populate)
-Next Feature: NOT AUTHORIZED (Brick 34: Form Submission & Confirmation — NOT STARTED)
+Current Brick: 34
+Status: BRICK-034 IN PROGRESS (Confirmed Form Submission + Result Verification v1; Automated Real-Browser Verification Passed)
+Last Verified Brick: BRICK-033
+Current Feature: Confirmed Form Submission & Result Verification v1
+Next Feature: NOT AUTHORIZED (Brick 35: Authentication & Saved Credentials — NOT STARTED)
 
 ## Working capabilities
+
+- Confirmed Form Submission & Result Verification v1 (Brick 34) deterministic two-step submission and verification subsystem (`src/browser/formSubmitter.js`, `browserManager.js`, `server.js`, `index.html`):
+  - Two-Step Authorization Contract:
+    - `POST /api/browser/prepare-form-submit`: Atomically inspects target form, verifies HTML5 native form validity, blocks password and file inputs, binds verification conditions, and issues an opaque, short-lived confirmation token without submitting.
+    - `POST /api/browser/submit-form`: Requires confirmation token. Verifies page and snapshot freshness, consumes token immediately at/before the execution boundary, clicks submit button, and evaluates verification evidence.
+  - Single-Use Opaque Confirmation Tokens:
+    - Opaque cryptographically random identifier (`conf_<timestamp>_<hex>`).
+    - Configurable TTL: `BROWSER_CONFIRMATION_TTL_MS` (default 60,000 ms, clamped [1000, 300000]).
+    - Bound strictly in memory to `pageId`, `documentVersion`, `semanticRevision`, `snapshotToken`, form identity, submitter identity, and verification expectation.
+    - Consumed immediately at execution boundary; duplicate or repeated submissions are strictly rejected with `CONFIRMATION_ALREADY_USED`.
+  - Browser-Native HTML5 Validation Precheck:
+    - Evaluates `form.checkValidity()` and `element.validity` before issuing token.
+    - Forms with missing required fields, type mismatches, pattern mismatches, or range issues are aborted with `FORM_VALIDATION_FAILED`, creating ZERO confirmation token.
+  - Strict Security Boundaries:
+    - Forms containing password or authentication inputs are blocked with `AUTH_FORM_NOT_SUPPORTED` (authentication deferred to Brick 35).
+    - Forms containing file upload inputs are blocked with `FILE_FORM_NOT_SUPPORTED` (upload deferred to Brick 37).
+  - Submission Mechanism:
+    - Clicks the uniquely resolved DOM submit element (`<button type="submit">` or `<input type="submit">`).
+    - Zero usage of `form.submit()`, synthetic script injection, Enter-key submission, or reset buttons.
+  - Evidence-Based Verification:
+    - Supported deterministic verification types: `url-equals`, `url-contains`, `url-changed`, `target-present`, `target-absent`, `text-present`, `spa-route-changed`, `document-navigation`.
+    - Polling loop bounded by `BROWSER_SUBMIT_VERIFY_TIMEOUT_MS` (default 10,000 ms, clamped [100, 30000]). Never uses `networkidle`.
+  - Truthful Failure Reporting & Strictly Zero Auto-Retry:
+    - Distinguishes `SUBMISSION_VERIFIED` from `SUBMISSION_ATTEMPTED_BUT_NOT_VERIFIED`.
+    - If submission executes but evidence is not observed within timeout: returns `submissionAttempted: true, verified: false`. Never claims success and NEVER automatically retries under any circumstance.
+  - Atomic Cross-Page Isolation:
+    - Tokens are strictly bound to the target page where preparation occurred. Cross-page submission attempts are blocked with `CROSS_PAGE_TOKEN_BLOCKED`.
+  - Developer Control Center UI:
+    - Adds "Submit Form" section with Prepare Submission, safe preview, Confirmation Token status display, "Confirm & Submit" button (only enabled after preparation), and Verification Result display. Rendered strictly via `.textContent` without HTML injection.
+  - Zero AI / Zero External Dependencies: Exactly 0 LLM calls, 0 search calls. Local loopback fixtures only.
 
 - Forms v1 (Brick 33) deterministic form discovery and safe population subsystem (`src/browser/formInspector.js`, `src/browser/formPopulator.js`, `browserManager.js`, `server.js`, `index.html`):
   - Form Discovery & Inspection (`POST /api/browser/inspect-form`): Discovers `<form>` elements and formless controls on the active managed page without leaking raw HTML, CSS selectors, XPath, ElementHandles, cookies, or hidden tokens.

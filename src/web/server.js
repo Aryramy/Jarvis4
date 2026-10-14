@@ -22,7 +22,7 @@ import { PageReaderError } from '../webpage/urlSafety.js';
 import { executePageQa, PageQaError } from '../webpage/pageQa.js';
 import { executeResearchOne, ResearchOneError } from '../research/researchOne.js';
 import { decideBrowserEscalation, BrowserEscalationError } from '../routing/browserEscalation.js';
-import { defaultBrowserManager, BrowserManager, BrowserManagerError, FormInspectionError, FormPopulationError } from '../browser/browserManager.js';
+import { defaultBrowserManager, BrowserManager, BrowserManagerError, FormInspectionError, FormPopulationError, FormSubmissionError } from '../browser/browserManager.js';
 import { TargetResolutionError, SUPPORTED_KINDS } from '../browser/targetResolver.js';
 import { ActionExecutionError } from '../browser/actionExecutor.js';
 
@@ -2573,6 +2573,170 @@ export function createRequestListener(options = {}) {
           res.writeHead(statusCode, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage,
+            details: err.details || {}
+          }));
+        }
+      });
+
+      return;
+    }
+
+    // Route: POST /api/browser/prepare-form-submit (Brick 34 Confirmed Form Submission)
+    if (url.pathname === '/api/browser/prepare-form-submit') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+          return;
+        }
+
+        if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Request body must be an object' }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.prepareFormSubmission(parsedBody);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'FORM_SUBMISSION_FAILED';
+          const statusCode = 400;
+
+          let safeMessage = 'Form submission preparation failed.';
+          if (errorCode === 'BROWSER_NOT_RUNNING') {
+            safeMessage = 'Browser is not running. Please launch the browser first.';
+          } else if (errorCode === 'AUTH_FORM_NOT_SUPPORTED') {
+            safeMessage = 'Forms containing password or authentication controls are not supported in Brick 34.';
+          } else if (errorCode === 'FILE_FORM_NOT_SUPPORTED') {
+            safeMessage = 'Forms containing file upload controls are not supported in Brick 34.';
+          } else if (errorCode === 'FORM_VALIDATION_FAILED') {
+            safeMessage = 'Form validation failed: one or more fields are invalid.';
+          } else if (errorCode === 'SUBMITTER_NOT_FOUND') {
+            safeMessage = 'Submit button could not be located.';
+          } else if (errorCode === 'SUBMITTER_AMBIGUOUS') {
+            safeMessage = 'Multiple submit controls found; please explicitly specify the submitter.';
+          } else if (errorCode === 'SUBMISSION_STALE' || errorCode === 'TARGET_STALE') {
+            safeMessage = 'Snapshot token is stale or invalid.';
+          } else if (err instanceof BrowserManagerError || err instanceof FormSubmissionError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage,
+            details: err.details || {}
+          }));
+        }
+      });
+
+      return;
+    }
+
+    // Route: POST /api/browser/submit-form (Brick 34 Confirmed Form Submission)
+    if (url.pathname === '/api/browser/submit-form') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+          return;
+        }
+
+        if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Request body must be an object' }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.submitForm(parsedBody);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'FORM_SUBMISSION_FAILED';
+
+          if (errorCode === 'SUBMISSION_ATTEMPTED_BUT_NOT_VERIFIED') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: false,
+              submissionAttempted: true,
+              verified: false,
+              state: 'SUBMISSION_ATTEMPTED_BUT_NOT_VERIFIED',
+              error: 'SUBMISSION_ATTEMPTED_BUT_NOT_VERIFIED',
+              code: 'SUBMISSION_ATTEMPTED_BUT_NOT_VERIFIED',
+              message: 'Form submission was executed but expected verification evidence was not observed.',
+              details: err.details || {}
+            }));
+            return;
+          }
+
+          let statusCode = 400;
+          if (errorCode === 'BROWSER_ERROR') {
+            statusCode = 500;
+          }
+
+          let safeMessage = 'Form submission execution failed.';
+          if (errorCode === 'CONFIRMATION_ALREADY_USED') {
+            safeMessage = 'Confirmation token has already been used.';
+          } else if (errorCode === 'CONFIRMATION_EXPIRED') {
+            safeMessage = 'Confirmation token has expired.';
+          } else if (errorCode === 'SUBMISSION_STALE') {
+            safeMessage = 'Form state has changed or snapshot is stale since preparation.';
+          } else if (errorCode === 'CROSS_PAGE_TOKEN_BLOCKED') {
+            safeMessage = 'Confirmation token is bound to a different page.';
+          } else if (errorCode === 'INVALID_CONFIRMATION_TOKEN') {
+            safeMessage = 'Confirmation token not found or invalid.';
+          } else if (err instanceof BrowserManagerError || err instanceof FormSubmissionError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            submissionAttempted: Boolean(err.details?.submissionAttempted),
+            verified: false,
+            state: err.details?.state || errorCode,
             error: errorCode,
             code: errorCode,
             message: safeMessage,

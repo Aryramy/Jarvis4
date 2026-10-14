@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Submission Failure Test</title>
+</head>
+<body>
+  <h1>Payment Processing</h1>
+  <form id="payment-form">
+    <div>
+      <label for="account-no">Account Number</label>
+      <input type="text" id="account-no" name="account" value="12345678" required>
+    </div>
+    <div style="margin-top: 15px;">
+      <button type="submit" id="process-btn">Process Transaction</button>
+    </div>
+  </form>
+  <div id="status-area"></div>
+
+  <script>
+    document.getElementById('payment-form').addEventListener('submit', function(e) {
+      e.preventDefault();
+      // Form was submitted and clicked, but server / page displays nothing matching expected verification
+      document.getElementById('status-area').textContent = 'Pending indefinitely';
+    });
+  </script>
+</body>
+</html>

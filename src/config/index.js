@@ -88,7 +88,9 @@ function clamp(val, min, max, defaultVal) {
     dynamicTimeoutMs: clamp(overrides.BROWSER_DYNAMIC_TIMEOUT_MS ?? process.env.BROWSER_DYNAMIC_TIMEOUT_MS, 100, 60000, 5000),
     domQuietMs: clamp(overrides.BROWSER_DOM_QUIET_MS ?? process.env.BROWSER_DOM_QUIET_MS, 50, 5000, 300),
     dynamicPollMs: clamp(overrides.BROWSER_DYNAMIC_POLL_MS ?? process.env.BROWSER_DYNAMIC_POLL_MS, 20, 1000, 100),
-    maxDynamicWaits: clamp(overrides.BROWSER_MAX_DYNAMIC_WAITS ?? process.env.BROWSER_MAX_DYNAMIC_WAITS, 1, 20, 4)
+    maxDynamicWaits: clamp(overrides.BROWSER_MAX_DYNAMIC_WAITS ?? process.env.BROWSER_MAX_DYNAMIC_WAITS, 1, 20, 4),
+    submitVerifyTimeoutMs: clamp(overrides.BROWSER_SUBMIT_VERIFY_TIMEOUT_MS ?? process.env.BROWSER_SUBMIT_VERIFY_TIMEOUT_MS, 100, 30000, 10000),
+    submitConfirmationTtlMs: clamp(overrides.BROWSER_CONFIRMATION_TTL_MS ?? process.env.BROWSER_CONFIRMATION_TTL_MS, 1000, 300000, 60000)
   });
 
   return Object.freeze({

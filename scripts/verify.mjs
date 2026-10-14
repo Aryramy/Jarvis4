@@ -61,6 +61,7 @@ const REQUIRED_FILES = [
   'src/browser/targetResolver.js',
   'src/browser/formInspector.js',
   'src/browser/formPopulator.js',
+  'src/browser/formSubmitter.js',
   'src/webpage/urlSafety.js',
   'src/webpage/htmlExtractor.js',
   'src/webpage/pageReader.js',
@@ -91,6 +92,7 @@ const REQUIRED_FILES = [
   'tests/unit/targetResolver.test.js',
   'tests/unit/formInspection.test.js',
   'tests/unit/formPopulator.test.js',
+  'tests/unit/formSubmission.test.js',
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
   'tests/unit/voiceTurn.test.js',
@@ -124,7 +126,13 @@ const REQUIRED_FILES = [
   'tests/browser-fixtures/forms-basic.html',
   'tests/browser-fixtures/forms-multiple.html',
   'tests/browser-fixtures/forms-dynamic.html',
-  'tests/browser-fixtures/forms-validation.html'
+  'tests/browser-fixtures/forms-validation.html',
+  'tests/browser-fixtures/submitted.html',
+  'tests/browser-fixtures/forms-submit-success.html',
+  'tests/browser-fixtures/forms-submit-validation.html',
+  'tests/browser-fixtures/forms-submit-spa.html',
+  'tests/browser-fixtures/forms-submit-failure.html',
+  'tests/browser-fixtures/forms-submit-file.html'
 ];
 
 const REQUIRED_DIRS = [
@@ -488,6 +496,17 @@ check('Browser Form Populator Module Sanity Check', async () => {
   const { FormPopulationError, populateForm, validateFormPreflight } = await import('../src/browser/formPopulator.js');
   if (typeof FormPopulationError !== 'function' || typeof populateForm !== 'function' || typeof validateFormPreflight !== 'function') {
     throw new Error('formPopulator module failed to export required functions or classes');
+  }
+});
+
+check('Browser Form Submitter Module Sanity Check', async () => {
+  const { FormSubmissionError, prepareFormSubmission, executeFormSubmission, generateConfirmationToken, getConfirmationToken, clearConfirmationTokens } = await import('../src/browser/formSubmitter.js');
+  if (typeof FormSubmissionError !== 'function' || typeof prepareFormSubmission !== 'function' || typeof executeFormSubmission !== 'function' || typeof generateConfirmationToken !== 'function') {
+    throw new Error('formSubmitter module failed to export required functions or classes');
+  }
+  const token = generateConfirmationToken();
+  if (typeof token !== 'string' || !token.startsWith('conf_')) {
+    throw new Error('generateConfirmationToken sanity check failed');
   }
 });
 

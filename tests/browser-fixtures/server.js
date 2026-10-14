@@ -33,11 +33,42 @@ const MIME_TYPES = {
  */
 export async function startFixtureServer(options = {}) {
   const sockets = new Set();
+  let submitCount = 0;
+  let lastSubmittedData = null;
+  const submissions = [];
 
   const server = http.createServer((req, res) => {
     try {
       const parsedUrl = new URL(req.url, 'http://127.0.0.1');
       let pathname = parsedUrl.pathname;
+
+      // Handle test-only form POST endpoints (Brick 34)
+      if (req.method === 'POST') {
+        if (pathname === '/submit-form-target' || pathname === '/api/test/submit') {
+          let body = '';
+          req.on('data', chunk => { body += chunk; });
+          req.on('end', () => {
+            submitCount++;
+            lastSubmittedData = body;
+            submissions.push({ pathname, body, time: Date.now() });
+
+            if (pathname === '/submit-form-target') {
+              res.writeHead(303, { 'Location': '/submitted.html' });
+              res.end();
+            } else {
+              res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+              res.end(JSON.stringify({ success: true, count: submitCount }));
+            }
+          });
+          return;
+        }
+      }
+
+      if (req.method === 'GET' && pathname === '/api/test/submit-count') {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+        res.end(JSON.stringify({ count: submitCount }));
+        return;
+      }
 
       if (pathname === '/' || pathname === '') {
         pathname = '/static.html';
@@ -110,6 +141,14 @@ export async function startFixtureServer(options = {}) {
     server,
     port,
     baseUrl,
-    close
+    close,
+    getSubmitCount: () => submitCount,
+    resetSubmitCount: () => {
+      submitCount = 0;
+      lastSubmittedData = null;
+      submissions.length = 0;
+    },
+    getLastSubmittedData: () => lastSubmittedData,
+    getSubmissions: () => [...submissions]
   };
 }

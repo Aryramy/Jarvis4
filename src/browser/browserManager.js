@@ -22,8 +22,9 @@ import { executeSemanticAction, ActionExecutionError } from './actionExecutor.js
 import { DYNAMIC_TRACKER_SCRIPT } from './dynamicTracker.js';
 import { inspectForms, FormInspectionError } from './formInspector.js';
 import { populateForm, FormPopulationError } from './formPopulator.js';
+import { prepareFormSubmission, executeFormSubmission, getConfirmationToken, clearConfirmationTokens, FormSubmissionError } from './formSubmitter.js';
 
-export { ActionExecutionError, FormInspectionError, FormPopulationError };
+export { ActionExecutionError, FormInspectionError, FormPopulationError, FormSubmissionError };
 
 export class BrowserManagerError extends Error {
   /**
@@ -99,6 +100,9 @@ export class BrowserManager {
     this._activeDynamicWaits = 0;
     this._dynamicWaiters = new Set();
 
+    this._submitVerifyTimeoutMs = Math.min(Math.max(Number(options.submitVerifyTimeoutMs ?? config.browser?.submitVerifyTimeoutMs ?? 10000) || 10000, 100), 30000);
+    this._submitConfirmationTtlMs = Math.min(Math.max(Number(options.submitConfirmationTtlMs ?? config.browser?.submitConfirmationTtlMs ?? 60000) || 60000, 1000), 300000);
+
     this._state = BROWSER_STATES.STOPPED;
     this._browser = null;
     this._context = null;
@@ -147,6 +151,14 @@ export class BrowserManager {
 
   get popupSettleMs() {
     return this._popupSettleMs;
+  }
+
+  get submitVerifyTimeoutMs() {
+    return this._submitVerifyTimeoutMs;
+  }
+
+  get submitConfirmationTtlMs() {
+    return this._submitConfirmationTtlMs;
   }
 
   get state() {
@@ -1947,6 +1959,107 @@ export class BrowserManager {
       throw new BrowserManagerError(
         safeMsg || 'Form population failed.',
         err.code || 'FORM_POPULATION_FAILED',
+        err.details || {}
+      );
+    }
+  }
+
+  /**
+   * Prepares deterministic form submission authorization and verification contract (Brick 34).
+   * Generates single-use confirmation token without submitting.
+   *
+   * @param {Object} prepareRequest
+   * @param {Object} [options={}]
+   * @returns {Promise<Object>}
+   */
+  async prepareFormSubmission(prepareRequest, options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError(
+        'Browser is not running. Please launch the browser first.',
+        'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    const targetPageId = options.pageId || prepareRequest?.pageId || this._activePageId;
+    const entry = this._pages.get(targetPageId);
+    if (!entry || !entry.page || (typeof entry.page.isClosed === 'function' && entry.page.isClosed())) {
+      throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND');
+    }
+
+    try {
+      return await prepareFormSubmission(entry.page, this, prepareRequest, {
+        ...options,
+        pageId: entry.pageId,
+        ttlMs: options.ttlMs ?? this._submitConfirmationTtlMs
+      });
+    } catch (err) {
+      if (err instanceof BrowserManagerError || err instanceof FormSubmissionError) {
+        throw err;
+      }
+      let safeMsg = 'Form submission preparation failed.';
+      if (err && typeof err.message === 'string') {
+        const firstLine = err.message.split('\n')[0].trim();
+        safeMsg = firstLine.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').trim();
+      }
+      throw new BrowserManagerError(
+        safeMsg || 'Form submission preparation failed.',
+        err.code || 'FORM_SUBMISSION_FAILED',
+        err.details || {}
+      );
+    }
+  }
+
+  /**
+   * Executes a confirmed form submission once using a valid confirmation token (Brick 34).
+   *
+   * @param {Object} submitRequest
+   * @param {Object} [options={}]
+   * @returns {Promise<Object>}
+   */
+  async submitForm(submitRequest, options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError(
+        'Browser is not running. Please launch the browser first.',
+        'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    // Determine target page from token or request
+    const token = typeof submitRequest?.confirmationToken === 'string'
+      ? submitRequest.confirmationToken.trim()
+      : '';
+    const tokenRecord = token ? getConfirmationToken(token) : null;
+    const targetPageId = options.pageId || submitRequest?.pageId || tokenRecord?.pageId || this._activePageId;
+
+    const entry = this._pages.get(targetPageId);
+    if (!entry || !entry.page || (typeof entry.page.isClosed === 'function' && entry.page.isClosed())) {
+      throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND');
+    }
+
+    try {
+      return await executeFormSubmission(entry.page, this, submitRequest, {
+        ...options,
+        pageId: entry.pageId,
+        actionTimeoutMs: options.actionTimeoutMs ?? config.browser?.actionTimeoutMs ?? 10000,
+        verifyTimeoutMs: options.verifyTimeoutMs ?? this._submitVerifyTimeoutMs,
+        popupSettleMs: options.popupSettleMs ?? this._popupSettleMs
+      });
+    } catch (err) {
+      if (err instanceof BrowserManagerError || err instanceof FormSubmissionError) {
+        throw err;
+      }
+      let safeMsg = 'Form submission execution failed.';
+      if (err && typeof err.message === 'string') {
+        const firstLine = err.message.split('\n')[0].trim();
+        safeMsg = firstLine.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').trim();
+      }
+      throw new BrowserManagerError(
+        safeMsg || 'Form submission execution failed.',
+        err.code || 'FORM_SUBMISSION_FAILED',
         err.details || {}
       );
     }

@@ -376,7 +376,7 @@ Currently tracked issues in JARVIS4:
     - **No Form Submission Workflow**: Submit buttons remain blocked (`FORM_SUBMISSION_NOT_AUTHORIZED`, deferred to Brick 34); form workflows belong to Brick 33.
     - **Production Milestone**: Infrastructure towards GREEN-045; Brick 32 alone is not production-ready.
 
-26. **Forms v1 — Understand, Map & Safely Populate Observations & Limitations (Brick 33 In Progress)**:
+26. **Forms v1 — Understand, Map & Safely Populate Observations & Limitations (Brick 33 Verified)**:
     - **Form Discovery & Inspection**: Deterministic inspection (`POST /api/browser/inspect-form`) discovers `<form>` elements and formless controls on the active managed page without exposing raw HTML, CSS selectors, XPath, ElementHandles, cookies, or hidden tokens. Multiple forms are semantically distinguished, returning `FORM_AMBIGUOUS` if target form is unspecified and ambiguous.
     - **Field Semantics & Accessibility Resolution**: Supported fields (`text`, `email`, `tel`, `url`, `number`, `search`, `textarea`, `select`, `checkbox`, `radio`) are semantically mapped using `<label for>`, wrapping parent `<label>`, `aria-label`, `aria-labelledby`, placeholder fallbacks, and `<fieldset><legend>` context. Radio buttons are grouped semantically; checkboxes enforce explicit boolean target state; select controls map by option label/value without guessing.
     - **Safe Population & Snapshot Authorization**: Form population (`POST /api/browser/fill-form`) requires `expectedSnapshotToken` strictly bound to `pageId`, `documentVersion`, and `semanticRevision`. Stale or cross-page tokens are blocked with `TARGET_STALE`.
@@ -384,8 +384,21 @@ Currently tracked issues in JARVIS4:
     - **Strict Privacy**: Password fields are detected (`sensitive: true`) but values are never exposed or filled (`SENSITIVE_FIELD_NOT_ALLOWED`). File inputs are protected (`FILE_INPUT_NOT_ALLOWED`, deferred to Brick 37). Hidden fields and tokens are protected (`ACTION_NOT_SUPPORTED_FOR_TARGET`). User-supplied values are never persisted in logs, snapshots, conversation store, or test diagnostics.
     - **Form Submission STRICTLY BLOCKED**: Preserves `FORM_SUBMISSION_NOT_AUTHORIZED`. Zero calls to `form.submit()`, `requestSubmit()`, submit button clicks, reset clicks, or Enter key finalization. Submission and result confirmation belong to Brick 34.
     - **Zero AI / Zero Autonomous Value Generation**: Exactly 0 LLM calls, 0 OpenRouter calls, 0 search calls. No guessing, no memory auto-complete, no autonomous filling.
-    - **Automated Real-Browser Verification**: 22 required Edge acceptance criteria verified automatically via Playwright against local fixtures without requiring human manual form mechanics testing.
-    - **Brick 34 Status**: Form Submission & Confirmation v1 is NOT STARTED.
+    - **Automated Real-Browser Verification**: Verified automatically via Playwright against local fixtures without requiring human manual form mechanics testing.
+
+27. **Confirmed Form Submission & Result Verification v1 Observations & Limitations (Brick 34 In Progress)**:
+    - **Deterministic Two-Step Flow**: Form submission is never executed implicitly. Requires explicit authorization via `POST /api/browser/prepare-form-submit` followed by `POST /api/browser/submit-form`.
+    - **Opaque Single-Use Confirmation Tokens**: Token (`conf_<timestamp>_<hex>`) is short-lived (`BROWSER_CONFIRMATION_TTL_MS`, default 60s), stored strictly in memory, and bound to `pageId`, `documentVersion`, `semanticRevision`, `snapshotToken`, form, submitter, and verification expectations. Token is consumed at the execution boundary; duplicate submissions are blocked with `CONFIRMATION_ALREADY_USED`.
+    - **HTML5 Native Form Validation Precheck**: Evaluates browser-native validation (`checkValidity()`) during preparation. If any required or pattern constraint is invalid, returns `FORM_VALIDATION_FAILED` with zero confirmation token generated.
+    - **Strict Security Boundaries**:
+      - Passwords & Credential Authentication: Submission of forms containing password fields is strictly blocked with `AUTH_FORM_NOT_SUPPORTED` (deferred to Brick 35).
+      - File Uploads: Submission of forms containing file upload controls is strictly blocked with `FILE_FORM_NOT_SUPPORTED` (deferred to Brick 37).
+    - **Submission Mechanism & Zero Script Injection**: Clicks the resolved DOM submit button element handle directly. Zero calls to `form.submit()`, zero synthetic JavaScript injection, zero Enter-key submission, and zero reset button usage.
+    - **Evidence-Based Result Verification**: Submission success requires deterministic post-action evidence observation (`url-equals`, `url-contains`, `url-changed`, `target-present`, `target-absent`, `text-present`, `spa-route-changed`, `document-navigation`) within bounded timeout (`BROWSER_SUBMIT_VERIFY_TIMEOUT_MS`, default 10s).
+    - **Truthful Failure Reporting & Strictly Zero Auto-Retry**: If the submit button clicks but verification evidence is not observed, reports `SUBMISSION_ATTEMPTED_BUT_NOT_VERIFIED` (`submissionAttempted: true, verified: false`). Never claims success and NEVER automatically retries under any circumstance (prevents duplicate orders/messages/transactions).
+    - **Atomic Cross-Page Isolation**: Tokens cannot be submitted across pages (`CROSS_PAGE_TOKEN_BLOCKED`). Switching active pages does not mutate or submit unselected pages.
+    - **Zero AI / Zero Search**: 0 LLM calls, 0 search calls. Local loopback fixtures only.
+    - **Brick 35 Status**: Authentication & Saved Credentials v1 is NOT STARTED.
 
 
 

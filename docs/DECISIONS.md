@@ -975,7 +975,47 @@
 - **Consequences**:
   - Safe, deterministic, prechecked form population without form submission.
   - Zero AI / LLM calls. Zero search calls.
-  - 100% offline Level 1 verification (`npm run verify`, 1384 tests) and Level 2 real-browser verification (`npm run verify:browser`, 47 tests) PASS.
+  - 100% offline Level 1 verification (`npm run verify`, 1391 tests) and Level 2 real-browser verification (`npm run verify:browser`, 48 tests) PASS.
+
+## ADR-0049: Confirmed Form Submission & Result Verification v1 (Brick 34)
+- **Status**: Accepted
+- **Context**:
+  - In Brick 33, form inspection and safe population were established, but form submission was strictly blocked (`FORM_SUBMISSION_NOT_AUTHORIZED`).
+  - Automated form submission carries high risk (e.g., unintended orders, duplicate transactions, accidental messages) if executed implicitly or automatically retried upon network/verification timeout.
+  - Brick 34 implements deterministic, two-step submission authorization, opaque single-use tokens, browser-native validation prechecks, security boundaries (blocking passwords and file uploads), and evidence-based result verification without auto-retry.
+- **Decision**:
+  1. **Two-Step Submission Authorization Contract**:
+     - `POST /api/browser/prepare-form-submit`: Atomically binds to one managed Page, validates current snapshot/lifecycle, checks browser-native HTML5 validity, blocks sensitive password and file controls, binds a deterministic verification contract, and generates an in-memory, short-lived, single-use confirmation token. Does NOT submit.
+     - `POST /api/browser/submit-form`: Requires a valid confirmation token. Revalidates snapshot and page identity before submission. Consumes token immediately at/before the execution boundary.
+  2. **Single-Use Opaque Confirmation Tokens**:
+     - Opaque crypto-random token (`conf_<timestamp>_<hex>`).
+     - Default TTL: 60,000 ms (`BROWSER_CONFIRMATION_TTL_MS`, clamped [1000, 300000]).
+     - In-memory only; strictly bound to `pageId`, `documentVersion`, `semanticRevision`, `snapshotToken`, and form/submitter identity. Never exposes field values, passwords, cookies, or files.
+     - Consumed immediately at execution boundary; repeated requests return `CONFIRMATION_ALREADY_USED`.
+  3. **Browser-Native HTML5 Validation Precheck**:
+     - Preparation inspects native `checkValidity()` and `element.validity` (valueMissing, typeMismatch, patternMismatch, etc.).
+     - If invalid, returns `FORM_VALIDATION_FAILED` with safe semantic issue descriptions, generating exactly ZERO confirmation token.
+  4. **Strict Security Boundaries**:
+     - Password/auth forms strictly blocked with `AUTH_FORM_NOT_SUPPORTED` (authentication deferred to Brick 35).
+     - File upload forms strictly blocked with `FILE_FORM_NOT_SUPPORTED` (upload deferred to Brick 37).
+  5. **Submission Mechanism**:
+     - Clicks the uniquely resolved DOM submit button (`<button type="submit">` or `<input type="submit">`).
+     - NO `form.submit()`, NO synthetic script injection, NO Enter key finalization, NO reset button usage.
+  6. **Evidence-Based Result Verification & Truthful Failure Reporting**:
+     - Verification conditions: `url-equals`, `url-contains`, `url-changed`, `target-present`, `target-absent`, `text-present`, `spa-route-changed`, `document-navigation`.
+     - Bounded verification timeout (`BROWSER_SUBMIT_VERIFY_TIMEOUT_MS`, default 10,000 ms). Never uses `networkidle`.
+     - Truthful result states: `SUBMISSION_VERIFIED`, `SUBMISSION_ATTEMPTED_BUT_NOT_VERIFIED`, `SUBMISSION_BLOCKED`, `SUBMISSION_STALE`, `FORM_VALIDATION_FAILED`, `PAGE_CLOSED`, `CONFIRMATION_EXPIRED`, `CONFIRMATION_ALREADY_USED`.
+     - If the submit click occurs but expected evidence never appears within timeout: returns `SUBMISSION_ATTEMPTED_BUT_NOT_VERIFIED` (`submissionAttempted: true, verified: false`). Never claims success.
+  7. **Strictly Zero Automatic Retry**:
+     - Never retries submission under any circumstance (timeout, network uncertainty, navigation delay, server error). One confirmation token = at most ONE submission attempt.
+  8. **Cross-Page Submission Isolation**:
+     - Confirmation tokens are strictly bound to the concrete page where preparation occurred. Cross-page usage rejected with `CROSS_PAGE_TOKEN_BLOCKED`.
+  9. **Zero AI / Zero External Dependencies**:
+     - Exactly 0 LLM calls, 0 search calls. Local loopback fixtures only.
+- **Consequences**:
+  - Confirmed, single-use, non-retried, evidence-verified form submission workflow.
+  - Level 1 offline verification and Level 2 real-browser verification PASS.
+
 
 
 
