@@ -25,13 +25,15 @@ export async function defaultPlaywrightLauncher(options = {}) {
   const {
     channel = 'msedge',
     headless = false,
-    timeout = 15000
+    timeout = 15000,
+    args = []
   } = options;
 
   return await chromium.launch({
     channel,
     headless,
-    timeout
+    timeout,
+    args
   });
 }
 

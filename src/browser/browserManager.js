@@ -17,8 +17,9 @@ import { config } from '../config/index.js';
 import { defaultPlaywrightLauncher } from './playwrightBrowser.js';
 import { validateUrlSafety, PageReaderError } from '../webpage/urlSafety.js';
 import { extractDomSnapshot } from './pageInspection.js';
-import { generateSnapshotToken, resolveTargetFromElements, TargetResolutionError } from './targetResolver.js';
+import { generateSnapshotToken, resolveTargetFromElements, createSafeElementSummary, TargetResolutionError } from './targetResolver.js';
 import { executeSemanticAction, ActionExecutionError } from './actionExecutor.js';
+import { DYNAMIC_TRACKER_SCRIPT } from './dynamicTracker.js';
 
 export { ActionExecutionError };
 
@@ -89,6 +90,13 @@ export class BrowserManager {
       this._popupSettleMs = config.browser?.popupSettleMs ?? 500;
     }
 
+    this._dynamicTimeoutMs = Math.min(Math.max(Number(options.dynamicTimeoutMs ?? config.browser?.dynamicTimeoutMs ?? 5000) || 5000, 100), 60000);
+    this._domQuietMs = Math.min(Math.max(Number(options.domQuietMs ?? config.browser?.domQuietMs ?? 300) || 300, 50), 5000);
+    this._dynamicPollMs = Math.min(Math.max(Number(options.dynamicPollMs ?? config.browser?.dynamicPollMs ?? 100) || 100, 20), 1000);
+    this._maxDynamicWaits = Math.min(Math.max(Number(options.maxDynamicWaits ?? config.browser?.maxDynamicWaits ?? 4) || 4, 1), 20);
+    this._activeDynamicWaits = 0;
+    this._dynamicWaiters = new Set();
+
     this._state = BROWSER_STATES.STOPPED;
     this._browser = null;
     this._context = null;
@@ -104,12 +112,35 @@ export class BrowserManager {
     this._browserDisconnectListener = null;
     this._lastError = null;
 
+    this._allowTestLoopback = Boolean(options.allowTestLoopback || options.allowLoopbackTest);
+    this._args = Array.isArray(options.args) ? [...options.args] : (this._allowTestLoopback ? ['--no-proxy-server'] : []);
+
     this._snapshotVersion = 0;
     this._snapshotToken = null;
 
     this._launchPromise = null;
     this._closePromise = null;
     this._cleanupPromise = null;
+  }
+
+  get dynamicTimeoutMs() {
+    return this._dynamicTimeoutMs;
+  }
+
+  get domQuietMs() {
+    return this._domQuietMs;
+  }
+
+  get dynamicPollMs() {
+    return this._dynamicPollMs;
+  }
+
+  get maxDynamicWaits() {
+    return this._maxDynamicWaits;
+  }
+
+  get activeDynamicWaits() {
+    return this._activeDynamicWaits;
   }
 
   get popupSettleMs() {
@@ -307,6 +338,17 @@ export class BrowserManager {
     this._page = val;
   }
 
+  get currentUrl() {
+    if (this._activePageId && this._pages.has(this._activePageId)) {
+      const entry = this._pages.get(this._activePageId);
+      if (entry.page && typeof entry.page.url === 'function') {
+        return entry.page.url();
+      }
+      return entry.currentUrl || 'about:blank';
+    }
+    return null;
+  }
+
   get lastError() {
     return this._lastError;
   }
@@ -333,24 +375,36 @@ export class BrowserManager {
   }
 
   isSnapshotTokenValid(token, pageId = this._activePageId) {
-    if (!token) return false;
-    if (pageId) {
-      if (!this._pages.has(pageId)) {
+    if (!token || typeof token !== 'string' || token.trim().length === 0) return false;
+    const pId = pageId || this._activePageId;
+    if (pId) {
+      if (!this._pages.has(pId)) return false;
+      const entry = this._pages.get(pId);
+      if (!entry || !entry.snapshotToken) return false;
+      if (entry.snapshotToken !== token) return false;
+      if (entry.semanticRevision !== entry.snapshotSemanticRevision) {
         return false;
       }
-      const entry = this._pages.get(pageId);
-      return Boolean(entry?.snapshotToken && entry.snapshotToken === token);
+      if (entry.spaRouteVersion !== entry.snapshotRouteVersion) {
+        return false;
+      }
+      return true;
     }
     return Boolean(this._snapshotToken && token === this._snapshotToken);
   }
 
   _invalidateSnapshot(pageId = this._activePageId) {
-    if (pageId && this._pages.has(pageId)) {
-      const entry = this._pages.get(pageId);
+    const pId = pageId || this._activePageId;
+    if (pId && this._pages.has(pId)) {
+      const entry = this._pages.get(pId);
       entry.snapshotVersion = (entry.snapshotVersion || 0) + 1;
-      entry.snapshotToken = generateSnapshotToken(entry.snapshotVersion, `${entry.pageId}_${Date.now().toString(36)}`);
-      this._snapshotVersion = entry.snapshotVersion;
-      this._snapshotToken = entry.snapshotToken;
+      entry.snapshotSemanticRevision = entry.semanticRevision;
+      entry.snapshotRouteVersion = entry.spaRouteVersion;
+      entry.snapshotToken = generateSnapshotToken(entry.snapshotVersion, `${entry.pageId}_${entry.semanticRevision}_${Date.now().toString(36)}`);
+      if (pId === this._activePageId) {
+        this._snapshotVersion = entry.snapshotVersion;
+        this._snapshotToken = entry.snapshotToken;
+      }
       return entry.snapshotToken;
     }
     this._snapshotVersion++;
@@ -564,7 +618,8 @@ export class BrowserManager {
         browserInstance = await this._launcher({
           channel: this._channel,
           headless: this._headless,
-          timeout: this._timeoutMs
+          timeout: this._timeoutMs,
+          args: this._args
         });
 
         if (!browserInstance) {
@@ -880,12 +935,17 @@ export class BrowserManager {
         state: BROWSER_STATES.STOPPED,
         pageOpen: false,
         url: null,
-        title: null
+        title: null,
+        pageId: null,
+        semanticRevision: 0,
+        spaRouteVersion: 0,
+        lastRelevantMutationAgeMs: null
       };
     }
 
     let currentUrl = null;
     let currentTitle = '';
+    const activeEntry = this._activePageId ? this._pages.get(this._activePageId) : null;
 
     try {
       if (this._page) {
@@ -903,16 +963,37 @@ export class BrowserManager {
         state: this._state,
         pageOpen: this.isSessionActive(),
         url: null,
-        title: null
+        title: null,
+        pageId: this._activePageId,
+        semanticRevision: activeEntry?.semanticRevision ?? 0,
+        spaRouteVersion: activeEntry?.spaRouteVersion ?? 0,
+        lastRelevantMutationAgeMs: null
       };
     }
+
+    if (this._activePageId) {
+      await this.syncDynamicState(this._activePageId).catch(() => {});
+    }
+
+    const now = Date.now();
+    const lastMutationTimestamp = activeEntry?.lastRelevantMutationTimestamp ?? now;
+    const lastRelevantMutationAgeMs = Math.max(0, now - lastMutationTimestamp);
+    const effectiveUrl = (activeEntry?.currentUrl && activeEntry.currentUrl !== 'about:blank')
+      ? activeEntry.currentUrl
+      : (currentUrl || activeEntry?.currentUrl || 'about:blank');
 
     return {
       success: true,
       state: this._state,
       pageOpen: true,
-      url: currentUrl,
-      title: currentTitle
+      url: effectiveUrl,
+      title: currentTitle,
+      pageId: this._activePageId,
+      semanticRevision: activeEntry?.semanticRevision ?? 1,
+      spaRouteVersion: activeEntry?.spaRouteVersion ?? 1,
+      lastRelevantMutationAgeMs,
+      dynamicObserverInstalled: Boolean(activeEntry?.dynamicObserverInstalled ?? true),
+      observerDocumentVersion: activeEntry?.documentVersion ?? 1
     };
   }
 
@@ -953,9 +1034,10 @@ export class BrowserManager {
 
     const requestedUrl = urlStr.trim();
     const dnsLookup = options.dnsLookup || this._dnsLookup;
+    const allowTestLoopback = Boolean(options.allowTestLoopback || options.allowLoopbackTest || this._allowTestLoopback);
 
     try {
-      await validateUrlSafety(requestedUrl, { dnsLookup });
+      await validateUrlSafety(requestedUrl, { dnsLookup, allowTestLoopback });
     } catch (err) {
       if (err instanceof BrowserManagerError) {
         throw err;
@@ -998,7 +1080,7 @@ export class BrowserManager {
 
             // Validate redirect destination network safety
             try {
-              await validateUrlSafety(toUrl, { dnsLookup });
+              await validateUrlSafety(toUrl, { dnsLookup, allowTestLoopback });
             } catch (valErr) {
               redirectError = new BrowserManagerError(
                 `Redirect destination blocked: ${valErr.message}`,
@@ -1108,7 +1190,7 @@ export class BrowserManager {
         }
 
         try {
-          await validateUrlSafety(currUrl, { dnsLookup });
+          await validateUrlSafety(currUrl, { dnsLookup, allowTestLoopback });
         } catch (valErr) {
           if (this._page && typeof this._page.goto === 'function') {
             await this._page.goto('about:blank').catch(() => {});
@@ -1159,6 +1241,20 @@ export class BrowserManager {
     const title = (this._page && typeof this._page.title === 'function')
       ? (await this._page.title()) || ''
       : '';
+
+    if (this._activePageId && this._pages.has(this._activePageId)) {
+      const activeEntry = this._pages.get(this._activePageId);
+      activeEntry.documentVersion = (activeEntry.documentVersion || 1) + 1;
+      activeEntry.semanticRevision = 1;
+      activeEntry.snapshotSemanticRevision = 1;
+      activeEntry.spaRouteVersion = 1;
+      activeEntry.snapshotRouteVersion = 1;
+      activeEntry.currentUrl = finalUrl;
+      activeEntry.spaRouteChanged = false;
+      activeEntry.lastRelevantMutationTimestamp = Date.now();
+      this._initDynamicTracker(activeEntry.page, activeEntry.pageId);
+      await this.syncDynamicState(activeEntry.pageId).catch(() => {});
+    }
 
     this._invalidateSnapshot();
 
@@ -1225,6 +1321,20 @@ export class BrowserManager {
       ? (await this._page.title()) || ''
       : '';
 
+    if (response && this._activePageId && this._pages.has(this._activePageId)) {
+      const activeEntry = this._pages.get(this._activePageId);
+      activeEntry.documentVersion = (activeEntry.documentVersion || 1) + 1;
+      activeEntry.semanticRevision = 1;
+      activeEntry.snapshotSemanticRevision = 1;
+      activeEntry.spaRouteVersion = 1;
+      activeEntry.snapshotRouteVersion = 1;
+      activeEntry.currentUrl = currentUrl;
+      activeEntry.spaRouteChanged = false;
+      activeEntry.lastRelevantMutationTimestamp = Date.now();
+      this._initDynamicTracker(activeEntry.page, activeEntry.pageId);
+      await this.syncDynamicState(activeEntry.pageId).catch(() => {});
+    }
+
     this._invalidateSnapshot();
 
     return {
@@ -1288,6 +1398,20 @@ export class BrowserManager {
       ? (await this._page.title()) || ''
       : '';
 
+    if (response && this._activePageId && this._pages.has(this._activePageId)) {
+      const activeEntry = this._pages.get(this._activePageId);
+      activeEntry.documentVersion = (activeEntry.documentVersion || 1) + 1;
+      activeEntry.semanticRevision = 1;
+      activeEntry.snapshotSemanticRevision = 1;
+      activeEntry.spaRouteVersion = 1;
+      activeEntry.snapshotRouteVersion = 1;
+      activeEntry.currentUrl = currentUrl;
+      activeEntry.spaRouteChanged = false;
+      activeEntry.lastRelevantMutationTimestamp = Date.now();
+      this._initDynamicTracker(activeEntry.page, activeEntry.pageId);
+      await this.syncDynamicState(activeEntry.pageId).catch(() => {});
+    }
+
     this._invalidateSnapshot();
 
     return {
@@ -1348,6 +1472,20 @@ export class BrowserManager {
     const title = (this._page && typeof this._page.title === 'function')
       ? (await this._page.title()) || ''
       : '';
+
+    if (this._activePageId && this._pages.has(this._activePageId)) {
+      const activeEntry = this._pages.get(this._activePageId);
+      activeEntry.documentVersion = (activeEntry.documentVersion || 1) + 1;
+      activeEntry.semanticRevision = 1;
+      activeEntry.snapshotSemanticRevision = 1;
+      activeEntry.spaRouteVersion = 1;
+      activeEntry.snapshotRouteVersion = 1;
+      activeEntry.currentUrl = currentUrl;
+      activeEntry.spaRouteChanged = false;
+      activeEntry.lastRelevantMutationTimestamp = Date.now();
+      this._initDynamicTracker(activeEntry.page, activeEntry.pageId);
+      await this.syncDynamicState(activeEntry.pageId).catch(() => {});
+    }
 
     this._invalidateSnapshot();
 
@@ -1455,6 +1593,12 @@ export class BrowserManager {
       );
     }
 
+    const targetPageId = options.pageId || this._activePageId;
+    const entry = this._pages.get(targetPageId);
+    if (!entry || !entry.page || (typeof entry.page.isClosed === 'function' && entry.page.isClosed())) {
+      throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND');
+    }
+
     const maxTextChars = Math.max(1, Number(options.maxTextChars ?? config.browser?.inspectionMaxTextChars ?? 12000)) || 12000;
     const maxElements = Math.max(1, Number(options.maxElements ?? config.browser?.inspectionMaxElements ?? 100)) || 100;
     const maxElementTextChars = Math.max(1, Number(options.maxElementTextChars ?? config.browser?.inspectionMaxElementTextChars ?? 300)) || 300;
@@ -1470,14 +1614,14 @@ export class BrowserManager {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         if (typeof options.evaluator === 'function') {
-          snapshot = await options.evaluator(this._page, {
+          snapshot = await options.evaluator(entry.page, {
             maxTextChars,
             maxElements,
             maxElementTextChars,
             attempt
           });
-        } else if (this._page && typeof this._page.evaluate === 'function') {
-          snapshot = await this._page.evaluate(extractDomSnapshot, {
+        } else if (entry.page && typeof entry.page.evaluate === 'function') {
+          snapshot = await entry.page.evaluate(extractDomSnapshot, {
             maxTextChars,
             maxElements,
             maxElementTextChars
@@ -1512,10 +1656,10 @@ export class BrowserManager {
 
         // Bounded wait for page lifecycle/stability before exactly one retry
         if (typeof options.waitForStability === 'function') {
-          await options.waitForStability(this._page).catch(() => {});
-        } else if (this._page && typeof this._page.waitForLoadState === 'function') {
+          await options.waitForStability(entry.page).catch(() => {});
+        } else if (entry.page && typeof entry.page.waitForLoadState === 'function') {
           const waitTimeout = Math.min(5000, Math.max(100, Number(options.stabilityTimeoutMs ?? 2000) || 2000));
-          await this._page.waitForLoadState('domcontentloaded', { timeout: waitTimeout }).catch(() => {});
+          await entry.page.waitForLoadState('domcontentloaded', { timeout: waitTimeout }).catch(() => {});
         }
 
         // Reconcile lifecycle after wait in case page was closed during the wait
@@ -1561,12 +1705,12 @@ export class BrowserManager {
     let currentTitle = '';
 
     try {
-      if (this._page) {
-        if (typeof this._page.url === 'function') {
-          currentUrl = this._page.url();
+      if (entry.page) {
+        if (typeof entry.page.url === 'function') {
+          currentUrl = entry.page.url();
         }
-        if (typeof this._page.title === 'function') {
-          currentTitle = (await this._page.title()) || '';
+        if (typeof entry.page.title === 'function') {
+          currentTitle = (await entry.page.title()) || '';
         }
       }
     } catch {
@@ -1579,16 +1723,19 @@ export class BrowserManager {
       }
     }
 
-    if (!this.snapshotToken) {
-      this._invalidateSnapshot();
+    if (!entry.snapshotToken) {
+      this._invalidateSnapshot(entry.pageId);
     }
 
     return {
       success: true,
       state: this._state,
+      pageId: entry.pageId,
+      documentVersion: entry.documentVersion ?? 1,
+      semanticRevision: entry.semanticRevision ?? 0,
       url: currentUrl,
       title: currentTitle,
-      snapshotToken: this.snapshotToken,
+      snapshotToken: entry.snapshotToken,
       visibleText: snapshot?.visibleText ?? '',
       textTruncated: Boolean(snapshot?.textTruncated),
       elements: Array.isArray(snapshot?.elements) ? snapshot.elements : [],
@@ -1621,8 +1768,14 @@ export class BrowserManager {
       ? performance.now()
       : Date.now();
 
-    if (!this.snapshotToken) {
-      this._invalidateSnapshot();
+    const targetPageId = options.pageId || this._activePageId;
+    const entry = this._pages.get(targetPageId);
+    if (!entry || !entry.page || (typeof entry.page.isClosed === 'function' && entry.page.isClosed())) {
+      throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND');
+    }
+
+    if (!entry.snapshotToken) {
+      this._invalidateSnapshot(entry.pageId);
     }
 
     let elements = options.elements;
@@ -1630,7 +1783,7 @@ export class BrowserManager {
     let pageTitle = options.pageTitle;
 
     if (!elements) {
-      const inspection = await this.inspectPage(options);
+      const inspection = await this.inspectPage({ ...options, pageId: entry.pageId });
       elements = inspection.elements;
       pageUrl = inspection.url;
       pageTitle = inspection.title;
@@ -1638,8 +1791,8 @@ export class BrowserManager {
 
     try {
       const result = resolveTargetFromElements(elements, targetQuery, {
-        snapshotToken: this._snapshotToken,
-        pageUrl: pageUrl ?? (typeof this._page?.url === 'function' ? this._page.url() : ''),
+        snapshotToken: entry.snapshotToken,
+        pageUrl: pageUrl ?? (typeof entry.page?.url === 'function' ? entry.page.url() : ''),
         pageTitle: pageTitle ?? '',
         ...options
       });
@@ -1648,6 +1801,10 @@ export class BrowserManager {
         ? performance.now()
         : Date.now();
       result.resolutionDurationMs = Math.max(0.001, Number((endTime - startTime).toFixed(3)));
+      result.pageId = entry.pageId;
+      result.documentVersion = entry.documentVersion ?? 1;
+      result.semanticRevision = entry.semanticRevision ?? 0;
+      result.snapshotToken = entry.snapshotToken;
 
       return result;
     } catch (err) {
@@ -1678,8 +1835,14 @@ export class BrowserManager {
       );
     }
 
+    const targetPageId = options.pageId || actionRequest?.pageId || this._activePageId;
+    const entry = this._pages.get(targetPageId);
+    if (!entry || !entry.page || (typeof entry.page.isClosed === 'function' && entry.page.isClosed())) {
+      throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND');
+    }
+
     try {
-      return await executeSemanticAction(this.page, this, actionRequest, options);
+      return await executeSemanticAction(entry.page, this, actionRequest, { ...options, pageId: entry.pageId });
     } catch (err) {
       if (err instanceof BrowserManagerError || err instanceof ActionExecutionError) {
         throw err;
@@ -1716,6 +1879,8 @@ export class BrowserManager {
           existingEntry.lastActivatedAt = Date.now();
           this._page = pageInstance;
           this._legacyPage = pageInstance;
+          this._snapshotToken = existingEntry.snapshotToken;
+          this._snapshotVersion = existingEntry.snapshotVersion;
         }
         return existingEntry;
       }
@@ -1731,7 +1896,7 @@ export class BrowserManager {
 
     const pageId = generatePageId();
     const now = Date.now();
-    const snapshotToken = generateSnapshotToken(1, `${pageId}_${now.toString(36)}`);
+    const snapshotToken = generateSnapshotToken(1, `${pageId}_1_${now.toString(36)}`);
 
     const entry = {
       pageId,
@@ -1741,10 +1906,19 @@ export class BrowserManager {
       openerPageId: openerPageId || null,
       creationType: creationType || 'manual',
       snapshotVersion: 1,
-      snapshotToken
+      snapshotToken,
+      semanticRevision: 1,
+      snapshotSemanticRevision: 1,
+      spaRouteVersion: 1,
+      snapshotRouteVersion: 1,
+      lastRelevantMutationTimestamp: now,
+      documentVersion: 1,
+      currentUrl: typeof pageInstance.url === 'function' ? pageInstance.url() : 'about:blank',
+      spaRouteChanged: false
     };
 
     this._pages.set(pageId, entry);
+    this._initDynamicTracker(pageInstance, pageId);
 
     if (typeof pageInstance.on === 'function') {
       pageInstance.on('close', () => {
@@ -1757,6 +1931,8 @@ export class BrowserManager {
       entry.lastActivatedAt = now;
       this._page = pageInstance;
       this._legacyPage = pageInstance;
+      this._snapshotToken = entry.snapshotToken;
+      this._snapshotVersion = entry.snapshotVersion;
     }
 
     return entry;
@@ -1771,6 +1947,9 @@ export class BrowserManager {
   _handlePageClosed(pageId) {
     const entry = this._pages.get(pageId);
     if (!entry) return;
+
+    // Cancel dynamic waiters for this closed page (Brick 32)
+    this._cancelDynamicWaiters(pageId, new BrowserManagerError('Page closed while waiting.', 'PAGE_CLOSED'));
 
     // Invalidate snapshots for the closed page (Brick 31 Live Fix A)
     entry.snapshotToken = null;
@@ -1902,12 +2081,13 @@ export class BrowserManager {
     }
 
     let requestedUrl = null;
+    const allowTestLoopback = Boolean(options.allowTestLoopback || options.allowLoopbackTest || this._allowTestLoopback);
     if (typeof urlStr === 'string' && urlStr.trim().length > 0) {
       requestedUrl = urlStr.trim();
       if (requestedUrl !== 'about:blank') {
         const dnsLookup = options.dnsLookup || this._dnsLookup;
         try {
-          await validateUrlSafety(requestedUrl, { dnsLookup });
+          await validateUrlSafety(requestedUrl, { dnsLookup, allowTestLoopback });
         } catch (err) {
           if (err instanceof BrowserManagerError) throw err;
           throw new BrowserManagerError(err.message, err.code || 'INVALID_URL', err.details || {});
@@ -1965,7 +2145,7 @@ export class BrowserManager {
               }
 
               try {
-                await validateUrlSafety(toUrl, { dnsLookup });
+                await validateUrlSafety(toUrl, { dnsLookup, allowTestLoopback });
               } catch (valErr) {
                 redirectError = new BrowserManagerError(
                   `Redirect destination blocked: ${valErr.message}`,
@@ -2055,7 +2235,7 @@ export class BrowserManager {
           }
 
           try {
-            await validateUrlSafety(currUrl, { dnsLookup });
+            await validateUrlSafety(currUrl, { dnsLookup, allowTestLoopback });
           } catch (valErr) {
             await newPageInstance.close().catch(() => {});
             this._handlePageClosed(entry.pageId);
@@ -2124,9 +2304,17 @@ export class BrowserManager {
       throw new BrowserManagerError(`Page "${cleanPageId}" is closed.`, 'PAGE_NOT_FOUND');
     }
 
+    const previousActivePageId = this._activePageId;
+    if (previousActivePageId && previousActivePageId !== cleanPageId) {
+      this._cancelDynamicWaiters(previousActivePageId, new BrowserManagerError('Active page changed while waiting.', 'ACTIVE_PAGE_CHANGED'));
+    }
+
     this._activePageId = cleanPageId;
     entry.lastActivatedAt = Date.now();
     this._page = entry.page;
+    this._legacyPage = entry.page;
+    this._snapshotToken = entry.snapshotToken || null;
+    this._snapshotVersion = entry.snapshotVersion || 0;
 
     if (entry.page && typeof entry.page.bringToFront === 'function') {
       await entry.page.bringToFront().catch(() => {});
@@ -2240,11 +2428,513 @@ export class BrowserManager {
     this._context = null;
     this._page = null;
     this._legacyPage = null;
+    this._cancelDynamicWaiters(null, new BrowserManagerError('Browser was closed while waiting.', 'BROWSER_NOT_RUNNING'));
+    this._dynamicWaiters.clear();
+    this._activeDynamicWaits = 0;
     this._pages.clear();
     this._activePageId = null;
     this._pendingAuthorizedCreation = null;
     this._actionPopupWindow = null;
     this._resetSnapshot();
+  }
+
+  /**
+   * Initializes lightweight in-browser dynamic tracking script on a managed page (Brick 32).
+   * Registers init script so all navigations/documents automatically run the tracker.
+   *
+   * @param {Object} pageInstance
+   * @param {string} pageId
+   * @private
+   */
+  _initDynamicTracker(pageInstance, pageId) {
+    if (!pageInstance) return;
+    try {
+      if (typeof pageInstance.addInitScript === 'function') {
+        pageInstance.addInitScript(DYNAMIC_TRACKER_SCRIPT).catch(() => {});
+      }
+    } catch {}
+  }
+
+  /**
+   * Synchronizes dynamic state between in-page tracker and node-side page registry (Brick 32).
+   * Ensures the observer is actively installed and running in the current document.
+   *
+   * @param {string} [pageId]
+   * @returns {Promise<Object|null>}
+   */
+  async syncDynamicState(pageId = this._activePageId) {
+    const pId = pageId || this._activePageId;
+    if (!pId || !this._pages.has(pId)) return null;
+
+    const entry = this._pages.get(pId);
+    if (!entry || !entry.page) return null;
+
+    if (typeof entry.page.evaluate === 'function') {
+      try {
+        let inPage = await entry.page.evaluate(() => {
+          const t = window.__JARVIS_DYNAMIC_TRACKER__;
+          if (!t) return null;
+          if (typeof t.ensureObserver === 'function') {
+            t.ensureObserver();
+          }
+          return {
+            semanticRevision: t.semanticRevision,
+            spaRouteVersion: t.spaRouteVersion,
+            lastRelevantMutationTime: t.lastRelevantMutationTime,
+            lastUrl: t.lastUrl,
+            spaRouteChanged: t.spaRouteChanged,
+            observerInstalled: Boolean(t.observerInstalled || t.observer)
+          };
+        });
+
+        if (!inPage) {
+          // If in-page tracker is not yet present in the current document, inject now
+          await entry.page.evaluate(DYNAMIC_TRACKER_SCRIPT).catch(() => {});
+          inPage = await entry.page.evaluate(() => {
+            const t = window.__JARVIS_DYNAMIC_TRACKER__;
+            if (!t) return null;
+            if (typeof t.ensureObserver === 'function') {
+              t.ensureObserver();
+            }
+            return {
+              semanticRevision: t.semanticRevision,
+              spaRouteVersion: t.spaRouteVersion,
+              lastRelevantMutationTime: t.lastRelevantMutationTime,
+              lastUrl: t.lastUrl,
+              spaRouteChanged: t.spaRouteChanged,
+              observerInstalled: Boolean(t.observerInstalled || t.observer)
+            };
+          }).catch(() => null);
+        }
+
+        if (inPage) {
+          entry.dynamicObserverInstalled = Boolean(inPage.observerInstalled);
+          if (inPage.semanticRevision > entry.semanticRevision) {
+            entry.semanticRevision = inPage.semanticRevision;
+            entry.lastRelevantMutationTimestamp = inPage.lastRelevantMutationTime;
+            this._invalidateSnapshot(pId);
+          } else if (inPage.lastRelevantMutationTime > (entry.lastRelevantMutationTimestamp || 0)) {
+            entry.lastRelevantMutationTimestamp = inPage.lastRelevantMutationTime;
+          }
+          if (inPage.spaRouteVersion > entry.spaRouteVersion || (inPage.lastUrl && inPage.lastUrl !== entry.currentUrl)) {
+            entry.spaRouteVersion = inPage.spaRouteVersion;
+            entry.currentUrl = inPage.lastUrl;
+            entry.spaRouteChanged = true;
+            this._invalidateSnapshot(pId);
+          }
+        }
+      } catch {}
+    }
+
+    return {
+      pageId: pId,
+      semanticRevision: entry.semanticRevision,
+      spaRouteVersion: entry.spaRouteVersion,
+      lastRelevantMutationTimestamp: entry.lastRelevantMutationTimestamp,
+      currentUrl: entry.currentUrl,
+      dynamicObserverInstalled: Boolean(entry.dynamicObserverInstalled ?? true),
+      documentVersion: entry.documentVersion || 1
+    };
+  }
+
+  /**
+   * Manually records a semantic mutation on a page (Brick 32).
+   *
+   * @param {string} [pageId]
+   * @returns {number} new semanticRevision
+   */
+  recordSemanticMutation(pageId = this._activePageId) {
+    const pId = pageId || this._activePageId;
+    if (pId && this._pages.has(pId)) {
+      const entry = this._pages.get(pId);
+      entry.semanticRevision++;
+      entry.lastRelevantMutationTimestamp = Date.now();
+      return entry.semanticRevision;
+    }
+    return 1;
+  }
+
+  /**
+   * Manually records a SPA route change on a page (Brick 32).
+   *
+   * @param {string} newUrl
+   * @param {string} [pageId]
+   * @returns {Object|null}
+   */
+  recordSpaRoute(newUrl, pageId = this._activePageId) {
+    const pId = pageId || this._activePageId;
+    if (pId && this._pages.has(pId)) {
+      const entry = this._pages.get(pId);
+      entry.currentUrl = newUrl;
+      if (entry.page && typeof entry.page.setUrl === 'function') {
+        entry.page.setUrl(newUrl);
+      }
+      entry.spaRouteVersion++;
+      entry.spaRouteChanged = true;
+      entry.semanticRevision++;
+      entry.lastRelevantMutationTimestamp = Date.now();
+      this._invalidateSnapshot(pId);
+      return {
+        pageId: pId,
+        currentUrl: newUrl,
+        spaRouteVersion: entry.spaRouteVersion,
+        semanticRevision: entry.semanticRevision
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Cancels active dynamic waiters matching a specific page or all pages (Brick 32).
+   *
+   * @param {string|null} pageId
+   * @param {Error} err
+   * @private
+   */
+  _cancelDynamicWaiters(pageId, err) {
+    for (const waiter of Array.from(this._dynamicWaiters)) {
+      if (!pageId || waiter.pageId === pageId) {
+        try {
+          waiter.cancel(err);
+        } catch {}
+      }
+    }
+  }
+
+  /**
+   * Bounded wait for active page's semantic surface to become quiet (Brick 32).
+   *
+   * @param {Object} [options]
+   * @param {number} [options.timeoutMs]
+   * @param {number} [options.quietMs]
+   * @param {number} [options.pollMs]
+   * @param {string} [options.pageId]
+   * @param {Function} [options.sleeper]
+   * @returns {Promise<Object>}
+   */
+  async waitForStable(options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError(
+        'Browser is not running. Please launch the browser first.',
+        'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    if (this._activeDynamicWaits >= this._maxDynamicWaits) {
+      throw new BrowserManagerError(
+        `Dynamic wait concurrency limit (${this._maxDynamicWaits}) reached.`,
+        'DYNAMIC_WAIT_LIMIT_REACHED'
+      );
+    }
+
+    const targetPageId = (options.pageId || this._activePageId || '').trim();
+    const entry = this._pages.get(targetPageId);
+    if (!entry || !this._isPageReallyOpen(entry.page)) {
+      throw new BrowserManagerError('Page is closed or not found.', 'PAGE_CLOSED');
+    }
+
+    const timeoutMs = Math.min(Math.max(Number(options.timeoutMs ?? this._dynamicTimeoutMs) || 5000, 100), 60000);
+    const quietMs = Math.min(Math.max(Number(options.quietMs ?? this._domQuietMs) || 300, 50), 5000);
+    const pollMs = Math.min(Math.max(Number(options.pollMs ?? this._dynamicPollMs) || 100, 20), 1000);
+    const sleeper = typeof options.sleeper === 'function' ? options.sleeper : null;
+
+    let cancelReject = null;
+    const cancelPromise = new Promise((_, reject) => {
+      cancelReject = reject;
+    });
+
+    const waiter = {
+      pageId: targetPageId,
+      cancel: (err) => {
+        if (cancelReject) {
+          cancelReject(err);
+        }
+      }
+    };
+
+    this._activeDynamicWaits++;
+    this._dynamicWaiters.add(waiter);
+
+    const startTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      ? performance.now()
+      : Date.now();
+
+    try {
+      while (true) {
+        this._reconcileLifecycle();
+        if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+          throw new BrowserManagerError('Browser is not running. Please launch the browser first.', 'BROWSER_NOT_RUNNING');
+        }
+        if (!this._pages.has(targetPageId) || !this._isPageReallyOpen(entry.page)) {
+          throw new BrowserManagerError('Page is closed.', 'PAGE_CLOSED');
+        }
+        if (options.pageId === undefined && this._activePageId !== targetPageId) {
+          throw new BrowserManagerError('Active page changed while waiting.', 'ACTIVE_PAGE_CHANGED');
+        }
+
+        await this.syncDynamicState(targetPageId);
+
+        const now = Date.now();
+        const quietForMs = Math.max(0, now - (entry.lastRelevantMutationTimestamp || now));
+        const currentElapsed = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+          ? performance.now() - startTime
+          : Date.now() - startTime;
+        const elapsedMs = Math.max(0, currentElapsed);
+
+        if (quietForMs >= quietMs) {
+          this._invalidateSnapshot(targetPageId);
+          let currentUrl = 'about:blank';
+          let title = '';
+          try {
+            if (entry.page) {
+              if (typeof entry.page.url === 'function') currentUrl = entry.page.url();
+              if (typeof entry.page.title === 'function') title = (await entry.page.title()) || '';
+            }
+          } catch {}
+
+          return {
+            success: true,
+            settled: true,
+            pageId: targetPageId,
+            currentUrl,
+            title,
+            semanticRevision: entry.semanticRevision,
+            quietForMs,
+            waitDurationMs: Number(elapsedMs.toFixed(3)),
+            snapshotToken: entry.snapshotToken,
+            dynamicObserverInstalled: Boolean(entry.dynamicObserverInstalled ?? true),
+            observerDocumentVersion: entry.documentVersion ?? 1
+          };
+        }
+
+        if (elapsedMs >= timeoutMs) {
+          throw new BrowserManagerError(
+            `Page did not become quiet within ${timeoutMs}ms.`,
+            'PAGE_NOT_STABLE',
+            {
+              pageId: targetPageId,
+              semanticRevision: entry.semanticRevision,
+              quietForMs,
+              waitDurationMs: Number(elapsedMs.toFixed(3)),
+              settled: false,
+              dynamicObserverInstalled: Boolean(entry.dynamicObserverInstalled ?? true),
+              observerDocumentVersion: entry.documentVersion ?? 1
+            }
+          );
+        }
+
+        const remainingMs = timeoutMs - elapsedMs;
+        const sleepTime = Math.min(pollMs, Math.max(20, quietMs - quietForMs), remainingMs);
+        const sleepPromise = sleeper ? sleeper(sleepTime) : new Promise((res) => setTimeout(res, sleepTime));
+        await Promise.race([sleepPromise, cancelPromise]);
+      }
+    } finally {
+      this._dynamicWaiters.delete(waiter);
+      this._activeDynamicWaits = Math.max(0, this._activeDynamicWaits - 1);
+    }
+  }
+
+  /**
+   * Bounded wait for ONE semantic target to appear/become resolvable (Brick 32).
+   * Read-only readiness primitive: strictly NO clicks, fills, checks, selects, navigates, or submits.
+   *
+   * @param {Object} [options]
+   * @param {Object} options.target
+   * @param {number} [options.timeoutMs]
+   * @param {Object} [options={}]
+   * @param {Object} [extraOptions={}]
+   * @param {Object} options.target
+   * @param {number} [options.timeoutMs]
+   * @param {number} [options.pollMs]
+   * @param {string} [options.pageId]
+   * @param {Function} [options.sleeper]
+   * @returns {Promise<Object>}
+   */
+  async waitForTarget(options = {}, extraOptions = {}) {
+    let mergedOptions;
+    if (options && (options.target || options.timeoutMs !== undefined || options.pollMs !== undefined || options.pageId !== undefined)) {
+      mergedOptions = { ...extraOptions, ...options };
+      if (!mergedOptions.target && (options.kind || options.text || options.visibleText || options.name)) {
+        mergedOptions.target = options;
+      }
+    } else {
+      mergedOptions = { ...extraOptions, target: options };
+    }
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError(
+        'Browser is not running. Please launch the browser first.',
+        'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    if (this._activeDynamicWaits >= this._maxDynamicWaits) {
+      throw new BrowserManagerError(
+        `Dynamic wait concurrency limit (${this._maxDynamicWaits}) reached.`,
+        'DYNAMIC_WAIT_LIMIT_REACHED'
+      );
+    }
+
+    const targetQuery = mergedOptions.target;
+    if (!targetQuery || typeof targetQuery !== 'object' || Array.isArray(targetQuery)) {
+      throw new BrowserManagerError('Target query must be an object.', 'INVALID_TARGET_QUERY');
+    }
+
+    if (targetQuery.selector || targetQuery.css || targetQuery.xpath || targetQuery.locator || targetQuery.js) {
+      throw new BrowserManagerError(
+        'CSS selectors, XPath, and locator expressions are not accepted.',
+        'INVALID_TARGET_QUERY'
+      );
+    }
+
+    const onlyTargetId = Boolean(
+      targetQuery.targetId &&
+      !targetQuery.kind &&
+      !targetQuery.name &&
+      !targetQuery.accessibleName &&
+      !targetQuery.label &&
+      !targetQuery.visibleText &&
+      !targetQuery.text &&
+      !targetQuery.placeholder &&
+      !targetQuery.role &&
+      !targetQuery.inputType
+    );
+    if (onlyTargetId) {
+      throw new BrowserManagerError(
+        'Target ID alone cannot authorize target wait. Semantic target description is required.',
+        'TARGETID_AUTHORIZATION_NOT_ALLOWED'
+      );
+    }
+
+    const targetPageId = (mergedOptions.pageId || this._activePageId || '').trim();
+    const entry = this._pages.get(targetPageId);
+    if (!entry || !this._isPageReallyOpen(entry.page)) {
+      throw new BrowserManagerError('Page is closed or not found.', 'PAGE_CLOSED');
+    }
+
+    const timeoutMs = Math.min(Math.max(Number(mergedOptions.timeoutMs ?? this._dynamicTimeoutMs) || 5000, 100), 60000);
+    const pollMs = Math.min(Math.max(Number(mergedOptions.pollMs ?? this._dynamicPollMs) || 100, 20), 1000);
+    const sleeper = typeof mergedOptions.sleeper === 'function' ? mergedOptions.sleeper : null;
+
+    let cancelReject = null;
+    const cancelPromise = new Promise((_, reject) => {
+      cancelReject = reject;
+    });
+
+    const waiter = {
+      pageId: targetPageId,
+      cancel: (err) => {
+        if (cancelReject) {
+          cancelReject(err);
+        }
+      }
+    };
+
+    this._activeDynamicWaits++;
+    this._dynamicWaiters.add(waiter);
+
+    const startTime = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      ? performance.now()
+      : Date.now();
+
+    let lastResolution = null;
+
+    try {
+      while (true) {
+        this._reconcileLifecycle();
+        if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+          throw new BrowserManagerError('Browser is not running. Please launch the browser first.', 'BROWSER_NOT_RUNNING');
+        }
+        if (!this._pages.has(targetPageId) || !this._isPageReallyOpen(entry.page)) {
+          throw new BrowserManagerError('Page is closed.', 'PAGE_CLOSED');
+        }
+        if (mergedOptions.pageId === undefined && this._activePageId !== targetPageId) {
+          throw new BrowserManagerError('Active page changed while waiting.', 'ACTIVE_PAGE_CHANGED');
+        }
+
+        await this.syncDynamicState(targetPageId);
+
+        const { target: _t, timeoutMs: _tm, pollMs: _pm, sleeper: _sl, pageId: _pid, ...forwardedResolveOpts } = mergedOptions;
+
+        try {
+          lastResolution = await this.resolveTarget(targetQuery, { pageId: targetPageId, ...forwardedResolveOpts });
+        } catch (resErr) {
+          if (resErr instanceof TargetResolutionError) {
+            lastResolution = {
+              resolution: resErr.code === 'TARGET_AMBIGUOUS' ? 'ambiguous' : 'not_found',
+              confidence: 'low',
+              candidateCount: resErr.details?.candidateCount || 0,
+              candidates: resErr.details?.candidates || []
+            };
+          } else {
+            throw resErr;
+          }
+        }
+
+        const currentElapsed = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+          ? performance.now() - startTime
+          : Date.now() - startTime;
+        const elapsedMs = Math.max(0, currentElapsed);
+
+        if (lastResolution && lastResolution.resolution === 'unique' && lastResolution.confidence === 'high') {
+          return {
+            success: true,
+            resolution: 'unique',
+            confidence: 'high',
+            pageId: targetPageId,
+            snapshotToken: lastResolution.snapshotToken || entry.snapshotToken,
+            target: createSafeElementSummary(lastResolution.match),
+            waitDurationMs: Number(elapsedMs.toFixed(3))
+          };
+        }
+
+        if (elapsedMs >= timeoutMs) {
+          if (lastResolution && lastResolution.resolution === 'ambiguous') {
+            throw new BrowserManagerError(
+              'Multiple elements matched the target query equally on timeout.',
+              'TARGET_AMBIGUOUS',
+              {
+                pageId: targetPageId,
+                candidateCount: lastResolution.candidateCount,
+                candidates: lastResolution.candidates,
+                waitDurationMs: Number(elapsedMs.toFixed(3))
+              }
+            );
+          }
+          if (lastResolution && lastResolution.confidence === 'medium') {
+            throw new BrowserManagerError(
+              'Target resolved with only medium confidence (high required) within timeout.',
+              'TARGET_NOT_READY',
+              {
+                pageId: targetPageId,
+                confidence: 'medium',
+                waitDurationMs: Number(elapsedMs.toFixed(3))
+              }
+            );
+          }
+          throw new BrowserManagerError(
+            'Target element did not become ready within timeout.',
+            'TARGET_NOT_READY',
+            {
+              pageId: targetPageId,
+              reason: 'not_found',
+              waitDurationMs: Number(elapsedMs.toFixed(3))
+            }
+          );
+        }
+
+        const remainingMs = timeoutMs - elapsedMs;
+        const sleepTime = Math.min(pollMs, remainingMs);
+        const sleepPromise = sleeper ? sleeper(sleepTime) : new Promise((res) => setTimeout(res, sleepTime));
+        await Promise.race([sleepPromise, cancelPromise]);
+      }
+    } finally {
+      this._dynamicWaiters.delete(waiter);
+      this._activeDynamicWaits = Math.max(0, this._activeDynamicWaits - 1);
+    }
   }
 }
 

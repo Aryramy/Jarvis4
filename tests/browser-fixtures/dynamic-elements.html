@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dynamic Elements Test</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .hidden-box { display: none; }
+    .visible-box { display: block; }
+  </style>
+</head>
+<body>
+  <h1>Dynamic DOM Mutation Test</h1>
+
+  <section id="insertion-section">
+    <button id="btn-trigger-insert" type="button" onclick="insertDynamicElement()">Trigger Dynamic Element</button>
+    <div id="dynamic-container"></div>
+  </section>
+
+  <section id="visibility-section">
+    <button id="btn-toggle-style" type="button" onclick="toggleStyleVisibility()">Toggle Style Visibility</button>
+    <div id="style-box" style="display: none;">
+      <button id="revealed-style-btn" type="button">Style Revealed Button</button>
+    </div>
+
+    <button id="btn-toggle-class" type="button" onclick="toggleClassVisibility()">Toggle Class Visibility</button>
+    <div id="class-box" class="hidden-box">
+      <button id="revealed-class-btn" type="button">Class Revealed Button</button>
+    </div>
+  </section>
+
+  <section id="delayed-target-section">
+    <button id="btn-trigger-delayed" type="button" onclick="triggerDelayedUnique()">Trigger Delayed Target</button>
+    <div id="delayed-container"></div>
+  </section>
+
+  <section id="ambiguous-section">
+    <h2>Ambiguous Controls</h2>
+    <button class="duplicate-btn" type="button">Duplicate Button Action</button>
+    <button class="duplicate-btn" type="button">Duplicate Button Action</button>
+  </section>
+
+  <script>
+    function insertDynamicElement() {
+      setTimeout(() => {
+        const container = document.getElementById('dynamic-container');
+        const btn = document.createElement('button');
+        btn.id = 'dynamic-inserted-btn';
+        btn.textContent = 'Newly Inserted Button';
+        container.appendChild(btn);
+      }, 200);
+    }
+
+    function toggleStyleVisibility() {
+      const el = document.getElementById('style-box');
+      el.style.display = (el.style.display === 'none' || el.style.display === '') ? 'block' : 'none';
+    }
+
+    function toggleClassVisibility() {
+      const el = document.getElementById('class-box');
+      if (el.classList.contains('hidden-box')) {
+        el.classList.remove('hidden-box');
+        el.classList.add('visible-box');
+      } else {
+        el.classList.remove('visible-box');
+        el.classList.add('hidden-box');
+      }
+    }
+
+    function triggerDelayedUnique() {
+      setTimeout(() => {
+        const container = document.getElementById('delayed-container');
+        const link = document.createElement('a');
+        link.id = 'delayed-unique-confirm';
+        link.href = '#confirmed';
+        link.textContent = 'Confirm Order Now';
+        container.appendChild(link);
+      }, 400);
+    }
+  </script>
+</body>
+</html>

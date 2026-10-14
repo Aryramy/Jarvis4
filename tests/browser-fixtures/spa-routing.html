@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>SPA Routing Test</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .route-view { margin-top: 15px; padding: 10px; border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <h1>SPA Routing Test Fixture</h1>
+
+  <nav>
+    <button id="nav-push-dash" type="button" onclick="navigatePush('/dashboard')">PushState: Dashboard</button>
+    <button id="nav-replace-settings" type="button" onclick="navigateReplace('/settings')">ReplaceState: Settings</button>
+    <button id="nav-hash-profile" type="button" onclick="navigateHash('#/profile')">Hash: Profile</button>
+  </nav>
+
+  <div id="route-display">Current Route: /home</div>
+  <div id="view-container" class="route-view">
+    <h2 id="view-title">Home View</h2>
+    <a href="#home-action" id="home-action-link">Home Exclusive Action</a>
+  </div>
+
+  <script>
+    function renderView(path, title, linkText, linkId) {
+      document.getElementById('route-display').textContent = 'Current Route: ' + path;
+      document.getElementById('view-title').textContent = title;
+      const container = document.getElementById('view-container');
+      const existingLink = container.querySelector('a');
+      if (existingLink) existingLink.remove();
+      const a = document.createElement('a');
+      a.id = linkId;
+      a.href = '#' + linkId;
+      a.textContent = linkText;
+      container.appendChild(a);
+    }
+
+    function navigatePush(path) {
+      history.pushState({ path }, '', path);
+      renderView(path, 'Dashboard View', 'Dashboard Metric Export', 'dash-export-link');
+    }
+
+    function navigateReplace(path) {
+      history.replaceState({ path }, '', path);
+      renderView(path, 'Settings View', 'Save System Preferences', 'save-pref-link');
+    }
+
+    function navigateHash(hash) {
+      location.hash = hash;
+    }
+
+    window.addEventListener('hashchange', () => {
+      renderView(location.hash, 'Profile View', 'Edit User Avatar', 'avatar-edit-link');
+    });
+
+    window.addEventListener('popstate', (e) => {
+      const path = (e.state && e.state.path) ? e.state.path : location.pathname;
+      renderView(path, 'History Restored View', 'Back Action Link', 'back-action-link');
+    });
+  </script>
+</body>
+</html>

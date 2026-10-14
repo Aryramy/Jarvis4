@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Multi-Page Test Fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .box { border: 1px solid #888; padding: 15px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div id="page-content"></div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const pageType = (params.get('page') || 'A').toUpperCase();
+
+    const root = document.getElementById('page-content');
+    if (pageType === 'B') {
+      document.title = 'Multi-Page Fixture - Page B';
+      root.innerHTML = `
+        <h1>Page B Context</h1>
+        <p>This is managed page B.</p>
+        <div class="box">
+          <a href="#learn" id="link-learn-more">Learn more</a>
+        </div>
+        <button id="btn-mutate-b" type="button" onclick="mutateB()">Mutate Page B DOM</button>
+        <div id="mutation-area-b"></div>
+      `;
+    } else {
+      document.title = 'Multi-Page Fixture - Page A';
+      root.innerHTML = `
+        <h1>Page A Context</h1>
+        <p>This is managed page A.</p>
+        <div class="box">
+          <a href="#explicit" id="link-explicit-waits">Explicit waits</a>
+        </div>
+        <button id="btn-mutate-a" type="button" onclick="mutateA()">Mutate Page A DOM</button>
+        <div id="mutation-area-a"></div>
+      `;
+    }
+
+    function mutateB() {
+      const container = document.getElementById('mutation-area-b');
+      const btn = document.createElement('button');
+      btn.className = 'b-dynamic-item';
+      btn.textContent = 'Page B dynamic entry at ' + Date.now();
+      container.appendChild(btn);
+    }
+
+    function mutateA() {
+      const container = document.getElementById('mutation-area-a');
+      const btn = document.createElement('button');
+      btn.className = 'a-dynamic-item';
+      btn.textContent = 'Page A dynamic entry at ' + Date.now();
+      container.appendChild(btn);
+    }
+  </script>
+</body>
+</html>

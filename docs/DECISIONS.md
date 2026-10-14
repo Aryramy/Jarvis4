@@ -848,4 +848,98 @@
   - Generic "new page" terminology is presented in response metadata while maintaining strict backward compatibility.
   - Zero weakening of security or popup policy rules.
 
+## ADR-0044: Brick 32 — Dynamic Sites & SPAs v1: Semantic Revision, SPA Route Awareness, and Bounded Waits
+- **Status**: Accepted
+- **Context**: Dynamic web applications, single-page applications (SPAs), and client-side rendering introduce asynchronous DOM re-renders, delayed control rendering, and history-based client-side routing. Actions executed against stale snapshots or detached nodes cause silent failures or non-deterministic behavior.
+- **Decision**:
+  1. **Per-Page Semantic Revision Tracking**: Introduce `semanticRevision` tracked per managed page via a lightweight browser-side `MutationObserver` that records only numeric revisions and monotonic timestamps. Tracks additions/removals of eligible elements (links, buttons, inputs, textareas, selects, headings), accessible label changes, relevant visible text mutations, and interaction state changes (disabled, checked, href).
+  2. **Zero Sensitive Data in Revision Tracking**: Privacy is strictly enforced. Mutation tracking never stores or inspects password values, text input contents, textarea contents, file paths, cookies, localStorage, sessionStorage, or hidden token values.
+  3. **Dynamic Snapshot Identity & Invalidation**: Snapshots bind to page lifecycle, pageId, document version, and semantic revision. Any main-document semantic DOM mutation, full document navigation, or SPA route change invalidates previous snapshots, causing subsequent action requests with stale snapshot tokens to return controlled `TARGET_STALE`.
+  4. **SPA / Client-Side Route Awareness**: Intercepts and observes `history.pushState`, `history.replaceState`, `popstate`, and hash routing. Preserves managed `pageId`, updates `currentUrl`, increments `spaRouteVersion` and `semanticRevision`, and invalidates prior route snapshots without falsely claiming full document navigation (`spaRouteChanged = true`, `navigationOccurred = false`).
+  5. **Readiness Primitives**:
+     - `POST /api/browser/wait-for-stable`: Bounded wait for semantic quiet window (`BROWSER_DOM_QUIET_MS`, default 300 ms, clamped [50, 5000]) within bounded timeout (`BROWSER_DYNAMIC_TIMEOUT_MS`, default 5000 ms, clamped [100, 60000]). Returns fresh settled metadata and snapshotToken. Continuous mutations trigger controlled `PAGE_NOT_STABLE`.
+     - `POST /api/browser/wait-for-target`: Read-only readiness wait for a single semantic target query. Requires unique resolution with high confidence. Tolerates temporary appearance/disappearance during bounded wait. Returns fresh safe element summary and snapshotToken without exposing ElementHandles, locators, or CSS/XPath selectors.
+  6. **Concurrency & Resource Bounding**: Active dynamic waiters are bounded by `BROWSER_MAX_DYNAMIC_WAITS` (default 4, clamped [1, 16]); excess waiters reject with `DYNAMIC_WAIT_LIMIT_REACHED`. Dynamic waiters are cleanly cancelled on page close (`PAGE_CLOSED`), active page switch (`ACTIVE_PAGE_CHANGED`), or browser shutdown (`BROWSER_NOT_RUNNING`).
+  7. **Action Re-render Safety**: Preserves single bounded immediate semantic re-resolution before action execution; validates element attachment via `isConnected`; detached nodes return controlled `TARGET_CHANGED` or `TARGET_STALE`. No automatic retry loops, no forced actions, no semantic query rewrites.
+  8. **Strict Architectural Invariants**:
+     - Main document only; zero iframe or shadow DOM traversal (deferred to Brick 39).
+     - Never use or restore `networkidle`.
+     - Zero AI / LLM calls. Zero search calls. No `/api/auto` connection. Zero voice pipeline changes.
+     - Form submission remains blocked (Brick 34); form workflows deferred to Brick 33; autonomous recovery/self-healing deferred to Brick 41.
+- **Consequences**:
+  - Deterministic browser layer handles dynamic rendering, SPAs, and delayed controls safely without flaky timing hacks or network sniffing.
+  - Snapshot validity is strictly enforced against DOM mutations and client-side route changes.
+  - All 1339 tests pass deterministically and offline with 0 failures, 0 skipped.
+
+## ADR-0045: Brick 32 Hotfix B — Real-Browser Semantic Mutation Tracking & Observer Lifecycle
+- **Status**: Accepted
+- **Context**: During Brick-032 real-browser live verification on `https://www.selenium.dev/selenium/web/dynamic.html`, clicking "Reveal a new input" revealed an eligible `<input type="text">` after a delayed render, but subsequent `waitForStable` returned unchanged `semanticRevision: 2` and a stale `quietForMs: 486435 ms`.
+- **Root Cause**:
+  1. **Missing Visibility Attributes**: The in-page `MutationObserver` attribute filter and relevant attributes set omitted `'style'` and `'class'`. On `dynamic.html`, "Reveal a new input" unhides an existing `<input id="revealed" style="display:none">` by executing `input.style.display = 'block'`. Because `'style'` was filtered out, `MutationObserver` never fired.
+  2. **Observer Lifecycle & Current Document Instrumentation**: `_initDynamicTracker` registered `page.addInitScript(DYNAMIC_TRACKER_SCRIPT)` for future documents, but if an active document was already loaded or replaced, the in-page tracker could become disconnected without being re-instrumented.
+  3. **Node Synchronization**: In `syncDynamicState`, if the in-page tracker was absent, Node remained stuck on stale cached revision and mutation timestamp values.
+  4. **Stale Page Status**: `getPageStatus()` reported cached Node values without actively synchronizing with the live in-page tracker.
+- **Decision**:
+  1. **Expanded Relevant Attributes**: Include `'style'` and `'class'` in `RELEVANT_ATTRIBUTES`, `RELEVANT_ATTRS`, and `attributeFilter`. Ensure attribute mutations only trigger a revision bump if the target node is relevant and non-sensitive (`!isNodeSensitive(m.target) && isNodeRelevant(m.target)`), avoiding false bumps on decorative elements.
+  2. **Descendant & Subtree Eligibility**: `isNodeRelevant` verifies descendant eligibility (`node.querySelector(...)`) for both childList insertions and attribute mutations (e.g. unhiding a parent container).
+  3. **Dual Lifecycle Instrumentation (Current + Future Documents)**:
+     - Future documents are instrumented via `page.addInitScript(DYNAMIC_TRACKER_SCRIPT)`.
+     - In `syncDynamicState()`, if `window.__JARVIS_DYNAMIC_TRACKER__` is missing on the live page, evaluate `DYNAMIC_TRACKER_SCRIPT` immediately on demand to ensure the active document is instrumented.
+     - `ensureObserver()` ensures the observer is active and observing `document`.
+  4. **Navigation Lifecycle Re-binding**: On `navigate()`, `refresh()`, `back()`, and `forward()`, increment `documentVersion`, reset `semanticRevision = 1`, re-bind the tracker, and invalidate prior snapshots.
+  5. **Live Synchronization**: `syncDynamicState()` synchronizes live in-page `semanticRevision` and fresh `lastRelevantMutationTimestamp` to Node. `getPageStatus()` and `waitForStable()` invoke `syncDynamicState()` and expose `dynamicObserverInstalled` and `observerDocumentVersion` diagnostics.
+- **Consequences**:
+  - Unhiding, revealing, or dynamically inserting inputs, buttons, and semantic controls increments `semanticRevision` and provides fresh `quietForMs`.
+  - Zero overcorrection: decorative style/class changes and password inputs alone do not trigger bumps.
+  - All 1361 tests pass deterministically and offline with 0 failures, 0 skipped.
+
+## ADR-0046: Automated Real-Browser Verification Harness & Two-Level Verification Policy
+- **Status**: Accepted
+- **Context**:
+  - Prior browser verification required human developers to manually run dozens of live browser clicks, inspects, and tab switches in Edge after every brick. This manual live verification does not scale.
+  - We preserve strict verification while automating real-browser acceptance.
+  - `npm run verify` must remain completely deterministic, offline, fast, and free of any browser launches or network dependencies.
+- **Decision**:
+  1. **Two Verification Levels**:
+     - **Level 1 (`npm run verify`)**: Fast, offline, deterministic unit tests, integration tests, mock environments, static checks, and regression tests. Strictly 0 real browser launches and 0 external network dependencies.
+     - **Level 2 (`npm run verify:browser`)**: Automated real-browser verification harness launching the installed system Microsoft Edge (`channel: "msedge"`) via Playwright and executing programmatically against real DOM, MutationObserver, tabs/pages, navigation, popups, SPA history, and dynamic rendering.
+  2. **Deterministic Local Fixture Server**:
+     - Tests rely on deterministic local HTML fixture pages in `tests/browser-fixtures/` (`static.html`, `dynamic-elements.html`, `spa-routing.html`, `multi-page.html`, `popup.html`, `rerender.html`).
+     - Served on a temporary HTTP server bound strictly to loopback (`127.0.0.1`) on an ephemeral port, running only during `verify:browser`.
+     - Zero external website dependencies (e.g., `selenium.dev`, `example.com`, etc.) for core acceptance verification.
+  3. **Strict Test Authorization Mechanism**:
+     - Production SSRF and private network safety restrictions remain 100% active by default.
+     - An explicit test authorization flag (`allowTestLoopback: true`) is scoped only to internal test runners and passes `--no-proxy-server` to Edge to bypass Windows system proxies on loopback.
+  4. **Automatic Teardown & Failure Diagnostics**:
+     - Harness uses `try/finally` blocks ensuring all pages, contexts, Edge browser processes, and the fixture server are terminated cleanly even upon test assertion failures.
+     - In-flight failure artifacts (screenshots, URLs, metadata) are stored in `test-results/` (ignored in `.gitignore`) without storing secrets.
+  5. **Human Verification Policy**:
+     - Human manual verification is strictly reserved for visual UX acceptance, voice quality, microphone behavior, human interactive authentication, MFA, CAPTCHA handoff, consequential-action UX, OS UI downloads/uploads, and major production milestones (e.g. GREEN-045).
+     - Ordinary browser mechanics are verified automatically via `verify:browser`.
+- **Consequences**:
+  - Massive scalability and velocity increase for subsequent browser bricks.
+  - Zero regression in Level 1 offline determinism.
+
+## ADR-0047: Atomic Page Context & Hotfix C Cross-Page Snapshot Binding
+- **Status**: Accepted
+- **Context**:
+  - Live testing revealed that opening Page A ("Explicit waits") and Page B ("Learn more"), waiting for stability on Page B, switching back to Page A, and resolving Page A's semantic link leaked Page B's snapshot token and omitted atomic page metadata.
+- **Root Cause**:
+  - `BrowserManager` maintained a global `this._snapshotToken` that was overwritten whenever any page updated its snapshot (e.g., `waitForStable` on Page B). Switching back to Page A updated `_activePageId` and `_page` but left `this._snapshotToken` pointing to Page B.
+  - `resolveTarget` passed `this._snapshotToken` instead of the specific page entry's token, resulting in cross-page snapshot contamination.
+  - `actionExecutor.js` was reading `browserManager.activePageId` directly rather than respecting `options.pageId || actionRequest.pageId`.
+  - `isSnapshotTokenValid` fell back to `this._snapshotToken` even when queried for a non-existent `pageId`.
+- **Decision**:
+  1. **Atomic Page Context**: Every page operation captures one concrete managed page entry (`entry = this._pages.get(targetPageId)`) at request start.
+  2. **Single Entry Authority**: All page artifacts—`pageInstance`, `pageId`, `documentVersion`, `semanticRevision`, `snapshotToken`, `inspection`, and `target resolution`—must come strictly from that same single entry.
+  3. **Atomic Target Resolution**: `resolveTarget` returns `pageId`, `documentVersion`, and `semanticRevision` matching the resolved target's page entry.
+  4. **Synchronized Active Context**: `switchPage` and `_registerPage` synchronize `_snapshotToken`, `_documentVersion`, and `_semanticRevision` from the active entry.
+  5. **Action Request Isolation**: `actionExecutor.js` captures `targetPageId = options.pageId || actionRequest.pageId || browserManager.activePageId` and binds snapshot validation and target re-resolution strictly to that target page.
+  6. **Snapshot Token Validation Scope**: `isSnapshotTokenValid(token, pageId)` strictly checks `pageId` when provided, never falling back to another page's token.
+- **Consequences**:
+  - Cross-page snapshot contamination is completely eliminated.
+  - Resolving targets on Page A after switching from Page B preserves Page A's snapshot token, pageId, and semantic revision.
+
+
+
 

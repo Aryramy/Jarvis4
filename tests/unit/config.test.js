@@ -26,7 +26,11 @@ describe('Configuration Utility', () => {
     'BROWSER_HEADLESS',
     'BROWSER_LAUNCH_TIMEOUT_MS',
     'BROWSER_NAVIGATION_TIMEOUT_MS',
-    'BROWSER_POPUP_SETTLE_MS'
+    'BROWSER_POPUP_SETTLE_MS',
+    'BROWSER_DYNAMIC_TIMEOUT_MS',
+    'BROWSER_DOM_QUIET_MS',
+    'BROWSER_DYNAMIC_POLL_MS',
+    'BROWSER_MAX_DYNAMIC_WAITS'
   ];
 
   let originalEnv = {};
@@ -276,6 +280,10 @@ describe('Configuration Utility', () => {
     assert.equal(defaultCfg.browser.inspectionMaxTextChars, 12000);
     assert.equal(defaultCfg.browser.inspectionMaxElements, 100);
     assert.equal(defaultCfg.browser.inspectionMaxElementTextChars, 300);
+    assert.equal(defaultCfg.browser.dynamicTimeoutMs, 5000);
+    assert.equal(defaultCfg.browser.domQuietMs, 300);
+    assert.equal(defaultCfg.browser.dynamicPollMs, 100);
+    assert.equal(defaultCfg.browser.maxDynamicWaits, 4);
   });
 
   test('should load browser config overrides passed directly', () => {
@@ -340,6 +348,60 @@ describe('Configuration Utility', () => {
   test('should default popupSettleMs to 500ms when not specified', () => {
     const defaultCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
     assert.equal(defaultCfg.browser.popupSettleMs, 500);
+  });
+
+  test('should load dynamic wait config overrides and clamp unsafe values (Brick 32)', () => {
+    const customCfg = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'info',
+      BROWSER_DYNAMIC_TIMEOUT_MS: '8000',
+      BROWSER_DOM_QUIET_MS: '450',
+      BROWSER_DYNAMIC_POLL_MS: '200',
+      BROWSER_MAX_DYNAMIC_WAITS: '8'
+    });
+    assert.equal(customCfg.browser.dynamicTimeoutMs, 8000);
+    assert.equal(customCfg.browser.domQuietMs, 450);
+    assert.equal(customCfg.browser.dynamicPollMs, 200);
+    assert.equal(customCfg.browser.maxDynamicWaits, 8);
+
+    const clampedUnder = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'info',
+      BROWSER_DYNAMIC_TIMEOUT_MS: '10', // min 100
+      BROWSER_DOM_QUIET_MS: '5',        // min 50
+      BROWSER_DYNAMIC_POLL_MS: '1',     // min 20
+      BROWSER_MAX_DYNAMIC_WAITS: '0'    // min 1
+    });
+    assert.equal(clampedUnder.browser.dynamicTimeoutMs, 100);
+    assert.equal(clampedUnder.browser.domQuietMs, 50);
+    assert.equal(clampedUnder.browser.dynamicPollMs, 20);
+    assert.equal(clampedUnder.browser.maxDynamicWaits, 1);
+
+    const clampedOver = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'info',
+      BROWSER_DYNAMIC_TIMEOUT_MS: '999999', // max 60000
+      BROWSER_DOM_QUIET_MS: '99999',       // max 5000
+      BROWSER_DYNAMIC_POLL_MS: '5000',      // max 1000
+      BROWSER_MAX_DYNAMIC_WAITS: '100'      // max 20
+    });
+    assert.equal(clampedOver.browser.dynamicTimeoutMs, 60000);
+    assert.equal(clampedOver.browser.domQuietMs, 5000);
+    assert.equal(clampedOver.browser.dynamicPollMs, 1000);
+    assert.equal(clampedOver.browser.maxDynamicWaits, 20);
+
+    const invalidCfg = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'info',
+      BROWSER_DYNAMIC_TIMEOUT_MS: 'not_a_number',
+      BROWSER_DOM_QUIET_MS: 'invalid',
+      BROWSER_DYNAMIC_POLL_MS: 'abc',
+      BROWSER_MAX_DYNAMIC_WAITS: 'xyz'
+    });
+    assert.equal(invalidCfg.browser.dynamicTimeoutMs, 5000);
+    assert.equal(invalidCfg.browser.domQuietMs, 300);
+    assert.equal(invalidCfg.browser.dynamicPollMs, 100);
+    assert.equal(invalidCfg.browser.maxDynamicWaits, 4);
   });
 });
 

@@ -29,3 +29,6 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Test results and failure artifacts
+test-results/

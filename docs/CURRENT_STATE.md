@@ -1,11 +1,34 @@
 Project: JARVIS4
-Current Brick: 31
-Status: BRICK-031 VERIFIED
+Current Brick: 32
+Status: BRICK-032 IN PROGRESS (Automated Real-Browser Verification Harness Operational; Hotfix C Verified)
 Last Verified Brick: BRICK-031
-Current Feature: Tabs, Windows & Popups v1 (Safe Multi-Page Browser Lifecycle)
+Current Feature: Dynamic Sites & SPAs v1 (Semantic DOM Revision + SPA Route Awareness + Bounded Waits)
 Next Feature: NOT AUTHORIZED
 
 ## Working capabilities
+
+- Two-Level Verification Architecture:
+  - Level 1 (`npm run verify`): 100% offline, fast, deterministic unit, integration, and mock regression suite (1362 tests across 150 suites). Strictly zero browser launches and zero network dependencies.
+  - Level 2 (`npm run verify:browser`): Automated real-browser verification suite running against actual installed system Microsoft Edge (`channel: "msedge"`) via Playwright. Verifies real DOM, MutationObserver, tabs/pages, popups, SPA routing, dynamic rendering, and atomic page isolation programmatically across 25 automated checks with guaranteed try/finally teardown.
+  - Deterministic Local Browser Fixture Server (`tests/browser-fixtures/`): Local loopback server (`127.0.0.1`) serving `static.html`, `dynamic-elements.html`, `spa-routing.html`, `multi-page.html`, `popup.html`, and `rerender.html`. Requires explicit `allowTestLoopback: true` authorization flag; production SSRF/loopback protections remain 100% active. Zero reliance on external websites.
+  - Human Verification Policy: Routine browser mechanics verified automatically via Level 2 harness. Human live verification strictly reserved for visual UX acceptance, voice quality, microphone behavior, human interactive authentication, MFA, CAPTCHAs, OS downloads/uploads, and major production milestones (GREEN-045).
+
+- Dynamic Sites & SPAs v1 (Brick 32) deterministic browser layer for dynamically rendered pages, SPAs, and delayed controls (`dynamicTracker.js`, `browserManager.js`, `actionExecutor.js`, `server.js`, `index.html`):
+  - Hotfix C (Atomic Page Context & Cross-Page Snapshot Binding): Eliminates cross-page snapshot contamination when switching between multiple managed pages. Guarantees that target resolution, snapshots, and action execution draw strictly from the concrete managed page entry corresponding to the requested page (`pageInstance`, `pageId`, `documentVersion`, `semanticRevision`, `snapshotToken`, `inspection`, and `target resolution`).
+  - Semantic Revision Tracking: Per-managed-page `semanticRevision` tracking via lightweight browser-side `MutationObserver` observing eligible semantic elements (links, buttons, inputs, selects, textareas, headings), accessible labels, visible relevant text, and interaction/visibility state (disabled, checked, href, hidden, style, class).
+  - Hotfix B (Real-Browser Semantic Mutation Tracking): Fixes live tracking on dynamic pages such as Selenium `dynamic.html` where controls are revealed via `style.display = 'block'` or class toggling. Observes `style` and `class` on semantic nodes and container subtrees with eligible descendants. Supports dual-lifecycle instrumentation (current active document evaluated on-demand + future navigations via init script). Re-binds and invalidates snapshots on navigation, reload, back, and forward.
+  - Strict Privacy in Mutation Tracking: Revision tracking records monotonic timestamps and numeric revisions only. Password values, text input contents, textarea contents, file paths, cookies, localStorage, sessionStorage, and hidden tokens are NEVER recorded or exposed.
+  - Dynamic Snapshot Identity & Invalidation: Snapshots bind to page lifecycle, pageId, document version, and semantic revision. Any main-document semantic DOM mutation, full document navigation, or SPA route change invalidates existing snapshots. Subsequent actions using a stale snapshot return controlled `TARGET_STALE`.
+  - SPA / Client-Side Route Awareness: Detects same-document route changes (`history.pushState`, `history.replaceState`, `popstate`, hash changes). Preserves managed `pageId`, updates `currentUrl`, increments `spaRouteVersion` and `semanticRevision`, and invalidates old route snapshots without claiming full document navigation.
+  - Readiness Primitives & Endpoints:
+    - `POST /api/browser/wait-for-stable`: Bounded wait for active page's semantic surface to become quiet (`BROWSER_DOM_QUIET_MS`, default 300 ms, clamped [50, 5000]) within timeout (`BROWSER_DYNAMIC_TIMEOUT_MS`, default 5000 ms, clamped [100, 60000]). Returns fresh settled metadata, snapshotToken, and diagnostics (`dynamicObserverInstalled`, `observerDocumentVersion`). Continuous mutations trigger controlled `PAGE_NOT_STABLE`.
+    - `POST /api/browser/wait-for-target`: Read-only semantic readiness wait for a single target query. Requires unique match with high confidence. Medium-confidence or ambiguous matches continue waiting until timeout (`TARGET_NOT_READY` or `TARGET_AMBIGUOUS`). Tolerates target disappearing/reappearing; never returns stale or long-lived ElementHandles.
+  - Concurrency & Resource Bounding: Dynamic wait concurrency limited by `BROWSER_MAX_DYNAMIC_WAITS` (default 4, clamped [1, 16]); excess waiters rejected with `DYNAMIC_WAIT_LIMIT_REACHED`. Pending waiters safely cancelled on page close (`PAGE_CLOSED`), active page switch (`ACTIVE_PAGE_CHANGED`), or browser shutdown (`BROWSER_NOT_RUNNING`).
+  - Action Re-render Safety: Preserves single bounded immediate semantic re-resolution before action execution; checks DOM attachment (`isConnected`); detached nodes return controlled `TARGET_CHANGED` or `TARGET_STALE`. Zero automatic action retry loops; zero forced actions; zero semantic query rewrites.
+  - Main Document Scope: Mutation observation and target resolution operate strictly on main document; no iframe traversal, no shadow DOM orchestration (deferred to Brick 39).
+  - No `networkidle`: Never uses or restores `networkidle`.
+  - Zero AI / LLM calls. Zero search calls. No `/api/auto` connection. Zero voice pipeline changes.
+  - Brick 33 is NOT started.
 
 - Tabs, Windows & Popups v1 (Brick 31) safe multi-page browser lifecycle subsystem (`BrowserManager` in `src/browser/browserManager.js`, `actionExecutor.js`, `server.js`, `index.html`):
   - Architecture: Exactly ONE Playwright browser process, ONE isolated temporary `BrowserContext`, and 1..N managed pages within that context bounded by `BROWSER_MAX_PAGES` (default 8, returns `PAGE_LIMIT_REACHED` on overflow).

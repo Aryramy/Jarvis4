@@ -365,7 +365,16 @@ Currently tracked issues in JARVIS4:
     - **No Multi-Step Browser Agent**: No multi-action chains, planner loops, or autonomous goal decomposition. Belongs to Brick 40.
     - **No Voice-Driven Page Switching**: Voice Turn, STT, and TTS are not connected to browser page management.
     - **Zero AI / Zero Search**: Page management, switching, and adoption perform 0 LLM calls and 0 search calls.
-    - **Production Milestone**: Infrastructure towards GREEN-045; Brick 31 alone is not production-ready. Brick 32 is not started.
+24. **Dynamic Sites & SPAs v1 Observations & Limitations (Brick 32 In Progress)**:
+    - **Main Document Only**: Dynamic tracking and bounded wait primitives observe only the top-level main document. Nested iframes and shadow DOM traversal remain unmanaged (deferred to Brick 39).
+    - **No `networkidle`**: Network requests are never used to determine DOM stability. Pages with ongoing WebSockets, long polling, ads, or background analytics can still settle reliably once the main document semantic DOM is quiet for `BROWSER_DOM_QUIET_MS` (default 300 ms).
+    - **Strict Privacy Preservation**: Revision tracking records only numeric revisions and monotonic timestamps. Passwords, text input contents, textarea contents, file paths, cookies, localStorage, sessionStorage, and hidden tokens are never observed or exposed.
+    - **No Automatic Action Retry / Self-Healing**: When a target element is missing, detached, or stale at interaction time, the action rejects immediately (`TARGET_STALE`, `TARGET_NOT_FOUND`, `TARGET_CHANGED`). No automatic retry loop or semantic query rewriting is performed (deferred to Brick 41).
+    - **No Forced DOM Modifications**: Observation only. JARVIS never deletes loading overlays, spinners, or disables disabled controls to force actionability.
+    - **Read-Only Readiness Primitives**: `wait-for-target` is strictly read-only and never performs clicks, fills, checks, or navigations.
+    - **Zero AI / Zero Search**: Dynamic tracking and wait primitives perform 0 LLM calls, 0 OpenRouter calls, and 0 search calls.
+    - **No Form Submission Workflow**: Submit buttons remain blocked (`FORM_SUBMISSION_NOT_AUTHORIZED`, deferred to Brick 34); form workflows deferred to Brick 33.
+    - **Production Milestone**: Infrastructure towards GREEN-045; Brick 32 alone is not production-ready. Brick 33 is not started.
 
 
 

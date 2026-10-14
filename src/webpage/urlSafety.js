@@ -257,20 +257,26 @@ export async function validateUrlSafety(urlStr, options = {}) {
 
   const lowerHost = hostname.toLowerCase();
 
+  const allowTestLoopback = Boolean(options.allowTestLoopback || options.allowLoopbackTest);
+
   // Local hostname checks
   if (lowerHost === 'localhost' || BLOCKED_HOST_SUFFIXES.some(suffix => lowerHost === suffix.replace(/^\./, '') || lowerHost.endsWith(suffix))) {
-    throw new PageReaderError('LOCAL_OR_PRIVATE_HOST_BLOCKED', `Local or private hostname blocked: "${hostname}"`);
+    if (!allowTestLoopback || lowerHost !== 'localhost') {
+      throw new PageReaderError('LOCAL_OR_PRIVATE_HOST_BLOCKED', `Local or private hostname blocked: "${hostname}"`);
+    }
   }
 
   // Port check
   const port = parsedUrl.port;
-  if (protocol === 'http:') {
-    if (port !== '' && port !== '80') {
-      throw new PageReaderError('PORT_NOT_ALLOWED', `Port ${port} is not allowed for HTTP. Only standard port 80 is permitted.`);
-    }
-  } else if (protocol === 'https:') {
-    if (port !== '' && port !== '443') {
-      throw new PageReaderError('PORT_NOT_ALLOWED', `Port ${port} is not allowed for HTTPS. Only standard port 443 is permitted.`);
+  if (!allowTestLoopback || (lowerHost !== 'localhost' && lowerHost !== '127.0.0.1' && lowerHost !== '[::1]')) {
+    if (protocol === 'http:') {
+      if (port !== '' && port !== '80') {
+        throw new PageReaderError('PORT_NOT_ALLOWED', `Port ${port} is not allowed for HTTP. Only standard port 80 is permitted.`);
+      }
+    } else if (protocol === 'https:') {
+      if (port !== '' && port !== '443') {
+        throw new PageReaderError('PORT_NOT_ALLOWED', `Port ${port} is not allowed for HTTPS. Only standard port 443 is permitted.`);
+      }
     }
   }
 
@@ -281,6 +287,13 @@ export async function validateUrlSafety(urlStr, options = {}) {
 
   const ipVersion = net.isIP(rawIpCandidate);
   if (ipVersion !== 0) {
+    if (allowTestLoopback && (rawIpCandidate === '127.0.0.1' || rawIpCandidate === '::1')) {
+      return {
+        valid: true,
+        url: parsedUrl,
+        resolvedAddresses: [{ address: rawIpCandidate, family: ipVersion }]
+      };
+    }
     if (!isPublicIP(rawIpCandidate)) {
       throw new PageReaderError('LOCAL_OR_PRIVATE_HOST_BLOCKED', `Access to private or non-routable IP address blocked: "${rawIpCandidate}"`);
     }
@@ -288,6 +301,14 @@ export async function validateUrlSafety(urlStr, options = {}) {
       valid: true,
       url: parsedUrl,
       resolvedAddresses: [{ address: rawIpCandidate, family: ipVersion }]
+    };
+  }
+
+  if (allowTestLoopback && lowerHost === 'localhost') {
+    return {
+      valid: true,
+      url: parsedUrl,
+      resolvedAddresses: [{ address: '127.0.0.1', family: 4 }]
     };
   }
 

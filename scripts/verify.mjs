@@ -608,14 +608,16 @@ check('Cross-Gateway AI Benchmark Module Sanity Check', async () => {
   }
 });
 
-// 3. Syntax Validation across all JS/MJS files
-check('JavaScript Syntax Validation (node --check)', () => {
+// 3. Syntax Validation across all JS/MJS files and HTML inline scripts
+check('JavaScript Syntax Validation (node --check & inline HTML scripts)', () => {
   const searchDirs = ['src', 'tests', 'scripts'];
   const allJsFiles = [];
+  const allHtmlFiles = [];
   for (const dir of searchDirs) {
     const fullDir = resolve(ROOT_DIR, dir);
     if (existsSync(fullDir)) {
       allJsFiles.push(...collectFiles(fullDir, ['.js', '.mjs']));
+      allHtmlFiles.push(...collectFiles(fullDir, ['.html']));
     }
   }
 
@@ -627,6 +629,23 @@ check('JavaScript Syntax Validation (node --check)', () => {
     });
     if (result.status !== 0) {
       throw new Error(`Syntax error in ${rel}:\n${result.stderr || result.stdout}`);
+    }
+  }
+
+  for (const filePath of allHtmlFiles) {
+    const rel = relative(ROOT_DIR, filePath);
+    const content = readFileSync(filePath, 'utf8');
+    const scriptMatches = [...content.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)];
+    for (let i = 0; i < scriptMatches.length; i++) {
+      const scriptCode = scriptMatches[i][1];
+      const result = spawnSync(process.execPath, ['--input-type=module', '--check'], {
+        cwd: ROOT_DIR,
+        input: scriptCode,
+        encoding: 'utf8'
+      });
+      if (result.status !== 0) {
+        throw new Error(`Syntax error in inline script[${i}] of ${rel}:\n${result.stderr || result.stdout}`);
+      }
     }
   }
 });

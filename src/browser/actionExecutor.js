@@ -303,8 +303,12 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
     throw new ActionExecutionError('Expected snapshot token is required.', 'MISSING_SNAPSHOT_TOKEN');
   }
 
-  const currentSnapshotToken = browserManager.snapshotToken;
-  if (!currentSnapshotToken || !browserManager.isSnapshotTokenValid(expectedSnapshotToken)) {
+  const activePageId = options.pageId || actionRequest.pageId || browserManager.activePageId;
+  const pageEntry = browserManager._pages ? browserManager._pages.get(activePageId) : null;
+  const preSemanticRevision = pageEntry ? pageEntry.semanticRevision : 1;
+
+  const currentSnapshotToken = browserManager.getSnapshotToken ? browserManager.getSnapshotToken(activePageId) : browserManager.snapshotToken;
+  if (!currentSnapshotToken || !browserManager.isSnapshotTokenValid(expectedSnapshotToken, activePageId)) {
     throw new ActionExecutionError('Snapshot token is stale or invalid.', 'TARGET_STALE');
   }
 
@@ -506,8 +510,9 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
       }
 
       const dnsLookup = options.dnsLookup || actionRequest.dnsLookup || browserManager._dnsLookup;
+      const allowTestLoopback = Boolean(options.allowTestLoopback || browserManager._allowTestLoopback);
       try {
-        await validateUrlSafety(resolvedUrl, { dnsLookup });
+        await validateUrlSafety(resolvedUrl, { dnsLookup, allowTestLoopback });
       } catch (valErr) {
         throw new ActionExecutionError(
           valErr.message,
@@ -576,6 +581,22 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
       throw new ActionExecutionError('Target element changed or is no longer attached.', 'TARGET_CHANGED');
     }
 
+    if (typeof elementHandle.isConnected === 'function') {
+      const isConnected = await elementHandle.isConnected().catch(() => true);
+      if (!isConnected) {
+        throw new ActionExecutionError('Target element changed or is no longer attached.', 'TARGET_CHANGED');
+      }
+    }
+
+    // Verify semantic revision hasn't changed between resolution and execution (Brick 32 Section 29)
+    if (typeof browserManager.syncDynamicState === 'function') {
+      await browserManager.syncDynamicState(activePageId);
+    }
+    const currentRevision = pageEntry ? pageEntry.semanticRevision : preSemanticRevision;
+    if (currentRevision !== preSemanticRevision) {
+      throw new ActionExecutionError('Target element re-rendered before interaction.', 'TARGET_STALE');
+    }
+
     // Verify element is still enabled and visible immediately before execution (Section 11)
     let isElementDisabled = false;
     if (typeof elementHandle.isDisabled === 'function') {
@@ -593,6 +614,9 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
     // Execute primitive action
     let verification = {};
     let navigationOccurred = false;
+    let spaRouteChanged = false;
+    let urlChanged = false;
+    let postSemanticRevision = preSemanticRevision;
     let postSnapshotToken = expectedSnapshotToken;
     let snapshotChanged = false;
     let popupEvidence = null;
@@ -757,8 +781,9 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
           if (req) {
             const reqUrl = typeof req.url === 'function' ? req.url() : '';
             if (req.isNavigationRequest ? req.isNavigationRequest() : true) {
+              const allowTestLoopback = Boolean(options.allowTestLoopback || browserManager._allowTestLoopback);
               try {
-                await validateUrlSafety(reqUrl, { dnsLookup });
+                await validateUrlSafety(reqUrl, { dnsLookup, allowTestLoopback });
               } catch (valErr) {
                 navSecurityError = valErr;
                 if (typeof route.abort === 'function') {
@@ -923,8 +948,9 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
               );
             }
 
+            const allowTestLoopback = Boolean(options.allowTestLoopback || browserManager._allowTestLoopback);
             try {
-              await validateUrlSafety(popupUrl, { dnsLookup });
+              await validateUrlSafety(popupUrl, { dnsLookup, allowTestLoopback });
             } catch (valErr) {
               if (typeof capturedPopup.close === 'function') await capturedPopup.close().catch(() => {});
               throw new ActionExecutionError(valErr.message, valErr.code || 'LOCAL_OR_PRIVATE_HOST_BLOCKED', valErr.details || {});
@@ -970,12 +996,21 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
           await page.waitForLoadState('domcontentloaded', { timeout: Math.min(3000, actionTimeoutMs) }).catch(() => {});
         }
 
-        const postActionUrl = typeof page.url === 'function' ? page.url() : preActionUrl;
-        navigationOccurred = postActionUrl !== preActionUrl;
+        if (typeof browserManager.syncDynamicState === 'function') {
+          await browserManager.syncDynamicState(activePageId);
+        }
 
-        if (navigationOccurred) {
-          browserManager._invalidateSnapshot();
-          postSnapshotToken = browserManager.snapshotToken;
+        const postActionUrl = typeof page.url === 'function' ? page.url() : preActionUrl;
+        postSemanticRevision = pageEntry ? pageEntry.semanticRevision : preSemanticRevision;
+        spaRouteChanged = Boolean(pageEntry?.spaRouteChanged || (postActionUrl !== preActionUrl && pageEntry?.spaRouteVersion > (pageEntry?.snapshotRouteVersion || 1)));
+        navigationOccurred = Boolean(postActionUrl !== preActionUrl && !spaRouteChanged);
+        urlChanged = Boolean(navigationOccurred || spaRouteChanged || postActionUrl !== preActionUrl);
+
+        if (navigationOccurred || spaRouteChanged || postSemanticRevision !== preSemanticRevision) {
+          if (typeof browserManager._invalidateSnapshot === 'function') {
+            browserManager._invalidateSnapshot(activePageId);
+          }
+          postSnapshotToken = browserManager.getSnapshotToken ? browserManager.getSnapshotToken(activePageId) : browserManager.snapshotToken;
           snapshotChanged = true;
         }
 
@@ -1020,6 +1055,10 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
       postSnapshotToken,
       snapshotChanged,
       navigationOccurred,
+      spaRouteChanged: Boolean(spaRouteChanged),
+      urlChanged: Boolean(urlChanged),
+      preSemanticRevision,
+      postSemanticRevision,
       verification,
       currentUrl,
       title: currentTitle,
@@ -1041,7 +1080,7 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
       result.creationType = popupEvidence.creationType || 'popup';
     }
 
-    if (navigationOccurred) {
+    if (navigationOccurred || spaRouteChanged) {
       result.preActionUrl = preActionUrl;
     }
 

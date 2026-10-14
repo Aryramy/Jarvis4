@@ -65,6 +65,13 @@ export function loadConfig(overrides = {}) {
     maxOutputTokens: Math.max(1, Number(overrides.PAGE_QA_MAX_OUTPUT_TOKENS ?? process.env.PAGE_QA_MAX_OUTPUT_TOKENS ?? 1000)) || 1000
   });
 
+function clamp(val, min, max, defaultVal) {
+  if (val === undefined || val === null || val === '') return defaultVal;
+  const num = Number(val);
+  if (Number.isNaN(num)) return defaultVal;
+  return Math.min(Math.max(num, min), max);
+}
+
   const browser = Object.freeze({
     channel: (overrides.BROWSER_CHANNEL ?? process.env.BROWSER_CHANNEL ?? 'msedge').trim(),
     headless: typeof overrides.BROWSER_HEADLESS === 'boolean'
@@ -77,7 +84,11 @@ export function loadConfig(overrides = {}) {
     inspectionMaxElementTextChars: Math.max(1, Number(overrides.BROWSER_INSPECTION_MAX_ELEMENT_TEXT_CHARS ?? process.env.BROWSER_INSPECTION_MAX_ELEMENT_TEXT_CHARS ?? 300)) || 300,
     actionTimeoutMs: Math.max(1, Number(overrides.BROWSER_ACTION_TIMEOUT_MS ?? process.env.BROWSER_ACTION_TIMEOUT_MS ?? 10000)) || 10000,
     maxPages: Math.max(1, Number(overrides.BROWSER_MAX_PAGES ?? process.env.BROWSER_MAX_PAGES ?? 8)) || 8,
-    popupSettleMs: Math.max(1, Number(overrides.BROWSER_POPUP_SETTLE_MS ?? process.env.BROWSER_POPUP_SETTLE_MS ?? 500)) || 500
+    popupSettleMs: Math.max(1, Number(overrides.BROWSER_POPUP_SETTLE_MS ?? process.env.BROWSER_POPUP_SETTLE_MS ?? 500)) || 500,
+    dynamicTimeoutMs: clamp(overrides.BROWSER_DYNAMIC_TIMEOUT_MS ?? process.env.BROWSER_DYNAMIC_TIMEOUT_MS, 100, 60000, 5000),
+    domQuietMs: clamp(overrides.BROWSER_DOM_QUIET_MS ?? process.env.BROWSER_DOM_QUIET_MS, 50, 5000, 300),
+    dynamicPollMs: clamp(overrides.BROWSER_DYNAMIC_POLL_MS ?? process.env.BROWSER_DYNAMIC_POLL_MS, 20, 1000, 100),
+    maxDynamicWaits: clamp(overrides.BROWSER_MAX_DYNAMIC_WAITS ?? process.env.BROWSER_MAX_DYNAMIC_WAITS, 1, 20, 4)
   });
 
   return Object.freeze({

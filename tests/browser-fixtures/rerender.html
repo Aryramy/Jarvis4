@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Rerender Test Fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .box { border: 1px solid #aaa; padding: 10px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>DOM Rerender Fixture</h1>
+  <button id="btn-full-rerender" type="button" onclick="performFullRerender()">Trigger Full Rerender</button>
+
+  <main id="app-root" class="box">
+    <h2>Initial Content Root</h2>
+    <p id="initial-desc">This is the original DOM structure before rerender.</p>
+    <button id="initial-btn" type="button">Initial Action Button</button>
+  </main>
+
+  <script>
+    function performFullRerender() {
+      const root = document.getElementById('app-root');
+      root.innerHTML = `
+        <h2>Rerendered Fresh Root</h2>
+        <p id="fresh-desc">The DOM has been completely rebuilt by client-side code.</p>
+        <button id="fresh-btn" type="button">Fresh Replaced Button</button>
+      `;
+    }
+  </script>
+</body>
+</html>

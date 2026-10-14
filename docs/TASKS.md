@@ -93,5 +93,8 @@ Status: VERIFIED
 
 BRICK-031 — Tabs, Windows & Popups v1 (Safe Multi-Page Browser Lifecycle)
 Status: VERIFIED
+BRICK-032 — Dynamic Sites & SPAs v1 (Semantic DOM Revision + SPA Route Awareness + Bounded Waits)
+Status: IN PROGRESS (Hotfix A, B, C verified; Automated Real-Browser Verification Harness operational; awaiting human checkpoint)
 
-BRICK-032 — NOT STARTED / NOT AUTHORIZED
+BRICK-033 — Forms Discovery & Inspection v1
+Status: NOT STARTED / NOT AUTHORIZED

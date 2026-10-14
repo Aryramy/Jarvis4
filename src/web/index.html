@@ -376,6 +376,38 @@
       <div id="browser-pages-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
       <div id="browser-pages-list" style="margin-top: 8px; display: flex; flex-direction: column; gap: 8px;"></div>
     </div>
+
+    <!-- Brick 32 Dynamic Sites & SPAs Section (Dynamic Page) -->
+    <div id="browser-dynamic-section" class="mic-section">
+      <div style="font-size: 0.95rem; font-weight: 600; color: #38bdf8; text-align: left; margin-bottom: 4px;">Dynamic Page</div>
+      <div style="font-size: 0.85rem; color: #94a3b8; text-align: left; margin-bottom: 8px;">
+        Page ID: <span id="dynamic-page-id" style="color: #f1f5f9;">—</span> |
+        URL: <span id="dynamic-page-url" style="color: #f1f5f9;">—</span> |
+        Semantic Revision: <span id="dynamic-semantic-revision" style="color: #f1f5f9;">—</span> |
+        Dynamic State: <span id="dynamic-page-state" style="color: #f1f5f9;">—</span>
+      </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <input type="number" id="dynamic-timeout-override" placeholder="Timeout ms (e.g. 5000)" style="width: 170px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <input type="number" id="dynamic-quiet-override" placeholder="Quiet ms (e.g. 300)" style="width: 150px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <button type="button" id="dynamic-wait-stable-btn">Wait for Stable</button>
+      </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <select id="dynamic-target-kind" style="padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;">
+          <option value="button">button</option>
+          <option value="link">link</option>
+          <option value="input">input</option>
+          <option value="heading">heading</option>
+          <option value="select">select</option>
+          <option value="textarea">textarea</option>
+        </select>
+        <input type="text" id="dynamic-target-name" placeholder="Target Name / Accessible text" style="flex: 1; min-width: 160px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <button type="button" id="dynamic-wait-target-btn">Wait for Target</button>
+      </div>
+      <div id="dynamic-status" class="mic-status">Dynamic Wait: Idle</div>
+      <div id="dynamic-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
+      <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; display: none;" id="dynamic-result-label">Dynamic Result:</div>
+      <div id="dynamic-result" class="response-area" style="display: none; max-height: 240px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
+    </div>
   </div>
 
   <script type="module">
@@ -1952,9 +1984,19 @@
                 `Browser State: ${data.state}`,
                 `Page Open: ${data.pageOpen ? 'Yes' : 'No'}`,
                 `Current URL: ${data.url ?? 'None'}`,
-                `Title: ${data.title ?? 'None'}`
+                `Title: ${data.title ?? 'None'}`,
+                `Page ID: ${data.pageId ?? 'None'}`,
+                `Semantic Revision: ${data.semanticRevision ?? 'None'}`
               ].join('\n');
             }
+            const dynPageId = document.getElementById('dynamic-page-id');
+            const dynPageUrl = document.getElementById('dynamic-page-url');
+            const dynRev = document.getElementById('dynamic-semantic-revision');
+            const dynState = document.getElementById('dynamic-page-state');
+            if (dynPageId) dynPageId.textContent = data.pageId ?? '—';
+            if (dynPageUrl) dynPageUrl.textContent = data.url ?? '—';
+            if (dynRev) dynRev.textContent = data.semanticRevision !== undefined ? String(data.semanticRevision) : '—';
+            if (dynState) dynState.textContent = data.pageOpen ? 'active' : 'idle';
           } else {
             renderNavigationError(data);
           }
@@ -2579,6 +2621,163 @@
     if (browserRefreshPagesBtn) {
       browserRefreshPagesBtn.addEventListener('click', () => {
         loadBrowserPages();
+      });
+    }
+
+    // Brick 32 Dynamic Page Controls
+    const dynamicWaitStableBtn = document.getElementById('dynamic-wait-stable-btn');
+    const dynamicWaitTargetBtn = document.getElementById('dynamic-wait-target-btn');
+    const dynamicTimeoutOverride = document.getElementById('dynamic-timeout-override');
+    const dynamicQuietOverride = document.getElementById('dynamic-quiet-override');
+    const dynamicTargetKind = document.getElementById('dynamic-target-kind');
+    const dynamicTargetName = document.getElementById('dynamic-target-name');
+    const dynamicStatus = document.getElementById('dynamic-status');
+    const dynamicMeta = document.getElementById('dynamic-meta');
+    const dynamicResult = document.getElementById('dynamic-result');
+    const dynamicResultLabel = document.getElementById('dynamic-result-label');
+    const dynamicPageId = document.getElementById('dynamic-page-id');
+    const dynamicPageUrl = document.getElementById('dynamic-page-url');
+    const dynamicSemanticRevision = document.getElementById('dynamic-semantic-revision');
+    const dynamicPageState = document.getElementById('dynamic-page-state');
+
+    function updateDynamicDisplays(data) {
+      if (!data) return;
+      if (dynamicPageId && data.pageId) dynamicPageId.textContent = data.pageId;
+      if (dynamicPageUrl && data.currentUrl) dynamicPageUrl.textContent = data.currentUrl;
+      if (dynamicSemanticRevision && data.semanticRevision !== undefined) dynamicSemanticRevision.textContent = String(data.semanticRevision);
+    }
+
+    if (dynamicWaitStableBtn) {
+      dynamicWaitStableBtn.addEventListener('click', async () => {
+        dynamicWaitStableBtn.disabled = true;
+        if (dynamicStatus) dynamicStatus.textContent = 'Dynamic Wait: Waiting for stable...';
+        if (dynamicMeta) dynamicMeta.style.display = 'none';
+        if (dynamicResult) dynamicResult.style.display = 'none';
+        if (dynamicResultLabel) dynamicResultLabel.style.display = 'none';
+        if (dynamicPageState) dynamicPageState.textContent = 'waiting';
+
+        const payload = {};
+        const timeoutVal = dynamicTimeoutOverride ? Number(dynamicTimeoutOverride.value) : NaN;
+        const quietVal = dynamicQuietOverride ? Number(dynamicQuietOverride.value) : NaN;
+        if (!isNaN(timeoutVal) && timeoutVal > 0) payload.timeoutMs = timeoutVal;
+        if (!isNaN(quietVal) && quietVal > 0) payload.quietMs = quietVal;
+
+        try {
+          const res = await fetch('/api/browser/wait-for-stable', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            if (dynamicStatus) dynamicStatus.textContent = 'Dynamic Wait: Settled';
+            if (dynamicPageState) dynamicPageState.textContent = 'settled';
+            updateDynamicDisplays(data);
+            if (dynamicMeta) {
+              dynamicMeta.style.display = 'block';
+              dynamicMeta.textContent = [
+                `Settled: ${data.settled ? 'Yes' : 'No'}`,
+                `Semantic Revision: ${data.semanticRevision}`,
+                `Quiet For: ${data.quietForMs}ms`,
+                `Wait Duration: ${data.waitDurationMs}ms`,
+                `Snapshot Token: ${data.snapshotToken}`
+              ].join('\n');
+            }
+            if (dynamicResult && dynamicResultLabel) {
+              dynamicResultLabel.style.display = 'block';
+              dynamicResult.style.display = 'block';
+              dynamicResult.textContent = JSON.stringify(data, null, 2);
+            }
+          } else {
+            if (dynamicStatus) dynamicStatus.textContent = `Dynamic Wait: Error (${data.code || data.error || 'PAGE_NOT_STABLE'})`;
+            if (dynamicPageState) dynamicPageState.textContent = 'unsettled';
+            if (dynamicMeta) {
+              dynamicMeta.style.display = 'block';
+              dynamicMeta.textContent = [
+                `Error Code: ${data.code || data.error || 'WAIT_FOR_STABLE_FAILED'}`,
+                `Message: ${data.message || 'Page did not settle'}`,
+                data.details ? `Details: ${JSON.stringify(data.details)}` : ''
+              ].filter(Boolean).join('\n');
+            }
+          }
+        } catch (err) {
+          if (dynamicStatus) dynamicStatus.textContent = 'Dynamic Wait: Error';
+          if (dynamicPageState) dynamicPageState.textContent = 'error';
+          if (dynamicMeta) {
+            dynamicMeta.style.display = 'block';
+            dynamicMeta.textContent = `Network Error: ${err.message || 'Request failed'}`;
+          }
+        } finally {
+          dynamicWaitStableBtn.disabled = false;
+        }
+      });
+    }
+
+    if (dynamicWaitTargetBtn) {
+      dynamicWaitTargetBtn.addEventListener('click', async () => {
+        dynamicWaitTargetBtn.disabled = true;
+        if (dynamicStatus) dynamicStatus.textContent = 'Dynamic Wait: Waiting for target...';
+        if (dynamicMeta) dynamicMeta.style.display = 'none';
+        if (dynamicResult) dynamicResult.style.display = 'none';
+        if (dynamicResultLabel) dynamicResultLabel.style.display = 'none';
+        if (dynamicPageState) dynamicPageState.textContent = 'waiting';
+
+        const kind = (dynamicTargetKind ? dynamicTargetKind.value : 'button').trim();
+        const name = (dynamicTargetName ? dynamicTargetName.value : '').trim();
+        const target = { kind };
+        if (name) target.name = name;
+
+        const payload = { target };
+        const timeoutVal = dynamicTimeoutOverride ? Number(dynamicTimeoutOverride.value) : NaN;
+        if (!isNaN(timeoutVal) && timeoutVal > 0) payload.timeoutMs = timeoutVal;
+
+        try {
+          const res = await fetch('/api/browser/wait-for-target', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            if (dynamicStatus) dynamicStatus.textContent = 'Dynamic Wait: Target Ready';
+            if (dynamicPageState) dynamicPageState.textContent = 'target_ready';
+            updateDynamicDisplays(data);
+            if (dynamicMeta) {
+              dynamicMeta.style.display = 'block';
+              dynamicMeta.textContent = [
+                `Resolution: ${data.resolution}`,
+                `Confidence: ${data.confidence}`,
+                `Wait Duration: ${data.waitDurationMs}ms`,
+                `Snapshot Token: ${data.snapshotToken}`
+              ].join('\n');
+            }
+            if (dynamicResult && dynamicResultLabel) {
+              dynamicResultLabel.style.display = 'block';
+              dynamicResult.style.display = 'block';
+              dynamicResult.textContent = JSON.stringify(data, null, 2);
+            }
+          } else {
+            if (dynamicStatus) dynamicStatus.textContent = `Dynamic Wait: Target Not Ready (${data.code || data.error || 'TARGET_NOT_READY'})`;
+            if (dynamicPageState) dynamicPageState.textContent = 'not_ready';
+            if (dynamicMeta) {
+              dynamicMeta.style.display = 'block';
+              dynamicMeta.textContent = [
+                `Error Code: ${data.code || data.error || 'WAIT_FOR_TARGET_FAILED'}`,
+                `Message: ${data.message || 'Target did not resolve'}`,
+                data.details ? `Details: ${JSON.stringify(data.details)}` : ''
+              ].filter(Boolean).join('\n');
+            }
+          }
+        } catch (err) {
+          if (dynamicStatus) dynamicStatus.textContent = 'Dynamic Wait: Error';
+          if (dynamicPageState) dynamicPageState.textContent = 'error';
+          if (dynamicMeta) {
+            dynamicMeta.style.display = 'block';
+            dynamicMeta.textContent = `Network Error: ${err.message || 'Request failed'}`;
+          }
+        } finally {
+          dynamicWaitTargetBtn.disabled = false;
+        }
       });
     }
   </script>

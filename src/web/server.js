@@ -2221,6 +2221,213 @@ export function createRequestListener(options = {}) {
       return;
     }
 
+    // Route: POST /api/browser/wait-for-stable (Brick 32 Dynamic Sites & SPAs v1)
+    if (url.pathname === '/api/browser/wait-for-stable') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) {
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        let parsedBody = {};
+        if (body.trim().length > 0) {
+          try {
+            parsedBody = JSON.parse(body);
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: false,
+              error: 'INVALID_REQUEST',
+              code: 'INVALID_REQUEST',
+              message: 'Invalid JSON request body'
+            }));
+            return;
+          }
+        }
+
+        if (parsedBody && (typeof parsedBody !== 'object' || Array.isArray(parsedBody))) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_REQUEST',
+            code: 'INVALID_REQUEST',
+            message: 'Request body must be an object'
+          }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.waitForStable({
+            timeoutMs: parsedBody.timeoutMs !== undefined ? Number(parsedBody.timeoutMs) : undefined,
+            quietMs: parsedBody.quietMs !== undefined ? Number(parsedBody.quietMs) : undefined,
+            pollMs: parsedBody.pollMs !== undefined ? Number(parsedBody.pollMs) : undefined,
+            pageId: typeof parsedBody.pageId === 'string' ? parsedBody.pageId : undefined
+          });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'WAIT_FOR_STABLE_FAILED';
+          let statusCode = 400;
+          if (errorCode === 'PAGE_NOT_STABLE') {
+            statusCode = 408;
+          } else if (errorCode === 'DYNAMIC_WAIT_LIMIT_REACHED') {
+            statusCode = 429;
+          } else if (errorCode === 'BROWSER_ERROR') {
+            statusCode = 500;
+          }
+
+          let safeMessage = 'Wait for stable failed.';
+          if (errorCode === 'BROWSER_NOT_RUNNING') {
+            safeMessage = 'Browser is not running. Please launch the browser first.';
+          } else if (errorCode === 'PAGE_NOT_STABLE') {
+            safeMessage = err.message || 'Page did not become quiet within timeout.';
+          } else if (errorCode === 'PAGE_CLOSED') {
+            safeMessage = 'Page is closed.';
+          } else if (errorCode === 'ACTIVE_PAGE_CHANGED') {
+            safeMessage = 'Active page changed while waiting.';
+          } else if (errorCode === 'DYNAMIC_WAIT_LIMIT_REACHED') {
+            safeMessage = err.message || 'Dynamic wait concurrency limit reached.';
+          } else if (err instanceof BrowserManagerError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage,
+            details: err.details || {}
+          }));
+        }
+      });
+
+      return;
+    }
+
+    // Route: POST /api/browser/wait-for-target (Brick 32 Dynamic Sites & SPAs v1)
+    if (url.pathname === '/api/browser/wait-for-target') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) {
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_REQUEST',
+            code: 'INVALID_REQUEST',
+            message: 'Invalid JSON request body'
+          }));
+          return;
+        }
+
+        if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_REQUEST',
+            code: 'INVALID_REQUEST',
+            message: 'Request body must be an object'
+          }));
+          return;
+        }
+
+        if (!parsedBody.target || typeof parsedBody.target !== 'object' || Array.isArray(parsedBody.target)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_TARGET_QUERY',
+            code: 'INVALID_TARGET_QUERY',
+            message: 'Target query must be an object'
+          }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.waitForTarget({
+            target: parsedBody.target,
+            timeoutMs: parsedBody.timeoutMs !== undefined ? Number(parsedBody.timeoutMs) : undefined,
+            pollMs: parsedBody.pollMs !== undefined ? Number(parsedBody.pollMs) : undefined,
+            pageId: typeof parsedBody.pageId === 'string' ? parsedBody.pageId : undefined
+          });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'WAIT_FOR_TARGET_FAILED';
+          let statusCode = 400;
+          if (errorCode === 'TARGET_NOT_READY' || errorCode === 'TARGET_AMBIGUOUS' || errorCode === 'TARGET_NOT_FOUND') {
+            statusCode = 408;
+          } else if (errorCode === 'DYNAMIC_WAIT_LIMIT_REACHED') {
+            statusCode = 429;
+          } else if (errorCode === 'BROWSER_ERROR') {
+            statusCode = 500;
+          }
+
+          let safeMessage = 'Wait for target failed.';
+          if (errorCode === 'BROWSER_NOT_RUNNING') {
+            safeMessage = 'Browser is not running. Please launch the browser first.';
+          } else if (errorCode === 'TARGET_NOT_READY') {
+            safeMessage = err.message || 'Target element did not become ready within timeout.';
+          } else if (errorCode === 'TARGET_AMBIGUOUS') {
+            safeMessage = 'Multiple elements matched the target query equally on timeout.';
+          } else if (errorCode === 'TARGET_NOT_FOUND') {
+            safeMessage = 'No matching element found within timeout.';
+          } else if (errorCode === 'PAGE_CLOSED') {
+            safeMessage = 'Page is closed.';
+          } else if (errorCode === 'ACTIVE_PAGE_CHANGED') {
+            safeMessage = 'Active page changed while waiting.';
+          } else if (errorCode === 'DYNAMIC_WAIT_LIMIT_REACHED') {
+            safeMessage = err.message || 'Dynamic wait concurrency limit reached.';
+          } else if (errorCode === 'INVALID_TARGET_QUERY') {
+            safeMessage = err.message || 'Target query is invalid.';
+          } else if (errorCode === 'TARGETID_AUTHORIZATION_NOT_ALLOWED') {
+            safeMessage = 'Target ID alone cannot authorize target wait. Semantic target description is required.';
+          } else if (err instanceof BrowserManagerError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage,
+            details: err.details || {}
+          }));
+        }
+      });
+
+      return;
+    }
+
     // Route: /api/stt (Brick 10 multilingual STT endpoint & Brick 18 STT Latency Instrumentation)
     if (url.pathname === '/api/stt') {
       if (req.method !== 'POST') {

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Popup Test Fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Popup / New Page Opener Fixture</h1>
+  <p>Tests new page / tab lifecycle via target="_blank" and window.open.</p>
+
+  <nav>
+    <a href="/static.html" target="_blank" id="link-open-tab">Open Static Page in New Tab</a>
+  </nav>
+
+  <div style="margin-top: 15px;">
+    <button id="btn-open-popup" type="button" onclick="openPopup()">Open Popup via window.open</button>
+  </div>
+
+  <script>
+    function openPopup() {
+      window.open('/static.html', 'testPopup', 'width=600,height=400');
+    }
+  </script>
+</body>
+</html>
