@@ -100,8 +100,10 @@ BRICK-033 — Forms v1 (Understand, Map & Safely Populate)
 Status: VERIFIED
 
 BRICK-034 — Confirmed Form Submission & Result Verification v1
-Status: IN PROGRESS (Automated Real-Browser Verification Harness)
+Status: VERIFIED
 
-BRICK-035 — Authentication & Saved Credentials v1
+BRICK-035 — Human-Authenticated Persistent Browser Sessions v1 (Local Device Session Vault)
+Status: IN PROGRESS (Awaiting Checkpoint)
+
+BRICK-036 — Human Authentication Handoff, Continuation, MFA & CAPTCHA Experience
 Status: NOT STARTED / NOT AUTHORIZED
-

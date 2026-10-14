@@ -70,6 +70,86 @@ export async function startFixtureServer(options = {}) {
         return;
       }
 
+      // Auth Fixture Routes (Brick 35)
+      if (pathname === '/auth/do-login') {
+        const user = parsedUrl.searchParams.get('user') || 'UserA';
+        const isExpired = parsedUrl.searchParams.get('expired') === 'true';
+
+        let cookieHeader;
+        if (isExpired) {
+          cookieHeader = 'jarvis_session=synth_expired_token; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax';
+        } else {
+          cookieHeader = `jarvis_session=synth_token_${encodeURIComponent(user)}; Path=/; HttpOnly; SameSite=Lax`;
+        }
+
+        res.writeHead(302, {
+          'Location': '/auth/protected',
+          'Set-Cookie': cookieHeader,
+          'Cache-Control': 'no-store, no-cache'
+        });
+        res.end();
+        return;
+      }
+
+      if (pathname === '/auth/logout') {
+        res.writeHead(302, {
+          'Location': '/auth/login',
+          'Set-Cookie': 'jarvis_session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax',
+          'Cache-Control': 'no-store, no-cache'
+        });
+        res.end();
+        return;
+      }
+
+      if (pathname === '/auth/protected') {
+        const rawCookies = req.headers.cookie || '';
+        const match = rawCookies.match(/(?:^|;\s*)jarvis_session=([^;]+)/);
+        const sessionToken = match ? decodeURIComponent(match[1]) : null;
+
+        const isAuthenticated = sessionToken && sessionToken.startsWith('synth_token_') && !sessionToken.includes('expired');
+        const user = isAuthenticated ? sessionToken.replace('synth_token_', '') : null;
+
+        const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${isAuthenticated ? 'Authenticated Fixture' : 'Authentication Required'}</title>
+</head>
+<body>
+  <h1 id="page-heading">${isAuthenticated ? 'Authenticated Fixture' : 'Authentication Required'}</h1>
+  <div id="auth-status">${isAuthenticated ? 'Authenticated Fixture' : 'Authentication Required'}</div>
+  <div id="user-display">User: ${isAuthenticated ? user : 'None'}</div>
+  <div id="localstorage-marker">Marker: Checking...</div>
+  <div style="margin-top: 12px;">
+    ${isAuthenticated ? '<a id="logout-link" href="/auth/logout">Log Out</a>' : '<a id="login-link" href="/auth/login">Log In</a>'}
+  </div>
+  <script>
+    const userVal = ${JSON.stringify(user)};
+    if (userVal) {
+      if (!localStorage.getItem('jarvis_marker')) {
+        localStorage.setItem('jarvis_marker', 'synth_marker_' + userVal);
+      }
+    } else {
+      localStorage.removeItem('jarvis_marker');
+    }
+    const marker = localStorage.getItem('jarvis_marker');
+    document.getElementById('localstorage-marker').textContent = 'Marker: ' + (marker || 'None');
+  </script>
+</body>
+</html>`;
+
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store, no-cache'
+        });
+        res.end(html);
+        return;
+      }
+
+      if (pathname === '/auth/login') {
+        pathname = '/auth-login.html';
+      }
+
       if (pathname === '/' || pathname === '') {
         pathname = '/static.html';
       }

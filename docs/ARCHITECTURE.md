@@ -61,3 +61,12 @@ The future voice architecture must adhere to the following principles:
 
 ### 3.3 Safe Tool Execution (Future Brick)
 - Tool calls (filesystem, terminal commands, browser actions) must execute through explicit permission and validation boundaries.
+
+---
+
+## 4. Development, Verification & Harness Architecture
+
+Development verification, future coding agent orchestration, autonomous model evaluation, and runtime tool governance are formally defined in:
+- [HARNESS.md](file:///c:/Users/aurehman6521/Desktop/AI%20Projects/Jarvis4/docs/HARNESS.md)
+
+Refer to that document for harness layering (Test Harness, Real-Browser Harness, Development Agent Harness, Eval Harness, Runtime Agent Harness), repository mapping, maturity status, and operating contracts.

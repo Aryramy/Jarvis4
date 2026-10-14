@@ -22,7 +22,7 @@ import { PageReaderError } from '../webpage/urlSafety.js';
 import { executePageQa, PageQaError } from '../webpage/pageQa.js';
 import { executeResearchOne, ResearchOneError } from '../research/researchOne.js';
 import { decideBrowserEscalation, BrowserEscalationError } from '../routing/browserEscalation.js';
-import { defaultBrowserManager, BrowserManager, BrowserManagerError, FormInspectionError, FormPopulationError, FormSubmissionError } from '../browser/browserManager.js';
+import { defaultBrowserManager, BrowserManager, BrowserManagerError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError } from '../browser/browserManager.js';
 import { TargetResolutionError, SUPPORTED_KINDS } from '../browser/targetResolver.js';
 import { ActionExecutionError } from '../browser/actionExecutor.js';
 
@@ -2745,6 +2745,313 @@ export function createRequestListener(options = {}) {
         }
       });
 
+      return;
+    }
+
+    // Route: GET /api/browser/sessions (Brick 35 List Sessions)
+    if (url.pathname === '/api/browser/sessions' && req.method === 'GET') {
+      (async () => {
+        try {
+          const sessions = await browserManager.sessionVault.listSessions();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: true,
+            sessions,
+            selectedSessionId: browserManager.selectedSessionId || null,
+            loadedSessionId: browserManager.loadedSessionId || null,
+            sessionProfileLoaded: Boolean(browserManager.loadedSessionId),
+            sessionStateRestored: Boolean(browserManager.loadedSessionId)
+          }));
+        } catch (err) {
+          const errorCode = err.code || 'SESSION_LIST_FAILED';
+          const statusCode = errorCode === 'SESSION_VAULT_UNAVAILABLE' ? 503 : 500;
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: err.message || 'Failed to list session profiles'
+          }));
+        }
+      })();
+      return;
+    }
+
+    // Route: POST /api/browser/sessions/save (Brick 35 Save Session)
+    if (url.pathname === '/api/browser/sessions/save') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+          return;
+        }
+
+        if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Request body must be an object' }));
+          return;
+        }
+
+        const name = typeof parsedBody.name === 'string' ? parsedBody.name.trim() : '';
+        if (!name) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_SESSION_NAME',
+            code: 'INVALID_SESSION_NAME',
+            message: 'Session name must be a non-empty string'
+          }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.saveSession({
+            name,
+            sessionId: parsedBody.sessionId || null,
+            overwrite: Boolean(parsedBody.overwrite)
+          });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'SESSION_SAVE_FAILED';
+          let statusCode = 400;
+          if (errorCode === 'SESSION_VAULT_UNAVAILABLE') {
+            statusCode = 503;
+          } else if (errorCode === 'SESSION_ALREADY_EXISTS') {
+            statusCode = 409;
+          } else if (errorCode === 'SESSION_DECRYPT_FAILED' || errorCode === 'SESSION_SAVE_FAILED') {
+            statusCode = 500;
+          }
+
+          let safeMessage = 'Failed to save session profile.';
+          if (errorCode === 'NO_ACTIVE_CONTEXT') {
+            safeMessage = 'Browser is not running or has no active context to save session from.';
+          } else if (errorCode === 'SESSION_VAULT_UNAVAILABLE') {
+            safeMessage = 'Secure session vault is unavailable on this device.';
+          } else if (errorCode === 'SESSION_ALREADY_EXISTS') {
+            safeMessage = 'A session profile with this ID already exists. Explicit overwrite is required.';
+          } else if (err instanceof BrowserManagerError || err instanceof SessionVaultError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage
+          }));
+        }
+      });
+      return;
+    }
+
+    // Route: POST /api/browser/sessions/select (Brick 35 Select Session)
+    if (url.pathname === '/api/browser/sessions/select') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+          return;
+        }
+
+        const sessionId = parsedBody.sessionId !== undefined ? parsedBody.sessionId : null;
+        try {
+          const result = await browserManager.selectSession(sessionId);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'SESSION_SELECT_FAILED';
+          const statusCode = errorCode === 'SESSION_NOT_FOUND' ? 404 : 400;
+          let safeMessage = err.message || 'Failed to select session.';
+          if (err instanceof BrowserManagerError || err instanceof SessionVaultError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage
+          }));
+        }
+      });
+      return;
+    }
+
+    // Route: POST /api/browser/sessions/activate (Brick 35 Activate Session)
+    if (url.pathname === '/api/browser/sessions/activate') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+          return;
+        }
+
+        const sessionId = typeof parsedBody.sessionId === 'string' ? parsedBody.sessionId.trim() : '';
+        if (!sessionId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_SESSION_ID',
+            code: 'INVALID_SESSION_ID',
+            message: 'Session ID must be a non-empty string'
+          }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.activateSession(sessionId);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'SESSION_ACTIVATE_FAILED';
+          let statusCode = 400;
+          if (errorCode === 'SESSION_NOT_FOUND') {
+            statusCode = 404;
+          } else if (errorCode === 'SESSION_VAULT_UNAVAILABLE') {
+            statusCode = 503;
+          } else if (errorCode === 'SESSION_DECRYPT_FAILED' || errorCode === 'SESSION_CONTEXT_REPLACEMENT_FAILED') {
+            statusCode = 500;
+          }
+
+          let safeMessage = err.message || 'Failed to activate session.';
+          if (err instanceof BrowserManagerError || err instanceof SessionVaultError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage
+          }));
+        }
+      });
+      return;
+    }
+
+    // Route: POST & DELETE /api/browser/sessions/delete and DELETE /api/browser/sessions (Brick 35 Delete Session)
+    if (url.pathname === '/api/browser/sessions/delete' || (url.pathname === '/api/browser/sessions' && req.method === 'DELETE')) {
+      if (req.method !== 'POST' && req.method !== 'DELETE') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+
+      req.on('end', async () => {
+        let parsedBody = {};
+        if (body.trim().length > 0) {
+          try {
+            parsedBody = JSON.parse(body);
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+            return;
+          }
+        }
+
+        const sessionId = typeof parsedBody.sessionId === 'string'
+          ? parsedBody.sessionId.trim()
+          : (url.searchParams.get('sessionId') || '');
+
+        if (!sessionId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'INVALID_SESSION_ID',
+            code: 'INVALID_SESSION_ID',
+            message: 'Session ID is required to delete a session'
+          }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.sessionVault.deleteSession(sessionId);
+          if (browserManager.selectedSessionId === sessionId) {
+            await browserManager.selectSession(null);
+          }
+          if (browserManager.loadedSessionId === sessionId) {
+            browserManager._loadedSessionId = null;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'SESSION_DELETE_FAILED';
+          const statusCode = errorCode === 'SESSION_NOT_FOUND' ? 404 : 400;
+          let safeMessage = err.message || 'Failed to delete session.';
+          if (err instanceof BrowserManagerError || err instanceof SessionVaultError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage
+          }));
+        }
+      });
       return;
     }
 

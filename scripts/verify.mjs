@@ -34,6 +34,7 @@ const REQUIRED_FILES = [
   'docs/TASKS.md',
   'docs/DECISIONS.md',
   'docs/KNOWN_ISSUES.md',
+  'docs/HARNESS.md',
   'src/core/index.js',
   'src/core/textCore.js',
   'src/core/conversationSession.js',
@@ -132,7 +133,14 @@ const REQUIRED_FILES = [
   'tests/browser-fixtures/forms-submit-validation.html',
   'tests/browser-fixtures/forms-submit-spa.html',
   'tests/browser-fixtures/forms-submit-failure.html',
-  'tests/browser-fixtures/forms-submit-file.html'
+  'tests/browser-fixtures/forms-submit-file.html',
+  'src/browser/sessionVault.js',
+  'tests/unit/sessionVault.test.js',
+  'tests/unit/dpapiProtection.test.js',
+  'tests/unit/browserManagerSession.test.js',
+  'tests/contract/sessionEndpoints.test.js',
+  'tests/browser-fixtures/auth-login.html',
+  'tests/browser-fixtures/auth-protected.html'
 ];
 
 const REQUIRED_DIRS = [
@@ -510,6 +518,32 @@ check('Browser Form Submitter Module Sanity Check', async () => {
   }
 });
 
+check('Browser Session Vault Module Sanity Check', async () => {
+  const {
+    SessionVault,
+    SessionVaultError,
+    generateSessionId,
+    isValidSessionId,
+    extractSafeOrigins,
+    MemoryProtectionProvider,
+    UnavailableProtectionProvider
+  } = await import('../src/browser/sessionVault.js');
+
+  if (typeof SessionVault !== 'function' || typeof SessionVaultError !== 'function') {
+    throw new Error('sessionVault module failed to export required classes');
+  }
+  const id = generateSessionId();
+  if (!isValidSessionId(id) || !id.startsWith('sess_')) {
+    throw new Error('generateSessionId or isValidSessionId failed sanity check');
+  }
+  const origins = extractSafeOrigins({
+    cookies: [{ domain: '.example.com', path: '/secret', name: 'tok', value: 'secret123' }],
+    origins: [{ origin: 'https://app.example.com', localStorage: [{ name: 'auth', value: 'secret' }] }]
+  });
+  if (origins.length !== 2 || JSON.stringify(origins).includes('secret')) {
+    throw new Error('extractSafeOrigins failed sanity check or leaked secret');
+  }
+});
 
 check('Webpage URL Safety Module Sanity Check', async () => {
   const { validateUrlSafety, isPublicIP } = await import('../src/webpage/urlSafety.js');

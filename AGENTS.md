@@ -34,6 +34,7 @@ Every future agent must:
 14. **Record important architecture decisions** in `docs/DECISIONS.md`.
 15. **Update `docs/CURRENT_STATE.md` after a verified brick.**
 16. **Stop after the requested brick is complete.** Do not proceed to any subsequent brick without explicit user instruction.
+17. **Read `docs/HARNESS.md`** before modifying tests, verification scripts, browser fixtures, evaluation infrastructure, agent orchestration, self-repair logic, or runtime tool governance. Never weaken or remove acceptance criteria merely to make a failing implementation pass.
 
 ---
 

@@ -59,6 +59,21 @@ export function clearConfirmationTokens() {
 }
 
 /**
+ * Registers an in-memory confirmation token for testing token lifecycle and invalidation.
+ * @param {string} token
+ * @param {Object} [record={}]
+ */
+export function registerTestConfirmationToken(token, record = {}) {
+  confirmationTokens.set(token, {
+    confirmationToken: token,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 60000,
+    used: false,
+    ...record
+  });
+}
+
+/**
  * Retrieves a confirmation token record by its token string.
  * @param {string} token
  * @returns {Object|undefined}

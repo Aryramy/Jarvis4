@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Auth Fixture Login</title>
+  <style>
+    body { font-family: sans-serif; margin: 2rem; }
+    .btn { display: inline-block; padding: 8px 16px; margin: 6px; background: #0284c7; color: white; text-decoration: none; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1 id="page-heading">Auth Fixture Login</h1>
+  <p>Synthetic login fixture for JARVIS persistent sessions verification.</p>
+  <div>
+    <a id="login-user-a-btn" class="btn" href="/auth/do-login?user=UserA">Log in as User A</a>
+    <a id="login-user-b-btn" class="btn" href="/auth/do-login?user=UserB">Log in as User B</a>
+    <a id="login-expired-btn" class="btn" href="/auth/do-login?user=ExpiredUser&expired=true">Log in as Expired</a>
+  </div>
+</body>
+</html>

@@ -23,8 +23,9 @@ import { DYNAMIC_TRACKER_SCRIPT } from './dynamicTracker.js';
 import { inspectForms, FormInspectionError } from './formInspector.js';
 import { populateForm, FormPopulationError } from './formPopulator.js';
 import { prepareFormSubmission, executeFormSubmission, getConfirmationToken, clearConfirmationTokens, FormSubmissionError } from './formSubmitter.js';
+import { SessionVault, SessionVaultError, generateSessionId, isValidSessionId } from './sessionVault.js';
 
-export { ActionExecutionError, FormInspectionError, FormPopulationError, FormSubmissionError };
+export { ActionExecutionError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError };
 
 export class BrowserManagerError extends Error {
   /**
@@ -124,6 +125,13 @@ export class BrowserManager {
     this._snapshotVersion = 0;
     this._snapshotToken = null;
 
+    this._sessionVault = options.sessionVault || new SessionVault({
+      vaultDir: options.vaultDir,
+      protectionProvider: options.protectionProvider
+    });
+    this._selectedSessionId = null;
+    this._loadedSessionId = null;
+
     this._launchPromise = null;
     this._closePromise = null;
     this._cleanupPromise = null;
@@ -183,6 +191,18 @@ export class BrowserManager {
 
   get maxPages() {
     return this._maxPages;
+  }
+
+  get sessionVault() {
+    return this._sessionVault;
+  }
+
+  get selectedSessionId() {
+    return this._selectedSessionId;
+  }
+
+  get loadedSessionId() {
+    return this._loadedSessionId;
   }
 
   get _popupAdoptionWindowActive() {
@@ -546,7 +566,11 @@ export class BrowserManager {
       headless: this._headless,
       currentUrl,
       activePageId: this._activePageId,
-      pageCount: this._pages.size
+      pageCount: this._pages.size,
+      selectedSessionId: this._selectedSessionId || null,
+      loadedSessionId: this._loadedSessionId || null,
+      sessionProfileLoaded: Boolean(this._loadedSessionId),
+      sessionStateRestored: Boolean(this._loadedSessionId)
     };
   }
 
@@ -587,7 +611,11 @@ export class BrowserManager {
         currentUrl: 'about:blank',
         alreadyRunning: true,
         activePageId: this._activePageId,
-        pageCount: this._pages.size
+        pageCount: this._pages.size,
+        selectedSessionId: this._selectedSessionId || null,
+        loadedSessionId: this._loadedSessionId || null,
+        sessionProfileLoaded: Boolean(this._loadedSessionId),
+        sessionStateRestored: Boolean(this._loadedSessionId)
       };
     }
 
@@ -611,7 +639,11 @@ export class BrowserManager {
         currentUrl: 'about:blank',
         alreadyRunning: true,
         activePageId: this._activePageId,
-        pageCount: this._pages.size
+        pageCount: this._pages.size,
+        selectedSessionId: this._selectedSessionId || null,
+        loadedSessionId: this._loadedSessionId || null,
+        sessionProfileLoaded: Boolean(this._loadedSessionId),
+        sessionStateRestored: Boolean(this._loadedSessionId)
       };
     }
 
@@ -648,11 +680,18 @@ export class BrowserManager {
           browserInstance.on('disconnected', this._browserDisconnectListener);
         }
 
-        // Create isolated temporary context
+        // Create isolated temporary context (restoring selected session state if present)
         if (typeof browserInstance.newContext !== 'function') {
           throw new Error('Browser instance missing newContext method');
         }
-        contextInstance = await browserInstance.newContext();
+        let restoredStorageState = null;
+        if (this._selectedSessionId) {
+          const sessionData = await this._sessionVault.loadSession(this._selectedSessionId);
+          restoredStorageState = sessionData.storageState;
+        }
+        const contextOptions = restoredStorageState ? { storageState: restoredStorageState } : undefined;
+        contextInstance = await browserInstance.newContext(contextOptions);
+        this._loadedSessionId = restoredStorageState ? this._selectedSessionId : null;
 
         // Attach close listener to context
         if (typeof contextInstance.on === 'function') {
@@ -741,7 +780,11 @@ export class BrowserManager {
           currentUrl: 'about:blank',
           alreadyRunning: false,
           activePageId: initialEntry.pageId,
-          pageCount: 1
+          pageCount: 1,
+          selectedSessionId: this._selectedSessionId || null,
+          loadedSessionId: this._loadedSessionId || null,
+          sessionProfileLoaded: Boolean(this._loadedSessionId),
+          sessionStateRestored: Boolean(this._loadedSessionId)
         };
       } catch (err) {
         // Safe cleanup of any partial handles
@@ -953,7 +996,11 @@ export class BrowserManager {
         pageId: null,
         semanticRevision: 0,
         spaRouteVersion: 0,
-        lastRelevantMutationAgeMs: null
+        lastRelevantMutationAgeMs: null,
+        selectedSessionId: this._selectedSessionId || null,
+        loadedSessionId: this._loadedSessionId || null,
+        sessionProfileLoaded: Boolean(this._loadedSessionId),
+        sessionStateRestored: Boolean(this._loadedSessionId)
       };
     }
 
@@ -981,7 +1028,11 @@ export class BrowserManager {
         pageId: this._activePageId,
         semanticRevision: activeEntry?.semanticRevision ?? 0,
         spaRouteVersion: activeEntry?.spaRouteVersion ?? 0,
-        lastRelevantMutationAgeMs: null
+        lastRelevantMutationAgeMs: null,
+        selectedSessionId: this._selectedSessionId || null,
+        loadedSessionId: this._loadedSessionId || null,
+        sessionProfileLoaded: Boolean(this._loadedSessionId),
+        sessionStateRestored: Boolean(this._loadedSessionId)
       };
     }
 
@@ -1007,7 +1058,11 @@ export class BrowserManager {
       spaRouteVersion: activeEntry?.spaRouteVersion ?? 1,
       lastRelevantMutationAgeMs,
       dynamicObserverInstalled: Boolean(activeEntry?.dynamicObserverInstalled ?? true),
-      observerDocumentVersion: activeEntry?.documentVersion ?? 1
+      observerDocumentVersion: activeEntry?.documentVersion ?? 1,
+      selectedSessionId: this._selectedSessionId || null,
+      loadedSessionId: this._loadedSessionId || null,
+      sessionProfileLoaded: Boolean(this._loadedSessionId),
+      sessionStateRestored: Boolean(this._loadedSessionId)
     };
   }
 
@@ -2642,6 +2697,8 @@ export class BrowserManager {
     this._pendingAuthorizedCreation = null;
     this._actionPopupWindow = null;
     this._resetSnapshot();
+    clearConfirmationTokens();
+    this._loadedSessionId = null;
   }
 
   /**
@@ -3141,6 +3198,278 @@ export class BrowserManager {
       this._dynamicWaiters.delete(waiter);
       this._activeDynamicWaits = Math.max(0, this._activeDynamicWaits - 1);
     }
+  }
+
+  /**
+   * Selects a session profile to be loaded on the next browser launch (Brick 35).
+   * Passing null or empty string deselects the current session.
+   *
+   * @param {string|null} sessionId
+   * @returns {Promise<{ success: boolean, selectedSessionId: string|null }>}
+   */
+  async selectSession(sessionId) {
+    if (sessionId === null || sessionId === undefined || sessionId === '') {
+      this._selectedSessionId = null;
+      return { success: true, selectedSessionId: null };
+    }
+
+    if (!isValidSessionId(sessionId)) {
+      throw new BrowserManagerError('Invalid session ID format.', 'INVALID_SESSION_ID');
+    }
+
+    // Verify session profile exists in the vault
+    await this._sessionVault.getSessionMetadata(sessionId);
+    this._selectedSessionId = sessionId;
+    return { success: true, selectedSessionId: this._selectedSessionId };
+  }
+
+  /**
+   * Explicitly captures and saves current browser context authentication state into the device vault (Brick 35).
+   *
+   * @param {Object} params
+   * @param {string} params.name - Human-readable session name
+   * @param {string} [params.sessionId] - Optional explicit sessionId for update
+   * @param {boolean} [params.overwrite=false] - Explicit flag required to overwrite
+   * @returns {Promise<Object>} Safe session metadata (0 sensitive values)
+   */
+  async saveSession({ name, sessionId = null, overwrite = false } = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive() || !this._context) {
+      throw new BrowserManagerError(
+        'Browser is not running or has no active context to save session from.',
+        'NO_ACTIVE_CONTEXT'
+      );
+    }
+
+    if (typeof this._context.storageState !== 'function') {
+      throw new BrowserManagerError(
+        'Active browser context does not support storage state capture.',
+        'STORAGE_STATE_NOT_SUPPORTED'
+      );
+    }
+
+    let storageState;
+    try {
+      storageState = await this._context.storageState();
+    } catch (err) {
+      throw new BrowserManagerError(
+        `Failed to capture browser context storage state: ${err.message}`,
+        'STORAGE_STATE_CAPTURE_FAILED'
+      );
+    }
+
+    const safeMeta = await this._sessionVault.saveSession({
+      name,
+      storageState,
+      sessionId,
+      overwrite
+    });
+
+    this._loadedSessionId = safeMeta.sessionId;
+
+    return {
+      success: true,
+      ...safeMeta
+    };
+  }
+
+  /**
+   * Activates / restores a saved session profile into the browser (Brick 35).
+   * If browser is stopped: selects session and launches fresh browser/context.
+   * If browser is running: performs safe context replacement (closes old context,
+   * invalidates all old pageIds, snapshots, and confirmation tokens, creates fresh
+   * isolated context initialized with the session state, and opens a new blank initial page).
+   *
+   * @param {string} sessionId
+   * @returns {Promise<{
+   *   success: boolean,
+   *   sessionId: string,
+   *   state: string,
+   *   pageId?: string,
+   *   sessionProfileLoaded: boolean,
+   *   sessionStateRestored: boolean
+   * }>}
+   */
+  async activateSession(sessionId) {
+    if (!isValidSessionId(sessionId)) {
+      throw new BrowserManagerError('Invalid session ID format.', 'INVALID_SESSION_ID');
+    }
+
+    // 1. Verify and decrypt session state first (fails closed if unavailable, not found, or corrupt)
+    const sessionData = await this._sessionVault.loadSession(sessionId);
+
+    // 2. If browser is stopped, select and launch
+    if (this._state === BROWSER_STATES.STOPPED) {
+      this._selectedSessionId = sessionId;
+      const launchResult = await this.launch();
+      return {
+        success: true,
+        sessionId,
+        state: this._state,
+        pageId: launchResult.activePageId,
+        sessionProfileLoaded: true,
+        sessionStateRestored: true
+      };
+    }
+
+    // 3. If browser is starting or stopping, wait for settle
+    if (this._state === BROWSER_STATES.STARTING && this._launchPromise) {
+      await this._launchPromise;
+    }
+    if (this._state === BROWSER_STATES.STOPPING && this._closePromise) {
+      await this._closePromise;
+      this._selectedSessionId = sessionId;
+      const launchResult = await this.launch();
+      return {
+        success: true,
+        sessionId,
+        state: this._state,
+        pageId: launchResult.activePageId,
+        sessionProfileLoaded: true,
+        sessionStateRestored: true
+      };
+    }
+
+    // 4. Safe context replacement in active browser
+    try {
+      // a. Invalidate in-flight dynamic waiters
+      this._cancelDynamicWaiters(null, new BrowserManagerError('Context was replaced while waiting.', 'CONTEXT_REPLACED'));
+
+      // b. Invalidate all form confirmation tokens immediately (Brick 35 Section 22)
+      clearConfirmationTokens();
+
+      // c. Safely close all existing managed pages
+      const oldPages = Array.from(this._pages.values()).map(e => e.page);
+      for (const p of oldPages) {
+        if (p && typeof p.close === 'function') {
+          const isClosed = typeof p.isClosed === 'function' ? p.isClosed() : false;
+          if (!isClosed) {
+            await p.close().catch(() => {});
+          }
+        }
+      }
+
+      // d. Safely close old context
+      if (this._context && typeof this._context.close === 'function') {
+        await this._context.close().catch(() => {});
+      }
+
+      // e. Reset internal page & snapshot registry (invalidates all old pageIds and snapshots)
+      this._pages.clear();
+      this._activePageId = null;
+      this._page = null;
+      this._legacyPage = null;
+      this._resetSnapshot();
+
+      // f. Create new isolated context with restored storage state
+      if (typeof this._browser.newContext !== 'function') {
+        throw new Error('Browser instance missing newContext method');
+      }
+
+      const newContext = await this._browser.newContext({ storageState: sessionData.storageState });
+      this._context = newContext;
+      this._loadedSessionId = sessionId;
+      this._selectedSessionId = sessionId;
+
+      // g. Attach listeners
+      if (typeof newContext.on === 'function') {
+        this._contextCloseListener = () => {
+          this._handleSessionTerminated('context_closed');
+        };
+        newContext.on('close', this._contextCloseListener);
+
+        this._contextPageListener = (newPage) => {
+          if (this._context && this._context !== newContext) return;
+          if (this._authorizedPages.has(newPage)) return;
+          for (const entry of this._pages.values()) {
+            if (entry.page === newPage) return;
+          }
+          if (this._pendingAuthorizedCreation) {
+            const ticket = this._pendingAuthorizedCreation;
+            ticket.authorizedPage = newPage;
+            this._authorizedPages.add(newPage);
+            this._pendingAuthorizedCreation = null;
+            return;
+          }
+          if (this._actionPopupWindow && this._actionPopupWindow.active) {
+            const actionWindow = this._actionPopupWindow;
+            if (!actionWindow.capturedPopups.includes(newPage)) {
+              actionWindow.capturedPopups.push(newPage);
+            }
+            if (typeof actionWindow.notifyPopup === 'function') {
+              actionWindow.notifyPopup(newPage);
+            }
+            return;
+          }
+          if (newPage && typeof newPage.close === 'function') {
+            newPage.close().catch(() => {});
+          }
+        };
+        newContext.on('page', this._contextPageListener);
+      }
+
+      // h. Create fresh initial blank page
+      const authTicket = this._authorizeNextPageCreation({ creationType: 'initial' });
+      let pageInstance;
+      try {
+        pageInstance = await newContext.newPage();
+        if (pageInstance) {
+          this._authorizedPages.add(pageInstance);
+        }
+      } finally {
+        this._clearAuthorizedPageCreation(authTicket);
+      }
+
+      const initialEntry = this._registerPage(pageInstance, { creationType: 'initial', activate: true });
+      this._page = pageInstance;
+      this._legacyPage = pageInstance;
+
+      return {
+        success: true,
+        sessionId,
+        state: this._state,
+        pageId: initialEntry.pageId,
+        sessionProfileLoaded: true,
+        sessionStateRestored: true
+      };
+    } catch (err) {
+      throw new BrowserManagerError(
+        `Failed to replace browser context with session "${sessionId}": ${err.message}`,
+        'SESSION_CONTEXT_REPLACEMENT_FAILED',
+        { sessionId }
+      );
+    }
+  }
+
+  /**
+   * Lists all saved session profiles from the session vault.
+   * Returns safe metadata only (0 secrets).
+   *
+   * @returns {Promise<Array<Object>>}
+   */
+  async listSessions() {
+    return this._sessionVault.listSessions();
+  }
+
+  /**
+   * Deletes a session profile and its ciphertext state from the vault.
+   *
+   * @param {string} sessionId
+   * @returns {Promise<{ success: boolean, deletedSessionId: string }>}
+   */
+  async deleteSession(sessionId) {
+    if (!sessionId || typeof sessionId !== 'string') {
+      throw new BrowserManagerError('Session ID is required for deletion', 'SESSION_NOT_FOUND');
+    }
+    const result = await this._sessionVault.deleteSession(sessionId);
+    if (this._selectedSessionId === sessionId) {
+      this._selectedSessionId = null;
+    }
+    if (this._loadedSessionId === sessionId) {
+      this._loadedSessionId = null;
+    }
+    return result;
   }
 }
 

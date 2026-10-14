@@ -1,11 +1,37 @@
 Project: JARVIS4
-Current Brick: 34
-Status: BRICK-034 IN PROGRESS (Confirmed Form Submission + Result Verification v1; Automated Real-Browser Verification Passed)
-Last Verified Brick: BRICK-033
-Current Feature: Confirmed Form Submission & Result Verification v1
-Next Feature: NOT AUTHORIZED (Brick 35: Authentication & Saved Credentials — NOT STARTED)
+Current Brick: 35
+Status: BRICK-035 IN PROGRESS (Human-Authenticated Persistent Browser Sessions v1; Local Device Session Vault; Harness-First / No Password Automation)
+Last Verified Brick: BRICK-034
+Current Feature: Human-Authenticated Persistent Browser Sessions v1 & Local Device Session Vault
+Next Feature: NOT AUTHORIZED (Brick 36: Human Authentication Handoff, Continuation, MFA, & CAPTCHA Experience — NOT STARTED)
 
 ## Working capabilities
+
+- Human-Authenticated Persistent Browser Sessions v1 (Brick 35) deterministic local session vault and safe context restoration subsystem (`src/browser/sessionVault.js`, `browserManager.js`, `server.js`, `index.html`):
+  - Human Manual Authentication Model:
+    - Zero autonomous credential automation: JARVIS never inputs, reads, saves, generates, or inspects passwords or MFA secrets. Human logs in manually inside the real isolated Edge context.
+    - Explicit Save Contract: Session persistence occurs ONLY on explicit user request (`POST /api/browser/sessions/save`). Automatic/passive saving on cookie change or page navigation is strictly prohibited.
+  - Safe Session Profile Abstraction:
+    - Opaque cryptographically random identifiers: `sess_<timestamp>_<randomHex>` (never username, email, cookie ID, or token).
+    - Human-readable name metadata (e.g., "Work Portal", "Personal Demo").
+    - Safe Origin Metadata: Origin strings only (e.g. `http://127.0.0.1:55614`); paths, query strings, and auth parameters are never exposed.
+    - Zero Credential Leakage: Raw storageState, cookie names/values, bearer tokens, localStorage keys/values, and auth headers are NEVER exposed to UI, logs, API responses, OpenRouter, LLM, or conversation store.
+  - Device-Local Encrypted Session Vault:
+    - Windows DPAPI CurrentUser Scope: Encrypts Playwright `storageState` JSON into binary `.vault` ciphertext files via OS-bound DPAPI (`System.Security.Cryptography.ProtectedData`). Decryption key is never stored alongside ciphertext.
+    - Fails closed: If secure DPAPI vault is unavailable, operations fail with `SESSION_VAULT_UNAVAILABLE`. Zero silent fallback to plaintext storage under any condition.
+    - Storage isolation: Default path `runtime/session-vault/` (git-ignored). No secrets in Git or documentation.
+    - Test isolation: Deterministic in-memory AES-GCM provider (`MemoryProtectionProvider`) used for fast offline unit tests without requiring real DPAPI.
+  - Truthful Supported State Boundaries:
+    - Cookies: Supported across lifecycles, including HttpOnly cookies.
+    - localStorage: Supported and verified across browser lifecycles.
+    - IndexedDB: Truthfully NOT supported by Playwright `storageState()`. Documented as NOT SUPPORTED without mock/fake claims.
+  - Safe Lifecycle Restoration & Old ID Invalidation:
+    - Context Isolation: Restoring a session creates a fresh, isolated `BrowserContext` with stored `storageState`.
+    - Lifecycle Invalidation: All prior page IDs, snapshot tokens, target resolutions, and GREEN-034 form confirmation tokens are invalidated upon session restore or context replacement.
+    - Truthful Expiration: Restoring browser state does NOT generically claim `authenticated = true`. If the server-side session is expired or revoked, the protected route truthfully reports authentication required.
+  - Developer Control Center UI:
+    - Added "Browser Sessions (Local Vault)" section displaying guidance ("Sign in manually in the JARVIS Edge window, then save the session"), Selected Session, Active Loaded Session, and list of saved profiles with Safe Origins, Timestamps, Select for Next Launch, and Delete. All metadata rendered strictly with `.textContent` (zero `.innerHTML`).
+  - Zero AI / Zero External Dependencies: Exactly 0 LLM calls, 0 search calls. Local loopback fixtures only.
 
 - Confirmed Form Submission & Result Verification v1 (Brick 34) deterministic two-step submission and verification subsystem (`src/browser/formSubmitter.js`, `browserManager.js`, `server.js`, `index.html`):
   - Two-Step Authorization Contract:
@@ -59,11 +85,17 @@ Next Feature: NOT AUTHORIZED (Brick 35: Authentication & Saved Credentials — N
   - Automated Acceptance Suite (`scripts/verify-browser.mjs`): 48 programmatic tests running against real Microsoft Edge and local loopback fixtures, verifying all required form acceptance points without human manual form mechanics testing.
 
 
-- Two-Level Verification Architecture:
-  - Level 1 (`npm run verify`): 100% offline, fast, deterministic unit, integration, and mock regression suite (1391 tests across 152 suites). Strictly zero browser launches and zero network dependencies.
-  - Level 2 (`npm run verify:browser`): Automated real-browser verification suite running against actual installed system Microsoft Edge (`channel: "msedge"`) via Playwright. Verifies real DOM, MutationObserver, tabs/pages, popups, SPA routing, dynamic rendering, forms inspection/population/validation, and atomic page isolation programmatically across 48 automated checks with guaranteed try/finally teardown.
-  - Deterministic Local Browser Fixture Server (`tests/browser-fixtures/`): Local loopback server (`127.0.0.1`) serving `static.html`, `dynamic-elements.html`, `spa-routing.html`, `multi-page.html`, `popup.html`, `rerender.html`, `forms-basic.html`, `forms-multiple.html`, `forms-dynamic.html`, and `forms-validation.html`. Requires explicit `allowTestLoopback: true` authorization flag; production SSRF/loopback protections remain 100% active. Zero reliance on external websites.
-  - Human Verification Policy: Routine browser mechanics verified automatically via Level 2 harness. Human live verification strictly reserved for visual UX acceptance, voice quality, microphone behavior, human interactive authentication, MFA, CAPTCHAs, OS downloads/uploads, and major production milestones (GREEN-045).
+- Harness Architecture & Multi-Layer Verification System:
+  - Harness Architecture: Formally documented in `docs/HARNESS.md` as a canonical subsystem defining 5 distinct architectural layers, maturity matrices, and operating contracts.
+  - Active Layers:
+    - Layer A: Test Harness (`npm run verify`): 100% offline, fast, deterministic unit, integration, contract, and regression suite (1452 tests across 175 suites). Strictly zero browser launches and zero network dependencies. Static frontend syntax gate via VM parser (`vm.Script`) and module check.
+    - Layer B: Real-Browser Test Harness (`npm run verify:browser`): Automated real-browser verification suite running against actual installed system Microsoft Edge (`channel: "msedge"`) via Playwright across 70 automated checks covering 25 categories with guaranteed `try/finally` teardown.
+  - Local Deterministic Browser Fixture Server (`tests/browser-fixtures/`): Local loopback server (`127.0.0.1`) serving `static.html`, `dynamic-elements.html`, `spa-routing.html`, `multi-page.html`, `popup.html`, `rerender.html`, `forms-basic.html`, `forms-multiple.html`, `forms-dynamic.html`, `forms-validation.html`, `auth-login.html`, and `auth-protected.html`. Requires explicit `allowTestLoopback: true` authorization flag; production SSRF/loopback protections remain 100% active. Zero reliance on external websites.
+  - Human Verification Policy: Routine browser mechanics verified automatically via Level 2 harness. Human live verification strictly reserved for visual UX acceptance, voice quality, microphone behavior, human interactive authentication, MFA, CAPTCHAs, OS dialogs, and major production milestones.
+  - Partial & Planned Harness Layers:
+    - Layer C: Development Agent Harness: PARTIAL / PLANNED (`AGENTS.md` operating rules, verification gates, state tracking active; automated context builder, skill selection, worktrees, and bounded self-repair loops are planned).
+    - Layer D: Eval Harness: PLANNED (curated golden tasks, trajectory evaluation, safety scoring, and release thresholds targeted around Brick 40+).
+    - Layer E: Runtime Agent Harness: PLANNED (real-time tool gating, parameter schema validation, risk classification, human confirmation boundaries, and sanitized audit logging).
 
 - Dynamic Sites & SPAs v1 (Brick 32) deterministic browser layer for dynamically rendered pages, SPAs, and delayed controls (`dynamicTracker.js`, `browserManager.js`, `actionExecutor.js`, `server.js`, `index.html`):
   - Hotfix C (Atomic Page Context & Cross-Page Snapshot Binding): Eliminates cross-page snapshot contamination when switching between multiple managed pages. Guarantees that target resolution, snapshots, and action execution draw strictly from the concrete managed page entry corresponding to the requested page (`pageInstance`, `pageId`, `documentVersion`, `semanticRevision`, `snapshotToken`, `inspection`, and `target resolution`).

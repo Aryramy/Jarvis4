@@ -470,6 +470,28 @@
       <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; display: none;" id="submit-result-label">Verification Result:</div>
       <div id="submit-result" class="response-area" style="display: none; max-height: 240px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
     </div>
+
+    <!-- Browser Sessions Section (Brick 35) -->
+    <div id="browser-sessions-section" style="margin-top: 16px; border: 1px solid #334155; border-radius: 8px; padding: 12px; background: #0f172a;">
+      <h3 style="margin: 0 0 8px 0; font-size: 1rem; color: #38bdf8;">Browser Sessions (Local Vault)</h3>
+      <p style="font-size: 0.82rem; color: #94a3b8; margin: 0 0 10px 0;">
+        Sign in manually in the JARVIS Edge window, then save the session. Credentials are never handled by JARVIS.
+      </p>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <input type="text" id="session-name-input" placeholder="Session Profile Name (e.g. Work Portal)" style="flex: 1; min-width: 200px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <button type="button" id="save-session-btn">Save Current Session</button>
+        <button type="button" id="refresh-sessions-btn">Refresh Sessions</button>
+      </div>
+      <div style="display: flex; gap: 16px; margin-bottom: 8px; font-size: 0.85rem; color: #94a3b8; flex-wrap: wrap;">
+        <div>Selected for Next Launch: <span id="selected-session-display" style="color: #f1f5f9; font-weight: 600;">(None)</span></div>
+        <div>Active Loaded Session: <span id="loaded-session-display" style="color: #f1f5f9; font-weight: 600;">(None)</span></div>
+      </div>
+      <div id="session-status-msg" style="font-size: 0.82rem; color: #64748b; margin-bottom: 8px;"></div>
+      <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-bottom: 4px;">Saved Session Profiles:</div>
+      <div id="sessions-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto;">
+        <div style="color: #64748b; font-size: 0.85rem;">No saved sessions found.</div>
+      </div>
+    </div>
   </div>
 
   <script type="module">
@@ -3229,6 +3251,178 @@
           }
         }
       });
+    }
+
+    // Brick 35 Browser Sessions Handlers
+    const sessionNameInput = document.getElementById('session-name-input');
+    const saveSessionBtn = document.getElementById('save-session-btn');
+    const refreshSessionsBtn = document.getElementById('refresh-sessions-btn');
+    const selectedSessionDisplay = document.getElementById('selected-session-display');
+    const loadedSessionDisplay = document.getElementById('loaded-session-display');
+    const sessionStatusMsg = document.getElementById('session-status-msg');
+    const sessionsList = document.getElementById('sessions-list');
+
+    async function refreshSessions() {
+      try {
+        const [sessionsRes, statusRes] = await Promise.all([
+          fetch('/api/browser/sessions'),
+          fetch('/api/browser/page-status')
+        ]);
+        const sessionsData = await sessionsRes.json();
+        const statusData = statusRes.ok ? await statusRes.json() : {};
+
+        const selectedId = statusData.selectedSessionId || null;
+        const loadedId = statusData.loadedSessionId || null;
+
+        if (selectedSessionDisplay) {
+          selectedSessionDisplay.textContent = selectedId || '(None)';
+        }
+        if (loadedSessionDisplay) {
+          loadedSessionDisplay.textContent = loadedId || '(None)';
+        }
+
+        if (sessionsList) {
+          sessionsList.textContent = '';
+          const sessions = (sessionsData && sessionsData.sessions) || [];
+          if (sessions.length === 0) {
+            const emptyEl = document.createElement('div');
+            emptyEl.style.color = '#64748b';
+            emptyEl.style.fontSize = '0.85rem';
+            emptyEl.textContent = 'No saved sessions found.';
+            sessionsList.appendChild(emptyEl);
+            return;
+          }
+
+          sessions.forEach(sess => {
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.justifyContent = 'space-between';
+            row.style.padding = '8px 10px';
+            row.style.background = '#1e293b';
+            row.style.borderRadius = '6px';
+            row.style.gap = '8px';
+
+            const infoCol = document.createElement('div');
+            infoCol.style.flex = '1';
+            infoCol.style.fontSize = '0.82rem';
+
+            const nameEl = document.createElement('div');
+            nameEl.style.fontWeight = '600';
+            nameEl.style.color = '#f1f5f9';
+            nameEl.textContent = `${sess.name || 'Untitled'} (${sess.sessionId})`;
+
+            const metaEl = document.createElement('div');
+            metaEl.style.color = '#94a3b8';
+            const originCount = Array.isArray(sess.origins) ? sess.origins.length : 0;
+            const originsText = originCount > 0 ? sess.origins.join(', ') : 'none';
+            metaEl.textContent = `Origins: ${originsText} | Created: ${sess.createdAt || 'unknown'}`;
+
+            infoCol.appendChild(nameEl);
+            infoCol.appendChild(metaEl);
+
+            const actionsCol = document.createElement('div');
+            actionsCol.style.display = 'flex';
+            actionsCol.style.gap = '6px';
+
+            const selectBtn = document.createElement('button');
+            selectBtn.type = 'button';
+            selectBtn.style.padding = '4px 8px';
+            selectBtn.style.fontSize = '0.78rem';
+            const isSelected = selectedId === sess.sessionId;
+            selectBtn.textContent = isSelected ? 'Deselect' : 'Select';
+            selectBtn.addEventListener('click', async () => {
+              try {
+                selectBtn.disabled = true;
+                const newId = isSelected ? null : sess.sessionId;
+                const res = await fetch('/api/browser/sessions/select', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ sessionId: newId })
+                });
+                const data = await res.json();
+                if (sessionStatusMsg) {
+                  sessionStatusMsg.textContent = res.ok ? `Session ${newId ? 'selected' : 'deselected'}.` : `Select error: ${data.error || 'Failed'}`;
+                }
+                await refreshSessions();
+              } catch (err) {
+                if (sessionStatusMsg) sessionStatusMsg.textContent = `Select error: ${err.message}`;
+              } finally {
+                selectBtn.disabled = false;
+              }
+            });
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.type = 'button';
+            deleteBtn.style.padding = '4px 8px';
+            deleteBtn.style.fontSize = '0.78rem';
+            deleteBtn.style.background = '#7f1d1d';
+            deleteBtn.style.color = '#fecaca';
+            deleteBtn.textContent = 'Delete';
+            deleteBtn.addEventListener('click', async () => {
+              try {
+                deleteBtn.disabled = true;
+                const res = await fetch('/api/browser/sessions/delete', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ sessionId: sess.sessionId })
+                });
+                const data = await res.json();
+                if (sessionStatusMsg) {
+                  sessionStatusMsg.textContent = res.ok ? `Deleted session ${sess.sessionId}.` : `Delete error: ${data.error || 'Failed'}`;
+                }
+                await refreshSessions();
+              } catch (err) {
+                if (sessionStatusMsg) sessionStatusMsg.textContent = `Delete error: ${err.message}`;
+              } finally {
+                deleteBtn.disabled = false;
+              }
+            });
+
+            actionsCol.appendChild(selectBtn);
+            actionsCol.appendChild(deleteBtn);
+
+            row.appendChild(infoCol);
+            row.appendChild(actionsCol);
+            sessionsList.appendChild(row);
+          });
+        }
+      } catch (err) {
+        if (sessionStatusMsg) {
+          sessionStatusMsg.textContent = `Error loading sessions: ${err.message}`;
+        }
+      }
+    }
+
+    if (saveSessionBtn) {
+      saveSessionBtn.addEventListener('click', async () => {
+        saveSessionBtn.disabled = true;
+        const name = (sessionNameInput ? sessionNameInput.value : '').trim() || 'Saved Session';
+        if (sessionStatusMsg) sessionStatusMsg.textContent = 'Saving session...';
+        try {
+          const res = await fetch('/api/browser/sessions/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            if (sessionStatusMsg) sessionStatusMsg.textContent = `Session "${data.name}" saved (${data.sessionId}).`;
+            if (sessionNameInput) sessionNameInput.value = '';
+          } else {
+            if (sessionStatusMsg) sessionStatusMsg.textContent = `Save failed: ${data.error || data.code || 'ERROR'}`;
+          }
+          await refreshSessions();
+        } catch (err) {
+          if (sessionStatusMsg) sessionStatusMsg.textContent = `Save error: ${err.message}`;
+        } finally {
+          saveSessionBtn.disabled = false;
+        }
+      });
+    }
+
+    if (refreshSessionsBtn) {
+      refreshSessionsBtn.addEventListener('click', refreshSessions);
     }
   </script>
 </body>

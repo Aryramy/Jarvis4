@@ -386,7 +386,7 @@ Currently tracked issues in JARVIS4:
     - **Zero AI / Zero Autonomous Value Generation**: Exactly 0 LLM calls, 0 OpenRouter calls, 0 search calls. No guessing, no memory auto-complete, no autonomous filling.
     - **Automated Real-Browser Verification**: Verified automatically via Playwright against local fixtures without requiring human manual form mechanics testing.
 
-27. **Confirmed Form Submission & Result Verification v1 Observations & Limitations (Brick 34 In Progress)**:
+27. **Confirmed Form Submission & Result Verification v1 Observations & Limitations (Brick 34 Verified)**:
     - **Deterministic Two-Step Flow**: Form submission is never executed implicitly. Requires explicit authorization via `POST /api/browser/prepare-form-submit` followed by `POST /api/browser/submit-form`.
     - **Opaque Single-Use Confirmation Tokens**: Token (`conf_<timestamp>_<hex>`) is short-lived (`BROWSER_CONFIRMATION_TTL_MS`, default 60s), stored strictly in memory, and bound to `pageId`, `documentVersion`, `semanticRevision`, `snapshotToken`, form, submitter, and verification expectations. Token is consumed at the execution boundary; duplicate submissions are blocked with `CONFIRMATION_ALREADY_USED`.
     - **HTML5 Native Form Validation Precheck**: Evaluates browser-native validation (`checkValidity()`) during preparation. If any required or pattern constraint is invalid, returns `FORM_VALIDATION_FAILED` with zero confirmation token generated.
@@ -398,7 +398,19 @@ Currently tracked issues in JARVIS4:
     - **Truthful Failure Reporting & Strictly Zero Auto-Retry**: If the submit button clicks but verification evidence is not observed, reports `SUBMISSION_ATTEMPTED_BUT_NOT_VERIFIED` (`submissionAttempted: true, verified: false`). Never claims success and NEVER automatically retries under any circumstance (prevents duplicate orders/messages/transactions).
     - **Atomic Cross-Page Isolation**: Tokens cannot be submitted across pages (`CROSS_PAGE_TOKEN_BLOCKED`). Switching active pages does not mutate or submit unselected pages.
     - **Zero AI / Zero Search**: 0 LLM calls, 0 search calls. Local loopback fixtures only.
-    - **Brick 35 Status**: Authentication & Saved Credentials v1 is NOT STARTED.
+
+28. **Human-Authenticated Persistent Browser Sessions v1 & Local Device Session Vault Observations & Limitations (Brick 35 In Progress)**:
+    - **Human Authentication Model (Not Autonomous Login)**: JARVIS launches an isolated Edge context where the human manually signs into websites. Saving session state is an explicit user action (`POST /api/browser/sessions/save`), strictly never automated or triggered by URL changes, cookies appearing, or browser closure.
+    - **Zero Password Automation**: Interacting with, reading, filling, generating, or saving passwords remains strictly prohibited. No credentials are saved or handled by JARVIS.
+    - **Zero MFA / CAPTCHA Bypass**: No MFA interception, TOTP token handling, or CAPTCHA solving. Brick 36 will own structured handoff for human continuation.
+    - **Storage State Boundaries & Supported Technologies**:
+      - HttpOnly and standard cookies: SUPPORTED and persisted across browser restarts.
+      - localStorage: SUPPORTED and persisted across browser restarts.
+      - IndexedDB: NOT SUPPORTED by Playwright's `context.storageState()` API. Truthfully reported as NOT SUPPORTED; no fake claims.
+    - **Truthful Authentication Semantics**: Restoring session state restores browser client storage (`sessionProfileLoaded: true, sessionStateRestored: true`), NOT guaranteed active authentication. Upstream server expirations, token revocations, IP restrictions, and enterprise SSO re-prompts must be handled truthfully by failing or displaying authentication prompts. JARVIS never generically claims `authenticated: true`.
+    - **Local Device Protection & Fail-Closed Behavior**: Production session ciphertext is protected using Windows DPAPI (`DataProtectionScope.CurrentUser`). If DPAPI is unavailable, the system strictly fails closed with `SESSION_VAULT_UNAVAILABLE` with ZERO fallback to unencrypted plaintext.
+    - **Strict Isolation & Old State Invalidation**: Restoring or activating a session invalidates all previous page IDs, snapshot tokens, target IDs, and form confirmation tokens. Cross-session leakage is strictly prevented.
+    - **Sensitive Artifact Protection**: Auth tokens, cookies, passwords, and storage states are never exposed in UI, REST responses, logs, debug output, docs, or Git. Safe profiles only expose opaque session IDs (`sess_...`), human-readable labels, timestamps, and origin hostnames.
 
 
 

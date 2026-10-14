@@ -71,6 +71,7 @@ async function runTest(num, name, category, testFn) {
   try {
     await testFn();
     results.push({ num, name, category, status: 'PASS' });
+    console.log(`  PASS [${num}] ${name}`);
     return true;
   } catch (err) {
     results.push({ num, name, category, status: 'FAIL', error: err.message });
@@ -1227,8 +1228,258 @@ async function main() {
       assert.equal(bm.activePageId, pageAId);
     });
 
-    // 59. Cleanup succeeds
-    await runTest(59, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
+    // =========================================================================
+    // Brick 35: Browser Sessions, Local Vault, & Persistence Tests (59 - 70)
+    // =========================================================================
+    let savedSessionA = null;
+    let savedSessionB = null;
+    let savedExpired = null;
+    let preRestorePageId = null;
+    let preRestoreSnapshotToken = null;
+    let preRestoreConfirmationToken = null;
+
+    // 59. Unauthenticated access to protected fixture
+    await runTest(59, 'Unauthenticated Protected Route Check', 'Session Persistence & Isolation', async () => {
+      const navRes = await bm.navigate(`${baseUrl}/auth/protected`);
+      assert.equal(navRes.success, true);
+      const text = await bm.page.textContent('#auth-status');
+      assert.equal(text.trim(), 'Authentication Required');
+      const userText = await bm.page.textContent('#user-display');
+      assert.equal(userText.trim(), 'User: None');
+    });
+
+    // 60. Establish synthetic human-like fixture session
+    await runTest(60, 'Establish Synthetic Fixture Session', 'Session Persistence & Isolation', async () => {
+      // Human-like navigation to login and selection
+      await bm.navigate(`${baseUrl}/auth/login`);
+      await Promise.all([
+        bm.page.waitForURL('**/auth/protected'),
+        bm.page.click('#login-user-a-btn')
+      ]);
+      
+      const authStatus = await bm.page.textContent('#auth-status');
+      assert.equal(authStatus.trim(), 'Authenticated Fixture');
+      const userDisplay = await bm.page.textContent('#user-display');
+      assert.equal(userDisplay.trim(), 'User: UserA');
+      const markerText = await bm.page.textContent('#localstorage-marker');
+      assert.equal(markerText.trim(), 'Marker: synth_marker_UserA');
+
+      // Prepare inspection and form confirmation token for invalidation test later
+      const insp = await bm.inspectForms();
+      preRestorePageId = bm.activePageId;
+      preRestoreSnapshotToken = insp.snapshotToken;
+      const { generateConfirmationToken, registerTestConfirmationToken } = await import('../src/browser/formSubmitter.js');
+      preRestoreConfirmationToken = generateConfirmationToken();
+      if (typeof registerTestConfirmationToken === 'function') {
+        registerTestConfirmationToken(preRestoreConfirmationToken, { pageId: preRestorePageId });
+      }
+    });
+
+    // 61. Explicit session save through JARVIS session subsystem
+    await runTest(61, 'Explicit Session Save with Safe Metadata', 'Session Persistence & Isolation', async () => {
+      savedSessionA = await bm.saveSession({ name: 'Work Portal A' });
+      assert.equal(savedSessionA.success, true);
+      assert.ok(savedSessionA.sessionId.startsWith('sess_'));
+      assert.equal(savedSessionA.name, 'Work Portal A');
+      assert.ok(Array.isArray(savedSessionA.origins));
+      assert.ok(savedSessionA.origins.includes(baseUrl));
+      // Must NOT contain any secrets or raw state
+      assert.equal(savedSessionA.cookies, undefined);
+      assert.equal(savedSessionA.storageState, undefined);
+      assert.equal(savedSessionA.tokens, undefined);
+      assert.equal(JSON.stringify(savedSessionA).includes('synth_token_UserA'), false);
+      assert.equal(JSON.stringify(savedSessionA).includes('synth_marker_UserA'), false);
+    });
+
+    // 62. Restart browser lifecycle with saved session
+    await runTest(62, 'Restart Browser with Saved Session State', 'Session Persistence & Isolation', async () => {
+      await bm.close();
+      assert.equal(bm.isBrowserConnected(), false);
+
+      // Create new BrowserManager lifecycle
+      bm = new BrowserManager({
+        allowTestLoopback: true,
+        headless: process.env.HEADLESS !== 'false'
+      });
+      activeBm = bm;
+
+      // Select saved session
+      const selected = await bm.selectSession(savedSessionA.sessionId);
+      assert.equal(selected.selectedSessionId, savedSessionA.sessionId);
+      assert.equal(bm.selectedSessionId, savedSessionA.sessionId);
+
+      // Launch new isolated context with saved state
+      await bm.launch();
+      assert.equal(bm.isBrowserConnected(), true);
+      assert.equal(bm.loadedSessionId, savedSessionA.sessionId);
+      
+      const status = bm.getStatus();
+      assert.equal(status.sessionProfileLoaded, true);
+      assert.equal(status.sessionStateRestored, true);
+      assert.equal(status.loadedSessionId, savedSessionA.sessionId);
+    });
+
+    // 63. Restored authentication & HttpOnly cookie persistence
+    await runTest(63, 'Restored Auth & HttpOnly Cookie Persistence', 'Session Persistence & Isolation', async () => {
+      // Navigate directly to protected route without logging in
+      const navRes = await bm.navigate(`${baseUrl}/auth/protected`);
+      assert.equal(navRes.success, true);
+      const authStatus = await bm.page.textContent('#auth-status');
+      assert.equal(authStatus.trim(), 'Authenticated Fixture');
+      const userDisplay = await bm.page.textContent('#user-display');
+      assert.equal(userDisplay.trim(), 'User: UserA');
+    });
+
+    // 64. localStorage persistence across browser lifecycle
+    await runTest(64, 'localStorage Persistence Across Lifecycle', 'Session Persistence & Isolation', async () => {
+      const markerText = await bm.page.textContent('#localstorage-marker');
+      assert.equal(markerText.trim(), 'Marker: synth_marker_UserA');
+    });
+
+    // 65. Session A/B isolation across lifecycles
+    await runTest(65, 'Session A/B Isolation Across Lifecycles', 'Session Persistence & Isolation', async () => {
+      // In current browser, navigate to login and authenticate as UserB
+      await bm.navigate(`${baseUrl}/auth/login`);
+      await Promise.all([
+        bm.page.waitForURL('**/auth/protected'),
+        bm.page.click('#login-user-b-btn')
+      ]);
+      
+      const bStatus = await bm.page.textContent('#auth-status');
+      assert.equal(bStatus.trim(), 'Authenticated Fixture');
+      const bUser = await bm.page.textContent('#user-display');
+      assert.equal(bUser.trim(), 'User: UserB');
+
+      // Save as Session B
+      savedSessionB = await bm.saveSession({ name: 'Work Portal B' });
+      assert.ok(savedSessionB.sessionId.startsWith('sess_'));
+      assert.notEqual(savedSessionB.sessionId, savedSessionA.sessionId);
+
+      // Close and restart with Session A
+      await bm.close();
+      bm = new BrowserManager({ allowTestLoopback: true, headless: process.env.HEADLESS !== 'false' });
+      activeBm = bm;
+      await bm.selectSession(savedSessionA.sessionId);
+      await bm.launch();
+      await bm.navigate(`${baseUrl}/auth/protected`);
+      const aUser = await bm.page.textContent('#user-display');
+      assert.equal(aUser.trim(), 'User: UserA');
+
+      // Close and restart with Session B
+      await bm.close();
+      bm = new BrowserManager({ allowTestLoopback: true, headless: process.env.HEADLESS !== 'false' });
+      activeBm = bm;
+      await bm.selectSession(savedSessionB.sessionId);
+      await bm.launch();
+      await bm.navigate(`${baseUrl}/auth/protected`);
+      const bUserAgain = await bm.page.textContent('#user-display');
+      assert.equal(bUserAgain.trim(), 'User: UserB');
+    });
+
+    // 66. Expired session truthfulness
+    await runTest(66, 'Expired Session Truthfulness', 'Session Persistence & Isolation', async () => {
+      // Log in with expired state
+      await bm.navigate(`${baseUrl}/auth/login`);
+      await Promise.all([
+        bm.page.waitForURL('**/auth/protected'),
+        bm.page.click('#login-expired-btn')
+      ]);
+      
+      const unauthText = await bm.page.textContent('#auth-status');
+      assert.equal(unauthText.trim(), 'Authentication Required');
+
+      // Save expired session
+      savedExpired = await bm.saveSession({ name: 'Expired Session' });
+      
+      // Close and restore expired session
+      await bm.close();
+      bm = new BrowserManager({ allowTestLoopback: true, headless: process.env.HEADLESS !== 'false' });
+      activeBm = bm;
+      await bm.selectSession(savedExpired.sessionId);
+      await bm.launch();
+
+      // JARVIS reports state restored, but protected route remains unauthenticated
+      const status = bm.getStatus();
+      assert.equal(status.sessionStateRestored, true);
+      
+      await bm.navigate(`${baseUrl}/auth/protected`);
+      const finalAuthStatus = await bm.page.textContent('#auth-status');
+      assert.equal(finalAuthStatus.trim(), 'Authentication Required');
+      const finalUser = await bm.page.textContent('#user-display');
+      assert.equal(finalUser.trim(), 'User: None');
+    });
+
+    // 67. Multi-page state & fresh page IDs upon restore
+    await runTest(67, 'Multi-Page Fresh Page IDs on Restore', 'Session Persistence & Isolation', async () => {
+      // Launch clean with Session A
+      await bm.close();
+      bm = new BrowserManager({ allowTestLoopback: true, headless: process.env.HEADLESS !== 'false' });
+      activeBm = bm;
+      await bm.selectSession(savedSessionA.sessionId);
+      await bm.launch();
+
+      const newPageId = bm.activePageId;
+      assert.ok(newPageId);
+      assert.notEqual(newPageId, preRestorePageId, 'Restored session must have fresh pageId');
+      
+      // Open second page
+      const page2 = await bm.openPage(`${baseUrl}/multi-page.html?page=B`);
+      assert.equal(bm.pageCount, 2);
+      assert.notEqual(page2.pageId, preRestorePageId);
+      await bm.closePage(page2.pageId);
+      assert.equal(bm.pageCount, 1);
+    });
+
+    // 68. Old ID, Snapshot, and Form Confirmation Invalidation
+    await runTest(68, 'Old ID and Confirmation Token Invalidation', 'Session Persistence & Isolation', async () => {
+      // Attempting to switch to pre-restore pageId must fail
+      let switchErr = null;
+      try {
+        await bm.switchPage(preRestorePageId);
+      } catch (err) {
+        switchErr = err;
+      }
+      assert.ok(switchErr);
+      assert.equal(switchErr.code, 'PAGE_NOT_FOUND');
+
+      // Attempting to submit form with pre-restore confirmation token must fail
+      let submitErr = null;
+      try {
+        await bm.submitForm({
+          confirmationToken: preRestoreConfirmationToken
+        });
+      } catch (err) {
+        submitErr = err;
+      }
+      assert.ok(submitErr);
+      assert.equal(submitErr.code, 'INVALID_CONFIRMATION_TOKEN');
+    });
+
+    // 69. Delete session profiles & vault file cleanup
+    await runTest(69, 'Delete Session Profiles and Vault Cleanup', 'Session Persistence & Isolation', async () => {
+      // List sessions before deletion
+      const beforeList = await bm.listSessions();
+      assert.ok(beforeList.some(s => s.sessionId === savedSessionA.sessionId));
+      assert.ok(beforeList.some(s => s.sessionId === savedSessionB.sessionId));
+      assert.ok(beforeList.some(s => s.sessionId === savedExpired.sessionId));
+
+      // Delete sessions
+      const delA = await bm.deleteSession(savedSessionA.sessionId);
+      assert.equal(delA.success, true);
+      const delB = await bm.deleteSession(savedSessionB.sessionId);
+      assert.equal(delB.success, true);
+      const delExp = await bm.deleteSession(savedExpired.sessionId);
+      assert.equal(delExp.success, true);
+
+      // Verify list after deletion
+      const afterList = await bm.listSessions();
+      assert.equal(afterList.some(s => s.sessionId === savedSessionA.sessionId), false);
+      assert.equal(afterList.some(s => s.sessionId === savedSessionB.sessionId), false);
+      assert.equal(afterList.some(s => s.sessionId === savedExpired.sessionId), false);
+    });
+
+    // 70. Real browser cleanup succeeds
+    await runTest(70, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
       await bm.close();
       assert.equal(bm.isBrowserConnected(), false);
       assert.equal(bm.pageCount, 0);
@@ -1282,6 +1533,7 @@ async function main() {
     'Submission Security & Safety',
     'Single-Use & Duplicate Prevention',
     'Cross-Page Submission Isolation',
+    'Session Persistence & Isolation',
     'Cleanup'
   ];
 
@@ -1299,10 +1551,10 @@ async function main() {
 
   console.log('--------------------------------------------------');
   console.log(`Tests:\n${passed}/${total} PASS\n`);
-  console.log(`Exit Code:\n${passed === total && total >= 59 ? 0 : 1}`);
+  console.log(`Exit Code:\n${passed === total && total >= 70 ? 0 : 1}`);
   console.log('==================================================');
 
-  if (passed !== total || total < 59) {
+  if (passed !== total || total < 70) {
     process.exit(1);
   }
 }

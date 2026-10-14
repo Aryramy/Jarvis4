@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Auth Fixture Protected Page</title>
+  <style>
+    body { font-family: sans-serif; margin: 2rem; }
+  </style>
+</head>
+<body>
+  <h1 id="page-heading">Auth Fixture Protected Page</h1>
+  <div id="auth-status">Checking...</div>
+  <div id="user-display">User: None</div>
+  <div id="localstorage-marker">Marker: Checking...</div>
+  <div style="margin-top: 12px;">
+    <a id="logout-link" href="/auth/logout">Log Out</a>
+  </div>
+  <script>
+    const marker = localStorage.getItem('jarvis_marker');
+    document.getElementById('localstorage-marker').textContent = 'Marker: ' + (marker || 'None');
+  </script>
+</body>
+</html>
