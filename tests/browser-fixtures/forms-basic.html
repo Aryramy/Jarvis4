@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Basic Form Fixture</title>
+</head>
+<body>
+  <h1>Order Form</h1>
+  <form id="order-form" name="orderForm" action="/submitted" method="POST">
+    <div>
+      <label for="full-name">Full Name</label>
+      <input type="text" id="full-name" name="fullName" placeholder="Enter full name" required>
+    </div>
+    <div>
+      <label for="email-address">Email Address</label>
+      <input type="email" id="email-address" name="email" required>
+    </div>
+    <div>
+      <label for="phone-number">Phone Number</label>
+      <input type="tel" id="phone-number" name="phone">
+    </div>
+    <div>
+      <label for="order-comments">Comments</label>
+      <textarea id="order-comments" name="comments"></textarea>
+    </div>
+    <div>
+      <label for="country-select">Country</label>
+      <select id="country-select" name="country">
+        <option value="">Select Country</option>
+        <option value="QA">Qatar</option>
+        <option value="US">United States</option>
+        <option value="UK">United Kingdom</option>
+      </select>
+    </div>
+    <div>
+      <label>
+        <input type="checkbox" id="subscribe-check" name="subscribe">
+        Subscribe to newsletter
+      </label>
+    </div>
+    <fieldset>
+      <legend>Payment Method</legend>
+      <label>
+        <input type="radio" name="payment" value="visa">
+        Visa
+      </label>
+      <label>
+        <input type="radio" name="payment" value="mastercard">
+        Mastercard
+      </label>
+      <label>
+        <input type="radio" name="payment" value="cash" checked>
+        Cash
+      </label>
+    </fieldset>
+    <div>
+      <label for="pwd-input">Password</label>
+      <input type="password" id="pwd-input" name="password">
+    </div>
+    <div>
+      <label for="file-input">Upload Document</label>
+      <input type="file" id="file-input" name="fileUpload">
+    </div>
+    <input type="hidden" name="csrf_token" value="super-secret-csrf-token">
+    <div>
+      <label for="disabled-code">Discount Code</label>
+      <input type="text" id="disabled-code" name="discount" disabled value="LOCKED">
+    </div>
+    <div>
+      <label for="readonly-ref">Order Reference</label>
+      <input type="text" id="readonly-ref" name="orderRef" readonly value="REF-12345">
+    </div>
+    <div>
+      <button type="submit" id="btn-submit">Submit Order</button>
+      <button type="reset" id="btn-reset">Reset Form</button>
+      <button type="button" id="btn-cancel">Cancel</button>
+    </div>
+  </form>
+  <script>
+    window.__submitted = false;
+    document.getElementById('order-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      window.__submitted = true;
+    });
+  </script>
+</body>
+</html>

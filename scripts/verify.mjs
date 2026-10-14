@@ -59,6 +59,8 @@ const REQUIRED_FILES = [
   'src/browser/browserManager.js',
   'src/browser/pageInspection.js',
   'src/browser/targetResolver.js',
+  'src/browser/formInspector.js',
+  'src/browser/formPopulator.js',
   'src/webpage/urlSafety.js',
   'src/webpage/htmlExtractor.js',
   'src/webpage/pageReader.js',
@@ -87,6 +89,8 @@ const REQUIRED_FILES = [
   'tests/unit/browserManager.test.js',
   'tests/unit/pageInspection.test.js',
   'tests/unit/targetResolver.test.js',
+  'tests/unit/formInspection.test.js',
+  'tests/unit/formPopulator.test.js',
   'tests/unit/conversationSession.test.js',
   'tests/unit/microphone.test.js',
   'tests/unit/voiceTurn.test.js',
@@ -116,7 +120,11 @@ const REQUIRED_FILES = [
   'tests/fixtures/html/unicode.html',
   'tests/fixtures/html/oversized.html',
   'tests/fixtures/html/empty.html',
-  'tests/fixtures/html/injection.html'
+  'tests/fixtures/html/injection.html',
+  'tests/browser-fixtures/forms-basic.html',
+  'tests/browser-fixtures/forms-multiple.html',
+  'tests/browser-fixtures/forms-dynamic.html',
+  'tests/browser-fixtures/forms-validation.html'
 ];
 
 const REQUIRED_DIRS = [
@@ -466,6 +474,20 @@ check('Browser Target Resolver Module Sanity Check', async () => {
   const res = resolveTargetFromElements(testElements, { kind: 'button', name: 'Submit' });
   if (!res.success || res.resolution !== 'unique' || res.match.accessibleName !== 'Submit') {
     throw new Error('resolveTargetFromElements sanity check failed');
+  }
+});
+
+check('Browser Form Inspector Module Sanity Check', async () => {
+  const { FormInspectionError, inspectFormsFromCheerio, extractFormsSnapshot } = await import('../src/browser/formInspector.js');
+  if (typeof FormInspectionError !== 'function' || typeof inspectFormsFromCheerio !== 'function' || typeof extractFormsSnapshot !== 'function') {
+    throw new Error('formInspector module failed to export required functions or classes');
+  }
+});
+
+check('Browser Form Populator Module Sanity Check', async () => {
+  const { FormPopulationError, populateForm, validateFormPreflight } = await import('../src/browser/formPopulator.js');
+  if (typeof FormPopulationError !== 'function' || typeof populateForm !== 'function' || typeof validateFormPreflight !== 'function') {
+    throw new Error('formPopulator module failed to export required functions or classes');
   }
 });
 

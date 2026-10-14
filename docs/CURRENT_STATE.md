@@ -1,16 +1,38 @@
 Project: JARVIS4
-Current Brick: 32
-Status: BRICK-032 IN PROGRESS (Automated Real-Browser Verification Harness Operational; Hotfix C Verified)
-Last Verified Brick: BRICK-031
-Current Feature: Dynamic Sites & SPAs v1 (Semantic DOM Revision + SPA Route Awareness + Bounded Waits)
-Next Feature: NOT AUTHORIZED
+Current Brick: 33
+Status: BRICK-033 IN PROGRESS (Forms v1 — Understand, Map & Safely Populate; Automated Real-Browser Verification Passed)
+Last Verified Brick: BRICK-032
+Current Feature: Forms v1 (Understand, Map & Safely Populate)
+Next Feature: NOT AUTHORIZED (Brick 34: Form Submission & Confirmation — NOT STARTED)
 
 ## Working capabilities
 
+- Forms v1 (Brick 33) deterministic form discovery and safe population subsystem (`src/browser/formInspector.js`, `src/browser/formPopulator.js`, `browserManager.js`, `server.js`, `index.html`):
+  - Form Discovery & Inspection (`POST /api/browser/inspect-form`): Discovers `<form>` elements and formless controls on the active managed page without leaking raw HTML, CSS selectors, XPath, ElementHandles, cookies, or hidden tokens.
+  - Semantic Field Inventory: Identifies field kind (`text`, `email`, `tel`, `url`, `number`, `search`, `textarea`, `select`, `checkbox`, `radio`), labels, accessible names, required/disabled/readonly state, placeholder, available select options, and radio groups.
+  - Robust Label Resolution: Resolves semantic field names through `<label for=id>`, wrapping parent `<label>`, `aria-label`, `aria-labelledby`, placeholder fallback, and `<fieldset><legend>` context.
+  - Radio Groups & Checkboxes: Groups radio controls semantically with selectable options; supports explicit boolean state for checkboxes (`checked: true|false`).
+  - Strict Field Security:
+    - Passwords: Detected as `sensitive: true` without exposing values; population strictly blocked with `SENSITIVE_FIELD_NOT_ALLOWED`.
+    - File Inputs: Detected as `isFile: true` without exposing file paths; population strictly blocked with `FILE_INPUT_NOT_ALLOWED` (upload deferred to Brick 37).
+    - Hidden Inputs: Counted for structure; values never exposed; mutation blocked with `ACTION_NOT_SUPPORTED_FOR_TARGET`.
+    - Disabled & Readonly: Blocked with `TARGET_DISABLED` and `FIELD_READONLY` without modifying DOM attributes or page JavaScript.
+    - Select & Radio validation: Non-matching options rejected with `OPTION_NOT_FOUND`.
+  - Safe Form Population (`POST /api/browser/fill-form`):
+    - Strict Snapshot Authorization: Requires `expectedSnapshotToken` bound to current `pageId`, `documentVersion`, and `semanticRevision`. Stale or cross-page tokens rejected with `TARGET_STALE`.
+    - Full Preflight Before Mutation: Validates all requested fields, options, and constraints before modifying ANY DOM node. If a single field fails preflight: exactly ZERO DOM mutations occur.
+    - Transactional Atomicity: Sequential execution with post-mutation DOM verification. Mid-operation unexpected failures attempt rollback to prior state; reports truthful `PARTIAL_FORM_UPDATE` if rollback is incomplete.
+    - Form Submission STRICTLY BLOCKED: Preserves `FORM_SUBMISSION_NOT_AUTHORIZED`. Zero calls to `form.submit()`, `requestSubmit()`, submit button clicks, or Enter key finalization. Submission and confirmation verification are owned by Brick 34.
+    - Multiple Form Disambiguation: Returns `FORM_AMBIGUOUS` if target form is not specified and fields do not uniquely identify a single form.
+    - Strict Privacy: User-supplied form values are never persisted in logs, snapshots, conversation store, or test diagnostics.
+  - Developer Control Center Forms UI Panel: "Forms" section in developer control center with Inspect Forms, Form selection, safe field inventory viewing, and safe field population table with dynamic rows, rendering strictly via `.textContent`. Preserves Hotfix A frontend syntax verification.
+  - Automated Acceptance Suite (`scripts/verify-browser.mjs`): 48 programmatic tests running against real Microsoft Edge and local loopback fixtures, verifying all required form acceptance points without human manual form mechanics testing.
+
+
 - Two-Level Verification Architecture:
-  - Level 1 (`npm run verify`): 100% offline, fast, deterministic unit, integration, and mock regression suite (1362 tests across 150 suites). Strictly zero browser launches and zero network dependencies.
-  - Level 2 (`npm run verify:browser`): Automated real-browser verification suite running against actual installed system Microsoft Edge (`channel: "msedge"`) via Playwright. Verifies real DOM, MutationObserver, tabs/pages, popups, SPA routing, dynamic rendering, and atomic page isolation programmatically across 25 automated checks with guaranteed try/finally teardown.
-  - Deterministic Local Browser Fixture Server (`tests/browser-fixtures/`): Local loopback server (`127.0.0.1`) serving `static.html`, `dynamic-elements.html`, `spa-routing.html`, `multi-page.html`, `popup.html`, and `rerender.html`. Requires explicit `allowTestLoopback: true` authorization flag; production SSRF/loopback protections remain 100% active. Zero reliance on external websites.
+  - Level 1 (`npm run verify`): 100% offline, fast, deterministic unit, integration, and mock regression suite (1391 tests across 152 suites). Strictly zero browser launches and zero network dependencies.
+  - Level 2 (`npm run verify:browser`): Automated real-browser verification suite running against actual installed system Microsoft Edge (`channel: "msedge"`) via Playwright. Verifies real DOM, MutationObserver, tabs/pages, popups, SPA routing, dynamic rendering, forms inspection/population/validation, and atomic page isolation programmatically across 48 automated checks with guaranteed try/finally teardown.
+  - Deterministic Local Browser Fixture Server (`tests/browser-fixtures/`): Local loopback server (`127.0.0.1`) serving `static.html`, `dynamic-elements.html`, `spa-routing.html`, `multi-page.html`, `popup.html`, `rerender.html`, `forms-basic.html`, `forms-multiple.html`, `forms-dynamic.html`, and `forms-validation.html`. Requires explicit `allowTestLoopback: true` authorization flag; production SSRF/loopback protections remain 100% active. Zero reliance on external websites.
   - Human Verification Policy: Routine browser mechanics verified automatically via Level 2 harness. Human live verification strictly reserved for visual UX acceptance, voice quality, microphone behavior, human interactive authentication, MFA, CAPTCHAs, OS downloads/uploads, and major production milestones (GREEN-045).
 
 - Dynamic Sites & SPAs v1 (Brick 32) deterministic browser layer for dynamically rendered pages, SPAs, and delayed controls (`dynamicTracker.js`, `browserManager.js`, `actionExecutor.js`, `server.js`, `index.html`):

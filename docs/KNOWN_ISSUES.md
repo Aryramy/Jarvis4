@@ -365,7 +365,7 @@ Currently tracked issues in JARVIS4:
     - **No Multi-Step Browser Agent**: No multi-action chains, planner loops, or autonomous goal decomposition. Belongs to Brick 40.
     - **No Voice-Driven Page Switching**: Voice Turn, STT, and TTS are not connected to browser page management.
     - **Zero AI / Zero Search**: Page management, switching, and adoption perform 0 LLM calls and 0 search calls.
-24. **Dynamic Sites & SPAs v1 Observations & Limitations (Brick 32 In Progress)**:
+25. **Dynamic Sites & SPAs v1 Observations & Limitations (Brick 32 Verified)**:
     - **Main Document Only**: Dynamic tracking and bounded wait primitives observe only the top-level main document. Nested iframes and shadow DOM traversal remain unmanaged (deferred to Brick 39).
     - **No `networkidle`**: Network requests are never used to determine DOM stability. Pages with ongoing WebSockets, long polling, ads, or background analytics can still settle reliably once the main document semantic DOM is quiet for `BROWSER_DOM_QUIET_MS` (default 300 ms).
     - **Strict Privacy Preservation**: Revision tracking records only numeric revisions and monotonic timestamps. Passwords, text input contents, textarea contents, file paths, cookies, localStorage, sessionStorage, and hidden tokens are never observed or exposed.
@@ -373,8 +373,20 @@ Currently tracked issues in JARVIS4:
     - **No Forced DOM Modifications**: Observation only. JARVIS never deletes loading overlays, spinners, or disables disabled controls to force actionability.
     - **Read-Only Readiness Primitives**: `wait-for-target` is strictly read-only and never performs clicks, fills, checks, or navigations.
     - **Zero AI / Zero Search**: Dynamic tracking and wait primitives perform 0 LLM calls, 0 OpenRouter calls, and 0 search calls.
-    - **No Form Submission Workflow**: Submit buttons remain blocked (`FORM_SUBMISSION_NOT_AUTHORIZED`, deferred to Brick 34); form workflows deferred to Brick 33.
-    - **Production Milestone**: Infrastructure towards GREEN-045; Brick 32 alone is not production-ready. Brick 33 is not started.
+    - **No Form Submission Workflow**: Submit buttons remain blocked (`FORM_SUBMISSION_NOT_AUTHORIZED`, deferred to Brick 34); form workflows belong to Brick 33.
+    - **Production Milestone**: Infrastructure towards GREEN-045; Brick 32 alone is not production-ready.
+
+26. **Forms v1 — Understand, Map & Safely Populate Observations & Limitations (Brick 33 In Progress)**:
+    - **Form Discovery & Inspection**: Deterministic inspection (`POST /api/browser/inspect-form`) discovers `<form>` elements and formless controls on the active managed page without exposing raw HTML, CSS selectors, XPath, ElementHandles, cookies, or hidden tokens. Multiple forms are semantically distinguished, returning `FORM_AMBIGUOUS` if target form is unspecified and ambiguous.
+    - **Field Semantics & Accessibility Resolution**: Supported fields (`text`, `email`, `tel`, `url`, `number`, `search`, `textarea`, `select`, `checkbox`, `radio`) are semantically mapped using `<label for>`, wrapping parent `<label>`, `aria-label`, `aria-labelledby`, placeholder fallbacks, and `<fieldset><legend>` context. Radio buttons are grouped semantically; checkboxes enforce explicit boolean target state; select controls map by option label/value without guessing.
+    - **Safe Population & Snapshot Authorization**: Form population (`POST /api/browser/fill-form`) requires `expectedSnapshotToken` strictly bound to `pageId`, `documentVersion`, and `semanticRevision`. Stale or cross-page tokens are blocked with `TARGET_STALE`.
+    - **Preflight Before Mutation & Atomicity**: The entire requested field set is strictly validated before ANY DOM modification. If any field fails preflight (missing, ambiguous, password, file, hidden, disabled, readonly, invalid option), exactly zero mutations occur. Execution is transactional with post-mutation verification; mid-operation unexpected failure attempts safe rollback and truthfully reports `PARTIAL_FORM_UPDATE` if rollback is incomplete.
+    - **Strict Privacy**: Password fields are detected (`sensitive: true`) but values are never exposed or filled (`SENSITIVE_FIELD_NOT_ALLOWED`). File inputs are protected (`FILE_INPUT_NOT_ALLOWED`, deferred to Brick 37). Hidden fields and tokens are protected (`ACTION_NOT_SUPPORTED_FOR_TARGET`). User-supplied values are never persisted in logs, snapshots, conversation store, or test diagnostics.
+    - **Form Submission STRICTLY BLOCKED**: Preserves `FORM_SUBMISSION_NOT_AUTHORIZED`. Zero calls to `form.submit()`, `requestSubmit()`, submit button clicks, reset clicks, or Enter key finalization. Submission and result confirmation belong to Brick 34.
+    - **Zero AI / Zero Autonomous Value Generation**: Exactly 0 LLM calls, 0 OpenRouter calls, 0 search calls. No guessing, no memory auto-complete, no autonomous filling.
+    - **Automated Real-Browser Verification**: 22 required Edge acceptance criteria verified automatically via Playwright against local fixtures without requiring human manual form mechanics testing.
+    - **Brick 34 Status**: Form Submission & Confirmation v1 is NOT STARTED.
+
 
 
 

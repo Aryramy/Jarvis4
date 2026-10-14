@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Multiple Forms Fixture</title>
+</head>
+<body>
+  <h1>Multiple Forms</h1>
+  
+  <form id="shipping-form" name="shipping" aria-label="Shipping Address" action="/shipping" method="POST">
+    <h2>Shipping Address</h2>
+    <div>
+      <label for="ship-street">Street Address</label>
+      <input type="text" id="ship-street" name="street" required>
+    </div>
+    <div>
+      <label for="ship-city">City</label>
+      <input type="text" id="ship-city" name="city" required>
+    </div>
+    <div>
+      <label for="ship-zip">Zip Code</label>
+      <input type="text" id="ship-zip" name="zip">
+    </div>
+    <button type="submit" id="btn-ship-submit">Save Shipping</button>
+  </form>
+
+  <form id="billing-form" name="billing" aria-label="Billing Address" action="/billing" method="POST">
+    <h2>Billing Address</h2>
+    <div>
+      <label for="bill-cardholder">Cardholder Name</label>
+      <input type="text" id="bill-cardholder" name="cardholder" required>
+    </div>
+    <div>
+      <label for="bill-city">Billing City</label>
+      <input type="text" id="bill-city" name="city" required>
+    </div>
+    <button type="submit" id="btn-bill-submit">Save Billing</button>
+  </form>
+
+  <div id="unassociated-section">
+    <h3>Quick Search</h3>
+    <label for="quick-search">Search Site</label>
+    <input type="search" id="quick-search" name="q" placeholder="Search site...">
+  </div>
+</body>
+</html>

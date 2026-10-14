@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { BrowserManager } from '../src/browser/browserManager.js';
+import { BrowserManager, FormInspectionError, FormPopulationError } from '../src/browser/browserManager.js';
 import { startFixtureServer } from '../tests/browser-fixtures/server.js';
 import { TargetResolutionError } from '../src/browser/targetResolver.js';
 import { ActionExecutionError } from '../src/browser/actionExecutor.js';
@@ -479,6 +479,428 @@ async function main() {
       assert.ok(entry2.documentVersion > docVer1, 'documentVersion must increment on new document navigation');
     });
 
+    // ==================================================
+    // BRICK-033: FORMS V1 ACCEPTANCE TESTS (26-47)
+    // ==================================================
+
+    // 26. Inspect ordinary real DOM form
+    await runTest(26, 'Inspect Ordinary Real DOM Form', 'Form Discovery', async () => {
+      await bm.navigate(`${baseUrl}/forms-basic.html`);
+      await bm.syncDynamicState();
+      const insp = await bm.inspectForms();
+      assert.equal(insp.success, true);
+      assert.ok(insp.pageId, 'Must include pageId');
+      assert.ok(insp.snapshotToken, 'Must include snapshotToken');
+      assert.equal(Array.isArray(insp.forms), true);
+      assert.equal(insp.forms.length, 1);
+      assert.ok(insp.forms[0].formId);
+      assert.equal(insp.forms[0].id, 'order-form');
+      assert.equal(insp.forms[0].name, 'orderForm');
+      assert.ok(insp.forms[0].fields.length >= 8);
+    });
+
+    // 27. Labels correctly resolved
+    await runTest(27, 'Form Labels Correctly Resolved', 'Form Discovery', async () => {
+      const insp = await bm.inspectForms();
+      const fields = insp.forms[0].fields;
+
+      // for="full-name" -> Full Name
+      const fullName = fields.find(f => f.label === 'Full Name');
+      assert.ok(fullName, 'Full Name field must be identified');
+      assert.equal(fullName.kind, 'text');
+      assert.equal(fullName.required, true);
+
+      // for="email-address" -> Email Address
+      const email = fields.find(f => f.label === 'Email Address');
+      assert.ok(email, 'Email Address field must be identified');
+      assert.equal(email.type, 'email');
+
+      // Comments textarea
+      const comments = fields.find(f => f.label === 'Comments');
+      assert.ok(comments, 'Comments textarea must be identified');
+      assert.equal(comments.kind, 'textarea');
+
+      // Country select
+      const country = fields.find(f => f.label === 'Country');
+      assert.ok(country, 'Country select must be identified');
+      assert.equal(country.kind, 'select');
+      assert.ok(country.options.some(o => o.label === 'Qatar'));
+
+      // Checkbox with wrapping label
+      const sub = fields.find(f => f.label.includes('Subscribe to newsletter'));
+      assert.ok(sub, 'Subscribe checkbox must be identified');
+      assert.equal(sub.kind, 'checkbox');
+
+      // Radio group under legend
+      const payment = fields.find(f => f.label === 'Payment Method');
+      assert.ok(payment, 'Payment Method radio group must be identified');
+      assert.equal(payment.kind, 'radio');
+      assert.deepEqual(payment.options.map(o => o.label), ['Visa', 'Mastercard', 'Cash']);
+    });
+
+    // 28. Text field populated
+    await runTest(28, 'Text Field Populated', 'Form Population', async () => {
+      const insp = await bm.inspectForms();
+      const res = await bm.fillForm({
+        expectedSnapshotToken: insp.snapshotToken,
+        fields: [{ name: 'Full Name', value: 'John Smith' }]
+      });
+      assert.equal(res.success, true);
+      assert.equal(res.updatedCount, 1);
+      const val = await bm.page.evaluate(() => document.getElementById('full-name').value);
+      assert.equal(val, 'John Smith');
+    });
+
+    // 29. Textarea populated
+    await runTest(29, 'Textarea Field Populated', 'Form Population', async () => {
+      const insp = await bm.inspectForms();
+      const res = await bm.fillForm({
+        expectedSnapshotToken: insp.snapshotToken,
+        fields: [{ name: 'Comments', value: 'Please pack with eco-friendly wrapping.' }]
+      });
+      assert.equal(res.success, true);
+      const val = await bm.page.evaluate(() => document.getElementById('order-comments').value);
+      assert.equal(val, 'Please pack with eco-friendly wrapping.');
+    });
+
+    // 30. Select option populated
+    await runTest(30, 'Select Option Populated', 'Form Population', async () => {
+      const insp = await bm.inspectForms();
+      const res = await bm.fillForm({
+        expectedSnapshotToken: insp.snapshotToken,
+        fields: [{ name: 'Country', value: 'Qatar' }]
+      });
+      assert.equal(res.success, true);
+      const val = await bm.page.evaluate(() => document.getElementById('country-select').value);
+      assert.equal(val, 'QA');
+    });
+
+    // 31. Checkbox checked
+    await runTest(31, 'Checkbox Checked', 'Form Population', async () => {
+      const insp = await bm.inspectForms();
+      const res = await bm.fillForm({
+        expectedSnapshotToken: insp.snapshotToken,
+        fields: [{ name: 'Subscribe to newsletter', checked: true }]
+      });
+      assert.equal(res.success, true);
+      const isChecked = await bm.page.evaluate(() => document.getElementById('subscribe-check').checked);
+      assert.equal(isChecked, true);
+    });
+
+    // 32. Checkbox unchecked
+    await runTest(32, 'Checkbox Unchecked', 'Form Population', async () => {
+      const insp = await bm.inspectForms();
+      const res = await bm.fillForm({
+        expectedSnapshotToken: insp.snapshotToken,
+        fields: [{ name: 'Subscribe to newsletter', checked: false }]
+      });
+      assert.equal(res.success, true);
+      const isChecked = await bm.page.evaluate(() => document.getElementById('subscribe-check').checked);
+      assert.equal(isChecked, false);
+    });
+
+    // 33. Radio option selected
+    await runTest(33, 'Radio Option Selected', 'Form Population', async () => {
+      const insp = await bm.inspectForms();
+      const res = await bm.fillForm({
+        expectedSnapshotToken: insp.snapshotToken,
+        fields: [{ name: 'Payment Method', value: 'Visa' }]
+      });
+      assert.equal(res.success, true);
+      const radioStates = await bm.page.evaluate(() => ({
+        visa: document.querySelector('input[value="visa"]').checked,
+        cash: document.querySelector('input[value="cash"]').checked
+      }));
+      assert.equal(radioStates.visa, true);
+      assert.equal(radioStates.cash, false);
+    });
+
+    // 34. Mixed-form request succeeds
+    await runTest(34, 'Mixed-Form Request Succeeds', 'Form Population', async () => {
+      const insp = await bm.inspectForms();
+      const res = await bm.fillForm({
+        expectedSnapshotToken: insp.snapshotToken,
+        fields: [
+          { name: 'Full Name', value: 'Sarah Connor' },
+          { name: 'Email Address', value: 'sarah@example.com' },
+          { name: 'Country', value: 'United Kingdom' },
+          { name: 'Subscribe to newsletter', checked: true },
+          { name: 'Payment Method', value: 'Mastercard' }
+        ]
+      });
+      assert.equal(res.success, true);
+      assert.equal(res.updatedCount, 5);
+    });
+
+    // 35. Final states verified
+    await runTest(35, 'Final Form States Verified in DOM', 'Form Population', async () => {
+      const domState = await bm.page.evaluate(() => ({
+        name: document.getElementById('full-name').value,
+        email: document.getElementById('email-address').value,
+        country: document.getElementById('country-select').value,
+        subscribe: document.getElementById('subscribe-check').checked,
+        mastercard: document.querySelector('input[value="mastercard"]').checked,
+        visa: document.querySelector('input[value="visa"]').checked
+      }));
+      assert.equal(domState.name, 'Sarah Connor');
+      assert.equal(domState.email, 'sarah@example.com');
+      assert.equal(domState.country, 'UK');
+      assert.equal(domState.subscribe, true);
+      assert.equal(domState.mastercard, true);
+      assert.equal(domState.visa, false);
+    });
+
+    // 36. Submit button NOT clicked
+    await runTest(36, 'Submit Button NOT Clicked', 'Submission Blocking', async () => {
+      const submitted = await bm.page.evaluate(() => window.__submitted);
+      assert.equal(submitted, false, 'Form must not have been submitted');
+    });
+
+    // 37. Navigation does NOT occur
+    await runTest(37, 'Navigation Does NOT Occur During Population', 'Submission Blocking', async () => {
+      const currentUrl = bm.page.url();
+      assert.equal(currentUrl, `${baseUrl}/forms-basic.html`, 'URL must remain unchanged');
+    });
+
+    // 38. Password fill blocked
+    await runTest(38, 'Password Fill Blocked', 'Sensitive Field Protection', async () => {
+      const insp = await bm.inspectForms();
+      let errorThrown = null;
+      try {
+        await bm.fillForm({
+          expectedSnapshotToken: insp.snapshotToken,
+          fields: [{ name: 'Password', value: 'secretPassword123' }]
+        });
+      } catch (err) {
+        errorThrown = err;
+      }
+      assert.ok(errorThrown, 'Must throw error on password fill');
+      assert.equal(errorThrown.code, 'SENSITIVE_FIELD_NOT_ALLOWED');
+      const pwdVal = await bm.page.evaluate(() => document.getElementById('pwd-input').value);
+      assert.equal(pwdVal, '');
+    });
+
+    // 39. File fill blocked
+    await runTest(39, 'File Input Fill Blocked', 'Sensitive Field Protection', async () => {
+      const insp = await bm.inspectForms();
+      let errorThrown = null;
+      try {
+        await bm.fillForm({
+          expectedSnapshotToken: insp.snapshotToken,
+          fields: [{ name: 'Upload Document', value: 'C:/fake/upload.pdf' }]
+        });
+      } catch (err) {
+        errorThrown = err;
+      }
+      assert.ok(errorThrown, 'Must throw error on file input fill');
+      assert.equal(errorThrown.code, 'FILE_INPUT_NOT_ALLOWED');
+    });
+
+    // 40. Disabled field blocked
+    await runTest(40, 'Disabled Field Fill Blocked', 'Form Preflight', async () => {
+      const insp = await bm.inspectForms();
+      let errorThrown = null;
+      try {
+        await bm.fillForm({
+          expectedSnapshotToken: insp.snapshotToken,
+          fields: [{ name: 'Discount Code', value: 'SAVE20' }]
+        });
+      } catch (err) {
+        errorThrown = err;
+      }
+      assert.ok(errorThrown, 'Must throw error on disabled field fill');
+      assert.equal(errorThrown.code, 'TARGET_DISABLED');
+      const val = await bm.page.evaluate(() => document.getElementById('disabled-code').value);
+      assert.equal(val, 'LOCKED');
+    });
+
+    // 41. Readonly field blocked
+    await runTest(41, 'Readonly Field Fill Blocked', 'Form Preflight', async () => {
+      const insp = await bm.inspectForms();
+      let errorThrown = null;
+      try {
+        await bm.fillForm({
+          expectedSnapshotToken: insp.snapshotToken,
+          fields: [{ name: 'Order Reference', value: 'TAMPERED' }]
+        });
+      } catch (err) {
+        errorThrown = err;
+      }
+      assert.ok(errorThrown, 'Must throw error on readonly field fill');
+      assert.equal(errorThrown.code, 'FIELD_READONLY');
+      const val = await bm.page.evaluate(() => document.getElementById('readonly-ref').value);
+      assert.equal(val, 'REF-12345');
+    });
+
+    // 42. Invalid option blocked
+    await runTest(42, 'Invalid Option Fill Blocked', 'Form Preflight', async () => {
+      const insp = await bm.inspectForms();
+      let errorThrown = null;
+      try {
+        await bm.fillForm({
+          expectedSnapshotToken: insp.snapshotToken,
+          fields: [{ name: 'Country', value: 'InvalidCountry' }]
+        });
+      } catch (err) {
+        errorThrown = err;
+      }
+      assert.ok(errorThrown, 'Must throw error on invalid option');
+      assert.equal(errorThrown.code, 'OPTION_NOT_FOUND');
+    });
+
+    // 43. Stale snapshot blocked
+    await runTest(43, 'Stale Snapshot Token Blocked', 'Form Preflight', async () => {
+      let errorThrown = null;
+      try {
+        await bm.fillForm({
+          expectedSnapshotToken: 'stale-token-form-123',
+          fields: [{ name: 'Full Name', value: 'Never Applied' }]
+        });
+      } catch (err) {
+        errorThrown = err;
+      }
+      assert.ok(errorThrown, 'Must throw error on stale snapshot');
+      assert.equal(errorThrown.code, 'TARGET_STALE');
+    });
+
+    // 44. Zero mutation on failed preflight
+    await runTest(44, 'Zero Mutation on Failed Preflight', 'Form Preflight', async () => {
+      // Set baseline in DOM
+      await bm.page.evaluate(() => {
+        document.getElementById('full-name').value = 'Baseline Name';
+      });
+      const insp = await bm.inspectForms();
+      let errorThrown = null;
+      try {
+        await bm.fillForm({
+          expectedSnapshotToken: insp.snapshotToken,
+          fields: [
+            { name: 'Full Name', value: 'Modified Name' },
+            { name: 'Discount Code', value: 'ILLEGAL' } // disabled -> fails preflight
+          ]
+        });
+      } catch (err) {
+        errorThrown = err;
+      }
+      assert.ok(errorThrown, 'Must reject before mutating any field');
+      assert.equal(errorThrown.code, 'TARGET_DISABLED');
+
+      // Crucial check: Full Name must STILL be Baseline Name
+      const currentName = await bm.page.evaluate(() => document.getElementById('full-name').value);
+      assert.equal(currentName, 'Baseline Name', 'Baseline field must remain unmutated on preflight failure');
+    });
+
+    // 45. Form validation state observed safely
+    await runTest(45, 'Form Validation State Observed Safely', 'Form Validation', async () => {
+      await bm.navigate(`${baseUrl}/forms-validation.html`);
+      await bm.syncDynamicState();
+      const insp = await bm.inspectForms();
+      assert.equal(insp.success, true);
+      const valForm = insp.forms[0];
+      assert.ok(valForm, 'Validation form must be detected');
+
+      // Check username field validity
+      const userField = valForm.fields.find(f => f.name === 'username');
+      assert.ok(userField, 'Username field must exist');
+      assert.ok(userField.validity, 'Validity metadata must be extracted');
+      assert.equal(userField.validity.valid, false, 'Empty required username must be invalid');
+      assert.equal(userField.validity.issue, 'valueMissing');
+
+      // Check email field validity
+      const emailField = valForm.fields.find(f => f.name === 'userEmail');
+      assert.ok(emailField, 'User email field must exist');
+      assert.ok(emailField.validity, 'Validity metadata must be extracted');
+      assert.equal(emailField.validity.valid, false, 'Empty required email must be invalid');
+      assert.equal(emailField.validity.issue, 'valueMissing');
+
+      // Populate age with invalid value (15, below min 18) directly in DOM
+      await bm.page.evaluate(() => {
+        const ageEl = document.getElementById('val-age');
+        ageEl.value = '15';
+      });
+      await bm.syncDynamicState();
+      const insp2 = await bm.inspectForms();
+      const ageField = insp2.forms[0].fields.find(f => f.name === 'age');
+      assert.ok(ageField, 'Age field must exist');
+      assert.ok(ageField.validity);
+      assert.equal(ageField.validity.valid, false);
+      assert.equal(ageField.validity.issue, 'rangeUnderflow');
+    });
+
+    // 46. Dynamic form mutation invalidates old snapshot
+    await runTest(46, 'Dynamic Form Mutation Invalidates Old Snapshot', 'Dynamic Forms & Atomicity', async () => {
+      await bm.navigate(`${baseUrl}/forms-dynamic.html`);
+      await bm.syncDynamicState();
+      const oldInsp = await bm.inspectForms();
+
+      // Trigger dynamic DOM mutation
+      await bm.page.evaluate(() => document.getElementById('btn-toggle-gift').click());
+      await bm.syncDynamicState();
+
+      let errorThrown = null;
+      try {
+        await bm.fillForm({
+          expectedSnapshotToken: oldInsp.snapshotToken,
+          fields: [{ name: 'Add Gift Wrapping', checked: true }]
+        });
+      } catch (err) {
+        errorThrown = err;
+      }
+      assert.ok(errorThrown, 'Must reject old snapshot after dynamic DOM mutation');
+      assert.equal(errorThrown.code, 'TARGET_STALE');
+    });
+
+    // 47. Page A/Page B isolation
+    await runTest(47, 'Multi-Page Form Isolation', 'Cross-Page Form Isolation', async () => {
+      // Page A is forms-dynamic.html
+      const pageAId = bm.activePageId;
+
+      // Open Page B with forms-multiple.html
+      const pageBRes = await bm.openPage(`${baseUrl}/forms-multiple.html`);
+      const pageBId = pageBRes.pageId;
+      await bm.syncDynamicState();
+
+      // Inspect Page B
+      const inspB = await bm.inspectForms();
+      assert.equal(inspB.pageId, pageBId);
+      assert.equal(inspB.forms.length, 2);
+
+      // Switch back to Page A
+      await bm.switchPage(pageAId);
+      await bm.syncDynamicState();
+      const inspA = await bm.inspectForms();
+      assert.equal(inspA.pageId, pageAId);
+
+      // Fill Page A
+      const fillResA = await bm.fillForm({
+        expectedSnapshotToken: inspA.snapshotToken,
+        fields: [{ name: 'Add Gift Wrapping', checked: true }]
+      });
+      assert.equal(fillResA.success, true);
+      assert.equal(fillResA.pageId, pageAId);
+
+      // Verify Page A mutated
+      const giftChecked = await bm.page.evaluate(() => document.getElementById('gift-check').checked);
+      assert.equal(giftChecked, true);
+
+      // Verify Page B unmutated by switching to Page B
+      await bm.switchPage(pageBId);
+      const bStreetVal = await bm.page.evaluate(() => document.getElementById('ship-street').value);
+      assert.equal(bStreetVal, '', 'Page B must remain untouched');
+
+      // Close Page B
+      await bm.closePage(pageBId);
+      assert.equal(bm.activePageId, pageAId);
+    });
+
+    // 48. Cleanup succeeds
+    await runTest(48, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
+      await bm.close();
+      assert.equal(bm.isBrowserConnected(), false);
+      assert.equal(bm.pageCount, 0);
+      assert.equal(bm.state.toLowerCase(), 'stopped');
+    });
+
   } finally {
     // Strict automatic cleanup: close browser, stop fixture server
     if (bm) {
@@ -512,6 +934,14 @@ async function main() {
     'Snapshot Integrity',
     'Multi-Page Isolation',
     'Cross-Page Snapshot Binding',
+    'Form Discovery',
+    'Form Population',
+    'Form Preflight',
+    'Form Validation',
+    'Sensitive Field Protection',
+    'Submission Blocking',
+    'Dynamic Forms & Atomicity',
+    'Cross-Page Form Isolation',
     'Cleanup'
   ];
 
@@ -529,10 +959,10 @@ async function main() {
 
   console.log('--------------------------------------------------');
   console.log(`Tests:\n${passed}/${total} PASS\n`);
-  console.log(`Exit Code:\n${passed === total && total >= 25 ? 0 : 1}`);
+  console.log(`Exit Code:\n${passed === total && total >= 48 ? 0 : 1}`);
   console.log('==================================================');
 
-  if (passed !== total || total < 25) {
+  if (passed !== total || total < 48) {
     process.exit(1);
   }
 }

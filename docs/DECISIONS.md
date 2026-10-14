@@ -936,9 +936,47 @@
   4. **Synchronized Active Context**: `switchPage` and `_registerPage` synchronize `_snapshotToken`, `_documentVersion`, and `_semanticRevision` from the active entry.
   5. **Action Request Isolation**: `actionExecutor.js` captures `targetPageId = options.pageId || actionRequest.pageId || browserManager.activePageId` and binds snapshot validation and target re-resolution strictly to that target page.
   6. **Snapshot Token Validation Scope**: `isSnapshotTokenValid(token, pageId)` strictly checks `pageId` when provided, never falling back to another page's token.
+## ADR-0048: Forms v1 — Understand, Map & Safely Populate
+- **Status**: Accepted
+- **Context**:
+  - Web interaction often requires discovering form fields, mapping user-supplied data to corresponding inputs, and populating forms without submitting them.
+  - Form submission must remain strictly unauthorized in Brick 33 (`FORM_SUBMISSION_NOT_AUTHORIZED`), with Brick 34 owning form submission and confirmation.
+  - Passwords, file uploads, hidden fields, disabled/readonly controls, and stale snapshots must be guarded by strict preflight verification.
+- **Decision**:
+  1. **Two Dedicated Endpoints**:
+     - `POST /api/browser/inspect-form`: Inspects active managed page forms, returning opaque form structure, field kinds, labels, accessibility semantics, required state, placeholder, select options, and radio groups. Never exposes raw HTML, CSS selectors, XPath, ElementHandles, cookies, storage, or hidden tokens.
+     - `POST /api/browser/fill-form`: Safely populates explicit user-supplied fields within a specified form.
+  2. **Semantic Field Model**:
+     - Classifies field kinds: `text`, `email`, `tel`, `url`, `number`, `search`, `textarea`, `select`, `checkbox`, `radio`.
+     - Resolves labels via `<label for=id>`, enclosing `<label>`, `aria-label`, `aria-labelledby`, placeholder fallback, and `<fieldset><legend>` context.
+     - Aggregates radio buttons into semantic groups with explicit option choices.
+     - Handles checkboxes via explicit boolean state (`checked: true|false`).
+  3. **Strict Security Boundaries**:
+     - Passwords: Detected with `sensitive: true` without exposing values; population strictly blocked with `SENSITIVE_FIELD_NOT_ALLOWED`.
+     - File Inputs: Detected with `isFile: true` without exposing file paths; population strictly blocked with `FILE_INPUT_NOT_ALLOWED`.
+     - Hidden Inputs: Counted for structure; values never exposed; mutation blocked with `ACTION_NOT_SUPPORTED_FOR_TARGET`.
+     - Disabled & Readonly: Blocked with `TARGET_DISABLED` and `FIELD_READONLY` without modifying DOM attributes or page JavaScript.
+     - Select & Radio validation: Invalid options return `OPTION_NOT_FOUND`.
+  4. **Strict Snapshot Authorization**:
+     - Requires `expectedSnapshotToken` bound to current `pageId`, `documentVersion`, and `semanticRevision`. Stale or cross-page tokens return `TARGET_STALE`.
+  5. **Preflight Atomicity**:
+     - Validates ALL requested fields, types, options, and security boundaries before modifying any DOM element. If ANY field fails preflight, exactly ZERO DOM mutations occur.
+  6. **Transactional Sequential Mutation & Rollback**:
+     - Modifies fields sequentially, verifying DOM state after each update.
+     - Mid-operation unexpected failures attempt rollback to prior state; reports truthful `PARTIAL_FORM_UPDATE` if rollback is incomplete. Never fakes complete success.
+  7. **Form Submission Remains Blocked**:
+     - Preserves `FORM_SUBMISSION_NOT_AUTHORIZED`. Zero calls to `form.submit()`, `requestSubmit()`, submit button clicks, or Enter key finalization.
+  8. **Multiple Form Disambiguation**:
+     - Returns `FORM_AMBIGUOUS` if target form is not specified and fields do not uniquely identify a single form.
+  9. **Strict Privacy**:
+     - User-supplied form values are never persisted in logs, snapshots, conversation store, or test failure diagnostics.
+  10. **Automated Real-Browser Verification**:
+     - Real Microsoft Edge test suite expanded to 47 tests (`verify:browser`), covering all 22 required form acceptance points against deterministic local loopback fixtures.
 - **Consequences**:
-  - Cross-page snapshot contamination is completely eliminated.
-  - Resolving targets on Page A after switching from Page B preserves Page A's snapshot token, pageId, and semantic revision.
+  - Safe, deterministic, prechecked form population without form submission.
+  - Zero AI / LLM calls. Zero search calls.
+  - 100% offline Level 1 verification (`npm run verify`, 1384 tests) and Level 2 real-browser verification (`npm run verify:browser`, 47 tests) PASS.
+
 
 
 

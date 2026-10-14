@@ -408,6 +408,39 @@
       <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; display: none;" id="dynamic-result-label">Dynamic Result:</div>
       <div id="dynamic-result" class="response-area" style="display: none; max-height: 240px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
     </div>
+
+    <!-- Brick 33 Forms Section (Forms) -->
+    <div id="browser-forms-section" class="mic-section">
+      <div style="font-size: 0.95rem; font-weight: 600; color: #38bdf8; text-align: left; margin-bottom: 4px;">Forms</div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <button type="button" id="inspect-forms-btn">Inspect Forms</button>
+        <select id="form-select" style="padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;">
+          <option value="">(Select Form)</option>
+        </select>
+      </div>
+      <div id="forms-status" class="mic-status">Forms: Idle</div>
+      <div id="forms-meta" class="mic-meta" style="display: none; white-space: pre-wrap;"></div>
+      <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; display: none;" id="forms-inventory-label">Form Fields:</div>
+      <div id="forms-inventory" class="response-area" style="display: none; max-height: 240px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
+
+      <div style="font-size: 0.9rem; font-weight: 600; color: #38bdf8; text-align: left; margin-top: 12px; margin-bottom: 4px;">Populate Form</div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <input type="text" id="populate-snapshot-token" placeholder="Expected Snapshot Token" style="flex: 1; min-width: 180px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <input type="text" id="populate-form-id" placeholder="Form ID (e.g. form_0, optional)" style="width: 180px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+      </div>
+      <div id="populate-fields-container" style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px;">
+        <div class="populate-field-row" style="display: flex; gap: 8px;">
+          <input type="text" class="field-name-input" placeholder="Field Name / Label" style="flex: 1; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+          <input type="text" class="field-value-input" placeholder="Value / Checked (true/false) / Option" style="flex: 1; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        </div>
+      </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+        <button type="button" id="add-field-row-btn" class="secondary">+ Add Field</button>
+        <button type="button" id="populate-form-btn">Populate Form</button>
+      </div>
+      <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; display: none;" id="forms-result-label">Population Result:</div>
+      <div id="forms-result" class="response-area" style="display: none; max-height: 240px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
+    </div>
   </div>
 
   <script type="module">
@@ -2777,6 +2810,270 @@
           }
         } finally {
           dynamicWaitTargetBtn.disabled = false;
+        }
+      });
+    }
+
+    // Brick 33 Forms Section Handlers
+    const inspectFormsBtn = document.getElementById('inspect-forms-btn');
+    const formSelect = document.getElementById('form-select');
+    const formsStatus = document.getElementById('forms-status');
+    const formsMeta = document.getElementById('forms-meta');
+    const formsInventoryLabel = document.getElementById('forms-inventory-label');
+    const formsInventory = document.getElementById('forms-inventory');
+    const populateSnapshotToken = document.getElementById('populate-snapshot-token');
+    const populateFormId = document.getElementById('populate-form-id');
+    const populateFieldsContainer = document.getElementById('populate-fields-container');
+    const addFieldRowBtn = document.getElementById('add-field-row-btn');
+    const populateFormBtn = document.getElementById('populate-form-btn');
+    const formsResultLabel = document.getElementById('forms-result-label');
+    const formsResult = document.getElementById('forms-result');
+
+    let currentInspectedForms = [];
+
+    function renderFormInventory(selectedFormId) {
+      if (!formsInventory) return;
+      if (!selectedFormId) {
+        formsInventory.style.display = 'none';
+        if (formsInventoryLabel) formsInventoryLabel.style.display = 'none';
+        return;
+      }
+      const targetForm = currentInspectedForms.find(f => f.formId === selectedFormId);
+      if (!targetForm) {
+        formsInventory.style.display = 'none';
+        if (formsInventoryLabel) formsInventoryLabel.style.display = 'none';
+        return;
+      }
+
+      if (formsInventoryLabel) formsInventoryLabel.style.display = 'block';
+      formsInventory.style.display = 'block';
+
+      const lines = [];
+      lines.push(`Form ID: ${targetForm.formId}`);
+      if (targetForm.name) lines.push(`Name: ${targetForm.name}`);
+      if (targetForm.accessibleName) lines.push(`Accessible Name: ${targetForm.accessibleName}`);
+      lines.push(`Method: ${targetForm.method || 'GET'} | Action: ${targetForm.action || 'none'}`);
+      lines.push(`Total Fields: ${targetForm.fields?.length || 0}`);
+      lines.push('---');
+
+      (targetForm.fields || []).forEach((f, i) => {
+        const parts = [
+          `[${i + 1}]`,
+          f.type ? `<${f.type}>` : `<${f.kind}>`,
+          f.label ? `"${f.label}"` : (f.name ? `name="${f.name}"` : (f.accessibleName ? `"${f.accessibleName}"` : 'unnamed')),
+          f.required ? '(required)' : '',
+          f.disabled ? '(disabled)' : '',
+          f.readonly ? '(readonly)' : '',
+          f.sensitive ? '(sensitive/password)' : '',
+          f.checked !== undefined ? `checked=${f.checked}` : '',
+          f.options ? `options=[${f.options.map(o => o.label).join(', ')}]` : ''
+        ].filter(Boolean);
+        lines.push(parts.join(' '));
+      });
+
+      if (targetForm.buttons && targetForm.buttons.length > 0) {
+        lines.push('--- Buttons ---');
+        targetForm.buttons.forEach((b, i) => {
+          lines.push(`Button [${i + 1}] (${b.type}): "${b.text || b.accessibleName || ''}"`);
+        });
+      }
+
+      formsInventory.textContent = lines.join('\n');
+    }
+
+    if (inspectFormsBtn) {
+      inspectFormsBtn.addEventListener('click', async () => {
+        inspectFormsBtn.disabled = true;
+        if (formsStatus) formsStatus.textContent = 'Forms: Inspecting...';
+        if (formsMeta) formsMeta.style.display = 'none';
+        if (formsInventory) formsInventory.style.display = 'none';
+        if (formsInventoryLabel) formsInventoryLabel.style.display = 'none';
+        if (formsResult) formsResult.style.display = 'none';
+        if (formsResultLabel) formsResultLabel.style.display = 'none';
+
+        try {
+          const res = await fetch('/api/browser/inspect-form', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            currentInspectedForms = data.forms || [];
+            if (formsStatus) formsStatus.textContent = `Forms: Discovered ${data.totalFormsCount || data.forms?.length || 0} form(s)`;
+            if (populateSnapshotToken && data.snapshotToken) {
+              populateSnapshotToken.value = data.snapshotToken;
+            }
+
+            if (formSelect) {
+              formSelect.textContent = '';
+              const defOpt = document.createElement('option');
+              defOpt.value = '';
+              defOpt.textContent = '(Select Form)';
+              formSelect.appendChild(defOpt);
+
+              (data.forms || []).forEach(f => {
+                const opt = document.createElement('option');
+                opt.value = f.formId;
+                opt.textContent = `${f.formId}: ${f.accessibleName || f.name || 'Form'}`;
+                formSelect.appendChild(opt);
+              });
+
+              if (data.forms && data.forms.length === 1) {
+                formSelect.value = data.forms[0].formId;
+                if (populateFormId) populateFormId.value = data.forms[0].formId;
+                renderFormInventory(data.forms[0].formId);
+              }
+            }
+
+            if (formsMeta) {
+              formsMeta.style.display = 'block';
+              formsMeta.textContent = [
+                `Page ID: ${data.pageId}`,
+                `Snapshot Token: ${data.snapshotToken}`,
+                `Forms Found: ${data.totalFormsCount || data.forms?.length || 0}`,
+                `Total Fields: ${data.totalFieldsCount || 0}`,
+                `Inspection Duration: ${data.inspectionDurationMs}ms`
+              ].join('\n');
+            }
+          } else {
+            if (formsStatus) formsStatus.textContent = `Forms: Inspection Failed (${data.code || data.error || 'ERROR'})`;
+            if (formsMeta) {
+              formsMeta.style.display = 'block';
+              formsMeta.textContent = `Error: ${data.message || data.error || 'Failed to inspect forms'}`;
+            }
+          }
+        } catch (err) {
+          if (formsStatus) formsStatus.textContent = 'Forms: Error';
+          if (formsMeta) {
+            formsMeta.style.display = 'block';
+            formsMeta.textContent = `Network Error: ${err.message || 'Request failed'}`;
+          }
+        } finally {
+          inspectFormsBtn.disabled = false;
+        }
+      });
+    }
+
+    if (formSelect) {
+      formSelect.addEventListener('change', () => {
+        const selectedId = formSelect.value;
+        if (populateFormId) populateFormId.value = selectedId;
+        renderFormInventory(selectedId);
+      });
+    }
+
+    if (addFieldRowBtn && populateFieldsContainer) {
+      addFieldRowBtn.addEventListener('click', () => {
+        const row = document.createElement('div');
+        row.className = 'populate-field-row';
+        row.style.display = 'flex';
+        row.style.gap = '8px';
+
+        const nameInp = document.createElement('input');
+        nameInp.type = 'text';
+        nameInp.className = 'field-name-input';
+        nameInp.placeholder = 'Field Name / Label';
+        nameInp.style.flex = '1';
+        nameInp.style.padding = '6px 10px';
+        nameInp.style.background = '#1e293b';
+        nameInp.style.color = '#e2e8f0';
+        nameInp.style.border = '1px solid #475569';
+        nameInp.style.borderRadius = '6px';
+        nameInp.style.fontSize = '0.9rem';
+
+        const valInp = document.createElement('input');
+        valInp.type = 'text';
+        valInp.className = 'field-value-input';
+        valInp.placeholder = 'Value / Checked (true/false) / Option';
+        valInp.style.flex = '1';
+        valInp.style.padding = '6px 10px';
+        valInp.style.background = '#1e293b';
+        valInp.style.color = '#e2e8f0';
+        valInp.style.border = '1px solid #475569';
+        valInp.style.borderRadius = '6px';
+        valInp.style.fontSize = '0.9rem';
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'secondary';
+        removeBtn.textContent = 'X';
+        removeBtn.style.padding = '6px 10px';
+        removeBtn.addEventListener('click', () => {
+          row.remove();
+        });
+
+        row.appendChild(nameInp);
+        row.appendChild(valInp);
+        row.appendChild(removeBtn);
+        populateFieldsContainer.appendChild(row);
+      });
+    }
+
+    if (populateFormBtn) {
+      populateFormBtn.addEventListener('click', async () => {
+        populateFormBtn.disabled = true;
+        if (formsResult) formsResult.style.display = 'none';
+        if (formsResultLabel) formsResultLabel.style.display = 'none';
+
+        const expectedSnapshotToken = (populateSnapshotToken ? populateSnapshotToken.value : '').trim();
+        const formId = (populateFormId ? populateFormId.value : '').trim();
+
+        const fieldRows = populateFieldsContainer ? populateFieldsContainer.querySelectorAll('.populate-field-row') : [];
+        const fields = [];
+
+        fieldRows.forEach(row => {
+          const nameInput = row.querySelector('.field-name-input');
+          const valInput = row.querySelector('.field-value-input');
+          const name = nameInput ? nameInput.value.trim() : '';
+          const rawVal = valInput ? valInput.value.trim() : '';
+
+          if (name) {
+            if (rawVal.toLowerCase() === 'true') {
+              fields.push({ name, checked: true });
+            } else if (rawVal.toLowerCase() === 'false') {
+              fields.push({ name, checked: false });
+            } else {
+              fields.push({ name, value: rawVal });
+            }
+          }
+        });
+
+        const payload = {
+          expectedSnapshotToken,
+          fields
+        };
+        if (formId) payload.formId = formId;
+
+        try {
+          const res = await fetch('/api/browser/fill-form', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+          if (formsResultLabel) formsResultLabel.style.display = 'block';
+          if (formsResult) {
+            formsResult.style.display = 'block';
+            formsResult.textContent = JSON.stringify(data, null, 2);
+          }
+          if (res.ok && data.success) {
+            if (formsStatus) formsStatus.textContent = 'Forms: Form Populated Successfully';
+            if (populateSnapshotToken && data.postSnapshotToken) {
+              populateSnapshotToken.value = data.postSnapshotToken;
+            }
+          } else {
+            if (formsStatus) formsStatus.textContent = `Forms: Populate Failed (${data.code || data.error || 'ERROR'})`;
+          }
+        } catch (err) {
+          if (formsStatus) formsStatus.textContent = 'Forms: Error';
+          if (formsResultLabel) formsResultLabel.style.display = 'block';
+          if (formsResult) {
+            formsResult.style.display = 'block';
+            formsResult.textContent = `Network Error: ${err.message || 'Request failed'}`;
+          }
+        } finally {
+          populateFormBtn.disabled = false;
         }
       });
     }

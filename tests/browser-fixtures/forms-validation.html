@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Validation Form Fixture</title>
+</head>
+<body>
+  <h1>Validation Form</h1>
+  <form id="validation-form" name="validationForm">
+    <div>
+      <label for="val-username">Username</label>
+      <input type="text" id="val-username" name="username" required minlength="3">
+    </div>
+    <div>
+      <label for="val-email">User Email</label>
+      <input type="email" id="val-email" name="userEmail" required>
+    </div>
+    <div>
+      <label for="val-age">Age</label>
+      <input type="number" id="val-age" name="age" min="18" max="120">
+    </div>
+  </form>
+</body>
+</html>

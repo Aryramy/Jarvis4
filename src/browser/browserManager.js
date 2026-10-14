@@ -20,8 +20,10 @@ import { extractDomSnapshot } from './pageInspection.js';
 import { generateSnapshotToken, resolveTargetFromElements, createSafeElementSummary, TargetResolutionError } from './targetResolver.js';
 import { executeSemanticAction, ActionExecutionError } from './actionExecutor.js';
 import { DYNAMIC_TRACKER_SCRIPT } from './dynamicTracker.js';
+import { inspectForms, FormInspectionError } from './formInspector.js';
+import { populateForm, FormPopulationError } from './formPopulator.js';
 
-export { ActionExecutionError };
+export { ActionExecutionError, FormInspectionError, FormPopulationError };
 
 export class BrowserManagerError extends Error {
   /**
@@ -1855,6 +1857,97 @@ export class BrowserManager {
       throw new BrowserManagerError(
         safeMsg || 'Browser action failed.',
         'ACTION_EXECUTION_FAILED'
+      );
+    }
+  }
+
+  /**
+   * Discovers and inspects HTML forms on the active or specified page (Brick 33).
+   *
+   * @param {Object} [options={}]
+   * @param {string} [options.pageId]
+   * @returns {Promise<Object>}
+   */
+  async inspectForms(options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError(
+        'Browser is not running. Please launch the browser first.',
+        'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    const targetPageId = options.pageId || this._activePageId;
+    const entry = this._pages.get(targetPageId);
+    if (!entry || !entry.page || (typeof entry.page.isClosed === 'function' && entry.page.isClosed())) {
+      throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND');
+    }
+
+    await this.syncDynamicState(targetPageId).catch(() => {});
+
+    if (!this.isSnapshotTokenValid(entry.snapshotToken, targetPageId)) {
+      this._invalidateSnapshot(entry.pageId);
+    }
+
+    try {
+      const result = await inspectForms(entry.page, { ...options, pageId: entry.pageId });
+      result.success = true;
+      result.pageId = entry.pageId;
+      result.documentVersion = entry.documentVersion ?? 1;
+      result.semanticRevision = entry.semanticRevision ?? 0;
+      result.snapshotToken = entry.snapshotToken;
+      result.url = typeof entry.page.url === 'function' ? entry.page.url() : entry.currentUrl;
+      return result;
+    } catch (err) {
+      if (err instanceof BrowserManagerError || err instanceof FormInspectionError) {
+        throw err;
+      }
+      throw new BrowserManagerError(
+        'Form inspection failed.',
+        'FORM_INSPECTION_FAILED'
+      );
+    }
+  }
+
+  /**
+   * Safely populates explicit form fields with preflight atomicity and verification (Brick 33).
+   *
+   * @param {Object} populateRequest
+   * @param {Object} [options={}]
+   * @returns {Promise<Object>}
+   */
+  async fillForm(populateRequest, options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError(
+        'Browser is not running. Please launch the browser first.',
+        'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    const targetPageId = options.pageId || populateRequest?.pageId || this._activePageId;
+    const entry = this._pages.get(targetPageId);
+    if (!entry || !entry.page || (typeof entry.page.isClosed === 'function' && entry.page.isClosed())) {
+      throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND');
+    }
+
+    try {
+      return await populateForm(entry.page, this, populateRequest, { ...options, pageId: entry.pageId });
+    } catch (err) {
+      if (err instanceof BrowserManagerError || err instanceof FormPopulationError) {
+        throw err;
+      }
+      let safeMsg = 'Form population failed.';
+      if (err && typeof err.message === 'string') {
+        const firstLine = err.message.split('\n')[0].trim();
+        safeMsg = firstLine.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').trim();
+      }
+      throw new BrowserManagerError(
+        safeMsg || 'Form population failed.',
+        err.code || 'FORM_POPULATION_FAILED',
+        err.details || {}
       );
     }
   }

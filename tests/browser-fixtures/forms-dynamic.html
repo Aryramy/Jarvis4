@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dynamic Form Fixture</title>
+</head>
+<body>
+  <h1>Dynamic Form</h1>
+  <form id="dynamic-form" name="dynamicForm">
+    <div>
+      <label for="gift-check">
+        <input type="checkbox" id="gift-check" name="hasGift">
+        Add Gift Wrapping
+      </label>
+    </div>
+    <div id="conditional-container" style="display: none;">
+      <label for="gift-note">Gift Note</label>
+      <textarea id="gift-note" name="giftNote"></textarea>
+    </div>
+    <button type="button" id="btn-toggle-gift">Toggle Gift Section</button>
+  </form>
+
+  <script>
+    const btn = document.getElementById('btn-toggle-gift');
+    const container = document.getElementById('conditional-container');
+    const check = document.getElementById('gift-check');
+
+    btn.addEventListener('click', () => {
+      container.style.display = container.style.display === 'none' ? 'block' : 'none';
+    });
+
+    check.addEventListener('change', () => {
+      container.style.display = check.checked ? 'block' : 'none';
+    });
+  </script>
+</body>
+</html>

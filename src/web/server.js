@@ -22,7 +22,7 @@ import { PageReaderError } from '../webpage/urlSafety.js';
 import { executePageQa, PageQaError } from '../webpage/pageQa.js';
 import { executeResearchOne, ResearchOneError } from '../research/researchOne.js';
 import { decideBrowserEscalation, BrowserEscalationError } from '../routing/browserEscalation.js';
-import { defaultBrowserManager, BrowserManager, BrowserManagerError } from '../browser/browserManager.js';
+import { defaultBrowserManager, BrowserManager, BrowserManagerError, FormInspectionError, FormPopulationError } from '../browser/browserManager.js';
 import { TargetResolutionError, SUPPORTED_KINDS } from '../browser/targetResolver.js';
 import { ActionExecutionError } from '../browser/actionExecutor.js';
 
@@ -2409,6 +2409,162 @@ export function createRequestListener(options = {}) {
           } else if (errorCode === 'TARGETID_AUTHORIZATION_NOT_ALLOWED') {
             safeMessage = 'Target ID alone cannot authorize target wait. Semantic target description is required.';
           } else if (err instanceof BrowserManagerError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage,
+            details: err.details || {}
+          }));
+        }
+      });
+
+      return;
+    }
+
+    // Route: POST /api/browser/inspect-form (Brick 33 Forms v1)
+    if (url.pathname === '/api/browser/inspect-form') {
+      if (req.method !== 'POST' && req.method !== 'GET') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      const handleInspect = async (parsedBody = {}) => {
+        try {
+          const result = await browserManager.inspectForms({
+            pageId: typeof parsedBody.pageId === 'string' ? parsedBody.pageId : undefined,
+            formId: typeof parsedBody.formId === 'string' ? parsedBody.formId : undefined
+          });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'FORM_INSPECTION_FAILED';
+          let statusCode = 400;
+          if (errorCode === 'BROWSER_NOT_RUNNING') {
+            statusCode = 400;
+          } else if (errorCode === 'PAGE_CLOSED' || errorCode === 'PAGE_NOT_FOUND') {
+            statusCode = 404;
+          } else if (errorCode === 'BROWSER_PAGE_BUSY') {
+            statusCode = 503;
+          } else if (errorCode === 'BROWSER_ERROR' || errorCode === 'FORM_INSPECTION_FAILED') {
+            statusCode = 500;
+          }
+
+          let safeMessage = 'Form inspection failed.';
+          if (errorCode === 'BROWSER_NOT_RUNNING') {
+            safeMessage = 'Browser is not running. Please launch the browser first.';
+          } else if (err instanceof BrowserManagerError || err instanceof FormInspectionError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage
+          }));
+        }
+      };
+
+      if (req.method === 'GET') {
+        handleInspect();
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+      req.on('end', async () => {
+        let parsedBody = {};
+        if (body.trim().length > 0) {
+          try {
+            parsedBody = JSON.parse(body);
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+            return;
+          }
+        }
+        await handleInspect(parsedBody);
+      });
+      return;
+    }
+
+    // Route: POST /api/browser/fill-form (Brick 33 Forms v1)
+    if (url.pathname === '/api/browser/fill-form') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+          return;
+        }
+
+        if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Request body must be an object' }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.fillForm(parsedBody);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'FORM_POPULATION_FAILED';
+          let statusCode = 400;
+          if (errorCode === 'TARGET_STALE') {
+            statusCode = 400;
+          } else if (errorCode === 'PARTIAL_FORM_UPDATE') {
+            statusCode = 500;
+          } else if (errorCode === 'BROWSER_ERROR') {
+            statusCode = 500;
+          }
+
+          let safeMessage = 'Form population failed.';
+          if (errorCode === 'BROWSER_NOT_RUNNING') {
+            safeMessage = 'Browser is not running. Please launch the browser first.';
+          } else if (errorCode === 'TARGET_STALE') {
+            safeMessage = 'Snapshot token is stale or invalid.';
+          } else if (errorCode === 'SENSITIVE_FIELD_NOT_ALLOWED') {
+            safeMessage = 'Password filling is not authorized in Brick 33.';
+          } else if (errorCode === 'FILE_INPUT_NOT_ALLOWED') {
+            safeMessage = 'File input filling is not authorized in Brick 33.';
+          } else if (errorCode === 'FORM_SUBMISSION_NOT_AUTHORIZED') {
+            safeMessage = 'Form submission is not authorized.';
+          } else if (errorCode === 'TARGET_DISABLED') {
+            safeMessage = 'Target field is disabled.';
+          } else if (errorCode === 'FIELD_READONLY') {
+            safeMessage = 'Target field is readonly.';
+          } else if (errorCode === 'FORM_AMBIGUOUS') {
+            safeMessage = 'Multiple forms exist on the page. Please specify formId.';
+          } else if (err instanceof BrowserManagerError || err instanceof FormPopulationError) {
             safeMessage = typeof err.message === 'string'
               ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
               : safeMessage;
