@@ -24,8 +24,9 @@ import { inspectForms, FormInspectionError } from './formInspector.js';
 import { populateForm, FormPopulationError } from './formPopulator.js';
 import { prepareFormSubmission, executeFormSubmission, getConfirmationToken, clearConfirmationTokens, FormSubmissionError } from './formSubmitter.js';
 import { SessionVault, SessionVaultError, generateSessionId, isValidSessionId } from './sessionVault.js';
+import { HumanHandoffManager, HumanHandoffError, HANDOFF_REASONS, HANDOFF_STATES, clampHandoffTtl, toSafeHandoffMetadata } from './humanHandoff.js';
 
-export { ActionExecutionError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError };
+export { ActionExecutionError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError, HumanHandoffError, HANDOFF_REASONS, HANDOFF_STATES };
 
 export class BrowserManagerError extends Error {
   /**
@@ -131,6 +132,13 @@ export class BrowserManager {
     });
     this._selectedSessionId = null;
     this._loadedSessionId = null;
+
+    this._handoffTtlMs = clampHandoffTtl(options.handoffTtlMs ?? config.browser?.handoffTtlMs ?? 300000);
+    this._handoffManager = options.handoffManager || new HumanHandoffManager({
+      browserManager: this,
+      defaultTtlMs: this._handoffTtlMs
+    });
+    this._handoffManager.setBrowserManager(this);
 
     this._launchPromise = null;
     this._closePromise = null;
@@ -570,7 +578,9 @@ export class BrowserManager {
       selectedSessionId: this._selectedSessionId || null,
       loadedSessionId: this._loadedSessionId || null,
       sessionProfileLoaded: Boolean(this._loadedSessionId),
-      sessionStateRestored: Boolean(this._loadedSessionId)
+      sessionStateRestored: Boolean(this._loadedSessionId),
+      handoffActive: this.isHandoffActive(),
+      activeHandoff: this.getHandoffStatus()
     };
   }
 
@@ -898,6 +908,7 @@ export class BrowserManager {
           }
         }
       } finally {
+        this._handoffManager?.onContextClosed();
         this._cleanupReferences();
         this._state = BROWSER_STATES.STOPPED;
         this._closePromise = null;
@@ -930,6 +941,9 @@ export class BrowserManager {
     const browserToClose = this._browser;
     const contextToClose = this._context;
     const pagesToClose = Array.from(this._pages.values()).map(e => e.page);
+
+    // Invalidate active handoffs on session termination
+    this._handoffManager?.onContextClosed();
 
     // Immediately mark lifecycle as no longer usable and clear references
     this._cleanupReferences();
@@ -1093,6 +1107,14 @@ export class BrowserManager {
       throw new BrowserManagerError(
         'Browser is not running. Please launch the browser first.',
         'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    if (this._handoffManager && this._handoffManager.isHandoffActive(this._activePageId)) {
+      throw new BrowserManagerError(
+        'Action blocked: human handoff is currently active on this page. Complete sign-in in the Edge window and resume, or cancel the handoff.',
+        'HUMAN_HANDOFF_ACTIVE',
+        { pageId: this._activePageId, handoff: this._handoffManager.getStatus(this._activePageId).handoff }
       );
     }
 
@@ -1361,6 +1383,14 @@ export class BrowserManager {
       );
     }
 
+    if (this._handoffManager && this._handoffManager.isHandoffActive(this._activePageId)) {
+      throw new BrowserManagerError(
+        'Action blocked: human handoff is currently active on this page. Complete sign-in in the Edge window and resume, or cancel the handoff.',
+        'HUMAN_HANDOFF_ACTIVE',
+        { pageId: this._activePageId, handoff: this._handoffManager.getStatus(this._activePageId).handoff }
+      );
+    }
+
     const navTimeout = Math.max(1, Number(options.timeoutMs ?? this._navTimeoutMs)) || 15000;
     let response = null;
 
@@ -1438,6 +1468,14 @@ export class BrowserManager {
       );
     }
 
+    if (this._handoffManager && this._handoffManager.isHandoffActive(this._activePageId)) {
+      throw new BrowserManagerError(
+        'Action blocked: human handoff is currently active on this page. Complete sign-in in the Edge window and resume, or cancel the handoff.',
+        'HUMAN_HANDOFF_ACTIVE',
+        { pageId: this._activePageId, handoff: this._handoffManager.getStatus(this._activePageId).handoff }
+      );
+    }
+
     const navTimeout = Math.max(1, Number(options.timeoutMs ?? this._navTimeoutMs)) || 15000;
     let response = null;
 
@@ -1511,6 +1549,14 @@ export class BrowserManager {
       throw new BrowserManagerError(
         'Browser is not running. Please launch the browser first.',
         'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    if (this._handoffManager && this._handoffManager.isHandoffActive(this._activePageId)) {
+      throw new BrowserManagerError(
+        'Action blocked: human handoff is currently active on this page. Complete sign-in in the Edge window and resume, or cancel the handoff.',
+        'HUMAN_HANDOFF_ACTIVE',
+        { pageId: this._activePageId, handoff: this._handoffManager.getStatus(this._activePageId).handoff }
       );
     }
 
@@ -1910,6 +1956,13 @@ export class BrowserManager {
       throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND');
     }
 
+    if (this.isHandoffActive(targetPageId)) {
+      throw new BrowserManagerError(
+        'A human authentication handoff is currently active on this page. Automation is paused.',
+        'HUMAN_HANDOFF_ACTIVE'
+      );
+    }
+
     try {
       return await executeSemanticAction(entry.page, this, actionRequest, { ...options, pageId: entry.pageId });
     } catch (err) {
@@ -2000,6 +2053,13 @@ export class BrowserManager {
       throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND');
     }
 
+    if (this.isHandoffActive(targetPageId)) {
+      throw new BrowserManagerError(
+        'A human authentication handoff is currently active on this page. Form population is paused.',
+        'HUMAN_HANDOFF_ACTIVE'
+      );
+    }
+
     try {
       return await populateForm(entry.page, this, populateRequest, { ...options, pageId: entry.pageId });
     } catch (err) {
@@ -2041,6 +2101,13 @@ export class BrowserManager {
     const entry = this._pages.get(targetPageId);
     if (!entry || !entry.page || (typeof entry.page.isClosed === 'function' && entry.page.isClosed())) {
       throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND');
+    }
+
+    if (this.isHandoffActive(targetPageId)) {
+      throw new BrowserManagerError(
+        'A human authentication handoff is currently active on this page. Form submission preparation is paused.',
+        'HUMAN_HANDOFF_ACTIVE'
+      );
     }
 
     try {
@@ -2093,6 +2160,13 @@ export class BrowserManager {
     const entry = this._pages.get(targetPageId);
     if (!entry || !entry.page || (typeof entry.page.isClosed === 'function' && entry.page.isClosed())) {
       throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND');
+    }
+
+    if (this.isHandoffActive(targetPageId)) {
+      throw new BrowserManagerError(
+        'A human authentication handoff is currently active on this page. Form submission is paused.',
+        'HUMAN_HANDOFF_ACTIVE'
+      );
     }
 
     try {
@@ -2211,6 +2285,9 @@ export class BrowserManager {
 
     // Cancel dynamic waiters for this closed page (Brick 32)
     this._cancelDynamicWaiters(pageId, new BrowserManagerError('Page closed while waiting.', 'PAGE_CLOSED'));
+
+    // Invalidate human handoffs for this closed page (Brick 36)
+    this._handoffManager?.onPageClosed(pageId);
 
     // Invalidate snapshots for the closed page (Brick 31 Live Fix A)
     entry.snapshotToken = null;
@@ -3338,6 +3415,7 @@ export class BrowserManager {
 
       // b. Invalidate all form confirmation tokens immediately (Brick 35 Section 22)
       clearConfirmationTokens();
+      this._handoffManager?.onContextClosed();
 
       // c. Safely close all existing managed pages
       const oldPages = Array.from(this._pages.values()).map(e => e.page);
@@ -3470,6 +3548,145 @@ export class BrowserManager {
       this._loadedSessionId = null;
     }
     return result;
+  }
+
+  /**
+   * Returns internal page entry by pageId.
+   *
+   * @param {string} pageId
+   * @returns {Object|null}
+   */
+  getPageEntry(pageId) {
+    if (!pageId) return null;
+    return this._pages.get(pageId) || null;
+  }
+
+  /**
+   * Human handoff manager getter.
+   */
+  get handoffManager() {
+    return this._handoffManager;
+  }
+
+  /**
+   * Checks whether a human handoff boundary is currently active on the page.
+   *
+   * @param {string} [pageId]
+   * @returns {boolean}
+   */
+  isHandoffActive(pageId = null) {
+    if (!this._handoffManager) return false;
+    const targetPageId = pageId || this._activePageId;
+    return this._handoffManager.isHandoffActive(targetPageId);
+  }
+
+  /**
+   * Checks whether an active handoff is in an authentication-sensitive category.
+   *
+   * @param {string} [pageId]
+   * @returns {boolean}
+   */
+  isSensitiveHandoffActive(pageId = null) {
+    if (!this._handoffManager) return false;
+    const targetPageId = pageId || this._activePageId;
+    return this._handoffManager.isSensitiveHandoffActive(targetPageId);
+  }
+
+  /**
+   * Evaluates diagnostic screenshot policy (Section 33 & 47).
+   *
+   * @param {string} [pageId]
+   * @param {Object} [options]
+   * @returns {{ allowed: boolean, reason?: string, message?: string }}
+   */
+  canCaptureDiagnosticScreenshot(pageId = null, options = {}) {
+    if (!this._handoffManager) return { allowed: true };
+    const targetPageId = pageId || this._activePageId;
+    return this._handoffManager.canCaptureScreenshot(targetPageId, options);
+  }
+
+  /**
+   * Safe screenshot capture respecting authentication privacy rules.
+   *
+   * @param {Object} [options]
+   * @returns {Promise<Buffer>}
+   */
+  async takeScreenshot(options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError('Browser is not running.', 'BROWSER_NOT_RUNNING');
+    }
+
+    const pageId = options.pageId || this._activePageId;
+    const isExplicit = Boolean(options.isExplicit ?? options.explicitUserRequest);
+    const policy = this.canCaptureDiagnosticScreenshot(pageId, { explicitUserRequest: isExplicit });
+    if (!policy.allowed) {
+      throw new BrowserManagerError(policy.message, policy.reason);
+    }
+
+    const pageEntry = this._pages.get(pageId);
+    if (!pageEntry || !pageEntry.page || (typeof pageEntry.page.isClosed === 'function' && pageEntry.page.isClosed())) {
+      throw new BrowserManagerError('Target page not found or closed.', 'PAGE_NOT_FOUND', { pageId });
+    }
+
+    return await pageEntry.page.screenshot(options);
+  }
+
+  /**
+   * Gets overall handoff status for a page or active page.
+   *
+   * @param {string} [pageId]
+   * @returns {{ active: boolean, status: string, state: string, handoff: Object|null }}
+   */
+  getHandoffStatus(pageId = null) {
+    if (!this._handoffManager) {
+      return { active: false, status: HANDOFF_STATES.IDLE, state: HANDOFF_STATES.IDLE, handoff: null };
+    }
+    const targetPageId = pageId || this._activePageId;
+    return this._handoffManager.getStatus(targetPageId);
+  }
+
+  /**
+   * Initiates human handoff boundary on managed page (Brick 36).
+   *
+   * @param {Object} request
+   * @param {Object} [options]
+   * @returns {Promise<Object>}
+   */
+  async startHandoff(request = {}, options = {}) {
+    if (!this._handoffManager) {
+      throw new BrowserManagerError('Human handoff subsystem is not initialized.', 'SUB_SYSTEM_NOT_AVAILABLE');
+    }
+    return await this._handoffManager.startHandoff(request, options);
+  }
+
+  /**
+   * Resumes handoff after human completes interaction in Edge (Brick 36).
+   *
+   * @param {Object} request
+   * @param {Object} [options]
+   * @returns {Promise<Object>}
+   */
+  async resumeHandoff(request = {}, options = {}) {
+    if (!this._handoffManager) {
+      throw new BrowserManagerError('Human handoff subsystem is not initialized.', 'SUB_SYSTEM_NOT_AVAILABLE');
+    }
+    return await this._handoffManager.resumeHandoff(request, options);
+  }
+
+  /**
+   * Cancels an active human handoff (Brick 36).
+   *
+   * @param {string|Object} request
+   * @param {Object} [options]
+   * @returns {Promise<Object>}
+   */
+  async cancelHandoff(request = {}, options = {}) {
+    if (!this._handoffManager) {
+      throw new BrowserManagerError('Human handoff subsystem is not initialized.', 'SUB_SYSTEM_NOT_AVAILABLE');
+    }
+    return await this._handoffManager.cancelHandoff(request, options);
   }
 }
 

@@ -399,10 +399,10 @@ Currently tracked issues in JARVIS4:
     - **Atomic Cross-Page Isolation**: Tokens cannot be submitted across pages (`CROSS_PAGE_TOKEN_BLOCKED`). Switching active pages does not mutate or submit unselected pages.
     - **Zero AI / Zero Search**: 0 LLM calls, 0 search calls. Local loopback fixtures only.
 
-28. **Human-Authenticated Persistent Browser Sessions v1 & Local Device Session Vault Observations & Limitations (Brick 35 In Progress)**:
+28. **Human-Authenticated Persistent Browser Sessions v1 & Local Device Session Vault Observations & Limitations (Brick 35 Verified)**:
     - **Human Authentication Model (Not Autonomous Login)**: JARVIS launches an isolated Edge context where the human manually signs into websites. Saving session state is an explicit user action (`POST /api/browser/sessions/save`), strictly never automated or triggered by URL changes, cookies appearing, or browser closure.
     - **Zero Password Automation**: Interacting with, reading, filling, generating, or saving passwords remains strictly prohibited. No credentials are saved or handled by JARVIS.
-    - **Zero MFA / CAPTCHA Bypass**: No MFA interception, TOTP token handling, or CAPTCHA solving. Brick 36 will own structured handoff for human continuation.
+    - **Zero MFA / CAPTCHA Bypass**: No MFA interception, TOTP token handling, or CAPTCHA solving. Brick 36 owns structured handoff for human continuation.
     - **Storage State Boundaries & Supported Technologies**:
       - HttpOnly and standard cookies: SUPPORTED and persisted across browser restarts.
       - localStorage: SUPPORTED and persisted across browser restarts.
@@ -411,6 +411,18 @@ Currently tracked issues in JARVIS4:
     - **Local Device Protection & Fail-Closed Behavior**: Production session ciphertext is protected using Windows DPAPI (`DataProtectionScope.CurrentUser`). If DPAPI is unavailable, the system strictly fails closed with `SESSION_VAULT_UNAVAILABLE` with ZERO fallback to unencrypted plaintext.
     - **Strict Isolation & Old State Invalidation**: Restoring or activating a session invalidates all previous page IDs, snapshot tokens, target IDs, and form confirmation tokens. Cross-session leakage is strictly prevented.
     - **Sensitive Artifact Protection**: Auth tokens, cookies, passwords, and storage states are never exposed in UI, REST responses, logs, debug output, docs, or Git. Safe profiles only expose opaque session IDs (`sess_...`), human-readable labels, timestamps, and origin hostnames.
+
+29. **Human Authentication Handoff, Continuation, MFA & CAPTCHA Experience v1 Observations & Limitations (Brick 36 In Progress)**:
+    - **Human Boundary vs. Automation**: Human interacts directly with the real JARVIS Edge window. JARVIS never automates, generates, stores, reads, or inputs passwords, MFA codes, OTPs, or CAPTCHA answers.
+    - **Deterministic Pause Boundary**: While a handoff is active on a bound page, mutating browser actions through JARVIS are blocked with `HUMAN_HANDOFF_ACTIVE` (`click`, `fill`, `fillForm`, `prepareFormSubmission`, `submitForm`, `navigate`, `back`, `forward`, `refresh`).
+    - **Explicit Human Resume**: Resume is explicitly triggered by the human (`POST /api/browser/handoff/resume`) declaring that human action was completed. Resume does not automatically imply success; fresh DOM state is re-inspected and deterministic verification contracts (`url-changed`, `url-equals`, `url-contains`, `target-present`, `target-absent`, `text-present`, `text-absent`) are evaluated.
+    - **Truthful Repeated Resume Policy**: Verification failure transitions state to `NOT_CLEARED` and returns controlled `HANDOFF_NOT_CLEARED` without automated retry polling loops. The human may make further attempts before bounded TTL expires.
+    - **Opaque IDs & Bounded TTL**: Handoff IDs use opaque `handoff_<timestamp>_<randomHex>` format. TTL is clamped to [1000, 1800000] ms with a default of 300,000 ms (5 minutes). Expired handoffs are blocked from resuming (`HANDOFF_EXPIRED`).
+    - **Bound Page & Context Invalidation**: Handoffs are bound strictly to a single managed page. Page closure invalidates the handoff (`PAGE_CLOSED`). Context replacement or session change invalidates the handoff (`HANDOFF_CONTEXT_CHANGED`). Any pre-auth form confirmation tokens are cleared.
+    - **Cross-Window / Popup Auth Flows**: If human authentication opens a separate window or tab that cannot be reliably bound, resume fails safely with `HANDOFF_NEW_PAGE_REQUIRES_USER` rather than guessing.
+    - **Diagnostic Screenshot Suppression**: While a sensitive handoff (`LOGIN_REQUIRED`, `MFA_REQUIRED`, `CAPTCHA_REQUIRED`) is active, automatic failure screenshot capture is strictly suppressed (`SCREENSHOT_SUPPRESSED_DURING_AUTH`) to prevent accidental visual capture of human credential entry.
+    - **Explicit Session Save Rule**: Successful handoff verification never automatically triggers Save Session. Preserves GREEN-035 rule: session profiles may only be saved via explicit user request.
+    - **Zero AI / Zero Search**: Exactly 0 LLM calls, 0 OpenRouter calls, 0 search calls. Local loopback fixtures only.
 
 
 

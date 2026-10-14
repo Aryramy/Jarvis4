@@ -140,7 +140,14 @@ const REQUIRED_FILES = [
   'tests/unit/browserManagerSession.test.js',
   'tests/contract/sessionEndpoints.test.js',
   'tests/browser-fixtures/auth-login.html',
-  'tests/browser-fixtures/auth-protected.html'
+  'tests/browser-fixtures/auth-protected.html',
+  'src/browser/humanHandoff.js',
+  'tests/unit/humanHandoff.test.js',
+  'tests/contract/handoffEndpoints.test.js',
+  'tests/browser-fixtures/auth-handoff-login.html',
+  'tests/browser-fixtures/auth-handoff-mfa.html',
+  'tests/browser-fixtures/auth-handoff-captcha.html',
+  'tests/browser-fixtures/auth-handoff-success.html'
 ];
 
 const REQUIRED_DIRS = [
@@ -542,6 +549,40 @@ check('Browser Session Vault Module Sanity Check', async () => {
   });
   if (origins.length !== 2 || JSON.stringify(origins).includes('secret')) {
     throw new Error('extractSafeOrigins failed sanity check or leaked secret');
+  }
+});
+
+check('Human Handoff Subsystem Module Sanity Check (Brick 36)', async () => {
+  const {
+    HumanHandoffManager,
+    HumanHandoffError,
+    HANDOFF_REASONS,
+    HANDOFF_STATES,
+    generateHandoffId,
+    isValidHandoffId,
+    clampHandoffTtl,
+    toSafeHandoffMetadata
+  } = await import('../src/browser/humanHandoff.js');
+
+  if (typeof HumanHandoffManager !== 'function' || typeof HumanHandoffError !== 'function') {
+    throw new Error('humanHandoff module failed to export required classes');
+  }
+  const hid = generateHandoffId();
+  if (!isValidHandoffId(hid) || !hid.startsWith('handoff_')) {
+    throw new Error('generateHandoffId or isValidHandoffId failed sanity check');
+  }
+  if (clampHandoffTtl(50) !== 1000 || clampHandoffTtl(99999999) !== 1800000) {
+    throw new Error('clampHandoffTtl failed sanity check');
+  }
+  const safeMeta = toSafeHandoffMetadata({
+    handoffId: hid,
+    reason: HANDOFF_REASONS.LOGIN_REQUIRED,
+    status: HANDOFF_STATES.PAUSED_FOR_HUMAN,
+    secretPassword: 'leaked_secret',
+    cookie: 'leaked_cookie'
+  });
+  if (safeMeta.secretPassword || safeMeta.cookie) {
+    throw new Error('toSafeHandoffMetadata leaked sensitive fields');
   }
 });
 

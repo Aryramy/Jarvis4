@@ -52,10 +52,19 @@ export function generateConfirmationToken() {
 }
 
 /**
- * Clears all in-memory confirmation tokens (useful for test resets).
+ * Clears in-memory confirmation tokens (optionally filtered by pageId).
+ * @param {string} [filterPageId]
  */
-export function clearConfirmationTokens() {
-  confirmationTokens.clear();
+export function clearConfirmationTokens(filterPageId) {
+  if (!filterPageId) {
+    confirmationTokens.clear();
+  } else {
+    for (const [key, val] of confirmationTokens.entries()) {
+      if (val.pageId === filterPageId) {
+        confirmationTokens.delete(key);
+      }
+    }
+  }
 }
 
 /**
@@ -64,12 +73,13 @@ export function clearConfirmationTokens() {
  * @param {Object} [record={}]
  */
 export function registerTestConfirmationToken(token, record = {}) {
+  const tokenRecord = typeof record === 'string' ? { pageId: record } : record;
   confirmationTokens.set(token, {
     confirmationToken: token,
     createdAt: Date.now(),
     expiresAt: Date.now() + 60000,
     used: false,
-    ...record
+    ...tokenRecord
   });
 }
 

@@ -103,7 +103,10 @@ BRICK-034 — Confirmed Form Submission & Result Verification v1
 Status: VERIFIED
 
 BRICK-035 — Human-Authenticated Persistent Browser Sessions v1 (Local Device Session Vault)
-Status: IN PROGRESS (Awaiting Checkpoint)
+Status: VERIFIED
 
 BRICK-036 — Human Authentication Handoff, Continuation, MFA & CAPTCHA Experience
+Status: IN PROGRESS (Awaiting Checkpoint)
+
+BRICK-037 — File Downloads & Uploads v1
 Status: NOT STARTED / NOT AUTHORIZED

@@ -73,6 +73,7 @@ JARVIS4 distinguishes five distinct harness layers across development, verificat
     - Semantic form inspection, label resolution, and safe transactional population.
     - Confirmed form submission, single-use confirmation tokens, and evidence verification.
     - Human-authenticated persistent session vault, DPAPI protection, and lifecycle restore.
+    - Human authentication handoff, safe pause boundary, mutating action blocking, explicit human resume, fresh state re-inspection, deterministic barrier clearance verification, repeated explicit resume policy, and diagnostic screenshot suppression.
 
 ### Layer C: Development Agent Harness (Coding Agent Governance)
 - **Status**: `PARTIAL / PLANNED`
@@ -230,6 +231,10 @@ All other mechanics—including form mechanics, state transitions, token invalid
   - Extended harness to validate local device session vault with Windows DPAPI CurrentUser encryption.
   - Added synthetic authentication fixtures (`/auth/login`, `/auth/protected`).
   - Validated HttpOnly cookie and localStorage cross-lifecycle persistence, session A/B isolation, and old token/page invalidation.
+- **BRICK-036**:
+  - Extended Level 2 real-browser harness from 70 to 82 tests across 26 categories.
+  - Added deterministic human handoff scenarios: login handoff, MFA approval, CAPTCHA solving simulation, explicit human resume, fresh DOM state re-inspection, deterministic evidence verification, repeated explicit resume policy, action blocking (`HUMAN_HANDOFF_ACTIVE`), sensitive screenshot suppression (`SCREENSHOT_SUPPRESSED_DURING_AUTH`), bound page close invalidation, cross-page isolation, and pre-auth form confirmation token invalidation.
+  - Extended Level 1 offline test harness from 1452 to 1490 tests across 188 suites.
 
 ---
 

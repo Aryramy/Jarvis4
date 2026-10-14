@@ -18,6 +18,8 @@ import { BrowserManager, FormInspectionError, FormPopulationError, FormSubmissio
 import { startFixtureServer } from '../tests/browser-fixtures/server.js';
 import { TargetResolutionError } from '../src/browser/targetResolver.js';
 import { ActionExecutionError } from '../src/browser/actionExecutor.js';
+import { HANDOFF_REASONS, HANDOFF_STATES } from '../src/browser/humanHandoff.js';
+import { registerTestConfirmationToken, getConfirmationToken } from '../src/browser/formSubmitter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,7 +47,9 @@ async function recordFailureEvidence(testName, bm, err) {
         if (bm.page && typeof bm.page.url === 'function') {
           currentUrl = bm.page.url();
         }
-        if (bm.page && typeof bm.page.screenshot === 'function' && !bm.page.isClosed?.()) {
+        if (bm.canCaptureDiagnosticScreenshot && !bm.canCaptureDiagnosticScreenshot(pageId).allowed) {
+          // Automatic screenshot capture is suppressed during sensitive auth handoffs (Section 47)
+        } else if (bm.page && typeof bm.page.screenshot === 'function' && !bm.page.isClosed?.()) {
           await bm.page.screenshot({ path: screenshotPath }).catch(() => {});
         }
       } catch {}
@@ -1478,8 +1482,231 @@ async function main() {
       assert.equal(afterList.some(s => s.sessionId === savedExpired.sessionId), false);
     });
 
-    // 70. Real browser cleanup succeeds
-    await runTest(70, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
+    // 70. Login handoff pause, guidance, and action blocking
+    let loginHandoff = null;
+    await runTest(70, 'Login Handoff Pause, Guidance, and Action Blocking', 'Human Handoff (Brick 36)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/auth-handoff-login.html`, { allowLoopbackTest: true });
+      const snapToken = bm.snapshotToken;
+
+      const startRes = await bm.startHandoff({
+        reason: HANDOFF_REASONS.LOGIN_REQUIRED,
+        verification: { type: 'url-contains', targetUrl: 'auth-handoff-success.html' }
+      });
+      assert.equal(startRes.success, true);
+      assert.ok(startRes.handoff);
+      assert.equal(startRes.handoff.status, HANDOFF_STATES.PAUSED_FOR_HUMAN);
+      assert.equal(startRes.handoff.reason, HANDOFF_REASONS.LOGIN_REQUIRED);
+      assert.ok(startRes.handoff.guidance);
+      loginHandoff = startRes.handoff;
+
+      // Verify mutating action through JARVIS is blocked while handoff is active
+      let actionErr = null;
+      try {
+        await bm.executeAction({
+          action: 'click',
+          target: { kind: 'button', text: 'Sign in' },
+          expectedSnapshotToken: snapToken
+        });
+      } catch (err) {
+        actionErr = err;
+      }
+      assert.ok(actionErr);
+      assert.equal(actionErr.code, 'HUMAN_HANDOFF_ACTIVE');
+    });
+
+    // 71. Sensitive screenshot suppression during active handoff
+    await runTest(71, 'Sensitive Screenshot Suppression During Active Handoff', 'Human Handoff (Brick 36)', async () => {
+      const policy = bm.canCaptureDiagnosticScreenshot();
+      assert.equal(policy.allowed, false);
+      assert.equal(policy.reason, 'SCREENSHOT_SUPPRESSED_DURING_AUTH');
+
+      let shotErr = null;
+      try {
+        await bm.takeScreenshot();
+      } catch (err) {
+        shotErr = err;
+      }
+      assert.ok(shotErr);
+      assert.equal(shotErr.code, 'SCREENSHOT_SUPPRESSED_DURING_AUTH');
+
+      // Explicit user diagnostics are permitted
+      const explicitPolicy = bm.canCaptureDiagnosticScreenshot(null, { explicitUserRequest: true });
+      assert.equal(explicitPolicy.allowed, true);
+    });
+
+    // 72. Verification failure returns NOT_CLEARED without automatic polling loop
+    await runTest(72, 'Verification Failure Returns NOT_CLEARED without Loop', 'Human Handoff (Brick 36)', async () => {
+      // Human has not completed login yet -> resume evaluates verification and returns NOT_CLEARED
+      const resumeRes = await bm.resumeHandoff({ handoffId: loginHandoff.handoffId });
+      assert.equal(resumeRes.success, false);
+      assert.equal(resumeRes.verified, false);
+      assert.equal(resumeRes.status, HANDOFF_STATES.NOT_CLEARED);
+      assert.equal(resumeRes.code, 'HANDOFF_NOT_CLEARED');
+      assert.equal(bm.isHandoffActive(), true);
+    });
+
+    // 73. Simulate human direct Edge interaction and successful explicit resume verification
+    await runTest(73, 'Simulate Human Edge Action & Successful Resume Verification', 'Human Handoff (Brick 36)', async () => {
+      // Test harness simulates human clicking the button directly in Edge (representing human action)
+      await bm.page.click('#synthetic-human-login-btn');
+      await bm.page.waitForURL('**/auth-handoff-success.html');
+
+      // Human clicks resume in Control Center
+      const resumeRes = await bm.resumeHandoff({ handoffId: loginHandoff.handoffId });
+      assert.equal(resumeRes.success, true);
+      assert.equal(resumeRes.verified, true);
+      assert.equal(resumeRes.status, HANDOFF_STATES.VERIFIED);
+      assert.ok(resumeRes.page.snapshotToken);
+      assert.equal(bm.isHandoffActive(), false);
+    });
+
+    // 74. One-time completion rejects repeated resume
+    await runTest(74, 'One-Time Completion Rejects Repeated Resume', 'Human Handoff (Brick 36)', async () => {
+      let repeatErr = null;
+      try {
+        await bm.resumeHandoff({ handoffId: loginHandoff.handoffId });
+      } catch (err) {
+        repeatErr = err;
+      }
+      assert.ok(repeatErr);
+      assert.equal(repeatErr.code, 'HANDOFF_ALREADY_COMPLETED');
+    });
+
+    // 75. MFA handoff and human second-factor approval simulation
+    await runTest(75, 'MFA Handoff & Second-Factor Approval Simulation', 'Human Handoff (Brick 36)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/auth-handoff-mfa.html`, { allowLoopbackTest: true });
+      const mfaStart = await bm.startHandoff({
+        reason: HANDOFF_REASONS.MFA_REQUIRED,
+        verification: { type: 'text-present', text: 'Authenticated Fixture' }
+      });
+      assert.equal(mfaStart.handoff.status, HANDOFF_STATES.PAUSED_FOR_HUMAN);
+
+      // Harness simulates external human second factor approval in Edge
+      await bm.page.click('#synthetic-human-mfa-btn');
+      await bm.page.waitForURL('**/auth-handoff-success.html');
+
+      const mfaResume = await bm.resumeHandoff({ handoffId: mfaStart.handoff.handoffId });
+      assert.equal(mfaResume.verified, true);
+      assert.equal(mfaResume.status, HANDOFF_STATES.VERIFIED);
+    });
+
+    // 76. CAPTCHA handoff and human solve simulation
+    await runTest(76, 'CAPTCHA Handoff & Human Solve Simulation', 'Human Handoff (Brick 36)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/auth-handoff-captcha.html`, { allowLoopbackTest: true });
+      const captchaStart = await bm.startHandoff({
+        reason: HANDOFF_REASONS.CAPTCHA_REQUIRED,
+        verification: { type: 'url-changed' }
+      });
+      assert.equal(captchaStart.handoff.status, HANDOFF_STATES.PAUSED_FOR_HUMAN);
+
+      // Harness simulates human solving CAPTCHA challenge in Edge
+      await bm.page.click('#synthetic-human-captcha-btn');
+      await bm.page.waitForURL('**/auth-handoff-success.html');
+
+      const captchaResume = await bm.resumeHandoff({ handoffId: captchaStart.handoff.handoffId });
+      assert.equal(captchaResume.verified, true);
+      assert.equal(captchaResume.status, HANDOFF_STATES.VERIFIED);
+    });
+
+    // 77. Explicit handoff cancellation
+    await runTest(77, 'Explicit Handoff Cancellation', 'Human Handoff (Brick 36)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/auth-handoff-login.html`, { allowLoopbackTest: true });
+      const cancelStart = await bm.startHandoff({
+        reason: HANDOFF_REASONS.USER_INTERACTION_REQUIRED
+      });
+      assert.equal(bm.isHandoffActive(), true);
+
+      const cancelRes = await bm.cancelHandoff({ handoffId: cancelStart.handoff.handoffId });
+      assert.equal(cancelRes.status, HANDOFF_STATES.CANCELLED);
+      assert.equal(bm.isHandoffActive(), false);
+
+      let doubleCancelErr = null;
+      try {
+        await bm.cancelHandoff({ handoffId: cancelStart.handoff.handoffId });
+      } catch (err) {
+        doubleCancelErr = err;
+      }
+      assert.ok(doubleCancelErr);
+      assert.equal(doubleCancelErr.code, 'HANDOFF_ALREADY_COMPLETED');
+    });
+
+    // 78. TTL expiry invalidation on real browser
+    await runTest(78, 'TTL Expiry Invalidation on Real Browser', 'Human Handoff (Brick 36)', async () => {
+      const expStart = await bm.startHandoff({
+        reason: HANDOFF_REASONS.LOGIN_REQUIRED,
+        ttlMs: 1000
+      });
+      await new Promise(r => setTimeout(r, 1100));
+
+      let expErr = null;
+      try {
+        await bm.resumeHandoff({ handoffId: expStart.handoff.handoffId });
+      } catch (err) {
+        expErr = err;
+      }
+      assert.ok(expErr);
+      assert.equal(expErr.code, 'HANDOFF_EXPIRED');
+    });
+
+    // 79. Bound page close invalidation
+    await runTest(79, 'Bound Page Close Invalidation', 'Human Handoff (Brick 36)', async () => {
+      const p2 = await bm.openPage();
+      const p2Handoff = await bm.startHandoff({
+        pageId: p2.pageId,
+        reason: HANDOFF_REASONS.LOGIN_REQUIRED
+      });
+      assert.equal(bm.isHandoffActive(p2.pageId), true);
+
+      await bm.closePage(p2.pageId);
+
+      let closeErr = null;
+      try {
+        await bm.resumeHandoff({ handoffId: p2Handoff.handoff.handoffId });
+      } catch (err) {
+        closeErr = err;
+      }
+      assert.ok(closeErr);
+      assert.ok(closeErr.code === 'PAGE_CLOSED' || closeErr.code === 'HANDOFF_NEW_PAGE_REQUIRES_USER');
+    });
+
+    // 80. Cross-page isolation during handoff
+    await runTest(80, 'Cross-Page Isolation During Handoff', 'Human Handoff (Brick 36)', async () => {
+      const activeP1 = bm.activePageId;
+      const hP1 = await bm.startHandoff({
+        pageId: activeP1,
+        reason: HANDOFF_REASONS.LOGIN_REQUIRED
+      });
+      assert.equal(bm.isHandoffActive(activeP1), true);
+
+      // Open second page
+      const p2 = await bm.openPage();
+      assert.equal(bm.isHandoffActive(p2.pageId), false);
+
+      // Second page operations are NOT blocked by page 1's handoff
+      await bm.navigate(`${fixtureServer.baseUrl}/static.html`, { allowLoopbackTest: true });
+      const statP2 = await bm.getPageStatus();
+      assert.equal(statP2.pageOpen, true);
+
+      // Clean up
+      await bm.closePage(p2.pageId);
+      await bm.cancelHandoff({ handoffId: hP1.handoff.handoffId });
+    });
+
+    // 81. Pre-auth form confirmation token invalidation
+    await runTest(81, 'Pre-Auth Form Confirmation Token Invalidation', 'Human Handoff (Brick 36)', async () => {
+      const token = 'conf_brick36_test_pre_auth';
+      registerTestConfirmationToken(token, { pageId: bm.activePageId });
+      assert.ok(getConfirmationToken(token));
+
+      await bm.startHandoff({
+        reason: HANDOFF_REASONS.LOGIN_REQUIRED
+      });
+      assert.equal(getConfirmationToken(token), undefined);
+      await bm.cancelHandoff({ handoffId: bm.getHandoffStatus().handoff.handoffId });
+    });
+
+    // 82. Real browser cleanup succeeds
+    await runTest(82, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
       await bm.close();
       assert.equal(bm.isBrowserConnected(), false);
       assert.equal(bm.pageCount, 0);
@@ -1534,6 +1761,7 @@ async function main() {
     'Single-Use & Duplicate Prevention',
     'Cross-Page Submission Isolation',
     'Session Persistence & Isolation',
+    'Human Handoff (Brick 36)',
     'Cleanup'
   ];
 
@@ -1551,10 +1779,10 @@ async function main() {
 
   console.log('--------------------------------------------------');
   console.log(`Tests:\n${passed}/${total} PASS\n`);
-  console.log(`Exit Code:\n${passed === total && total >= 70 ? 0 : 1}`);
+  console.log(`Exit Code:\n${passed === total && total >= 82 ? 0 : 1}`);
   console.log('==================================================');
 
-  if (passed !== total || total < 70) {
+  if (passed !== total || total < 82) {
     process.exit(1);
   }
 }

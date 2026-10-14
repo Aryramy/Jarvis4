@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Sign in - Synthetic Authentication Barrier</title>
+  <style>
+    body { font-family: sans-serif; margin: 40px; background: #f9f9f9; }
+    .card { background: white; padding: 24px; border-radius: 8px; border: 1px solid #ccc; max-width: 400px; }
+    .btn { background: #0066cc; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+    .note { margin-top: 12px; font-size: 13px; color: #666; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1 id="page-heading">Sign in</h1>
+    <div id="barrier-desc">Please sign in to continue to protected resource.</div>
+    <form id="synthetic-login-form" style="margin-top: 16px;">
+      <div style="margin-bottom: 12px;">
+        <label for="username">Username</label><br>
+        <input type="text" id="username" name="username" value="synth_user" autocomplete="off">
+      </div>
+      <div style="margin-bottom: 12px;">
+        <label for="password">Password</label><br>
+        <input type="password" id="password" name="password" value="********" autocomplete="off">
+      </div>
+      <!-- Test-only synthetic action button representing human interaction in Edge window -->
+      <button type="button" id="synthetic-human-login-btn" class="btn">Sign in</button>
+    </form>
+    <div class="note">Complete sign-in in this window, then resume automation.</div>
+  </div>
+
+  <script>
+    document.getElementById('synthetic-human-login-btn').addEventListener('click', () => {
+      // Human completes login -> navigates to authenticated page
+      window.location.href = '/auth-handoff-success.html';
+    });
+  </script>
+</body>
+</html>

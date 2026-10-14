@@ -1058,6 +1058,54 @@
   - Complete protection of sensitive credentials; zero password automation.
   - Level 1 offline test suite (1452 tests across 175 suites) and Level 2 real Edge browser test suite (70 tests across 25 categories) PASS cleanly.
 
+## ADR-0051: Human Authentication Handoff, Continuation, MFA & CAPTCHA Experience v1 (Brick 36)
+- **Status**: Accepted
+- **Context**:
+  - Web navigation and automation frequently encounter authentication barriers: login forms, second-factor MFA (push/SMS/TOTP), CAPTCHAs, and expired sessions.
+  - Automating credentials, cracking/solving CAPTCHAs, or bypassing bot protections creates unacceptable security vulnerabilities and violates core JARVIS design principles.
+  - Brick 36 establishes a deterministic human handoff subsystem:
+    1. Automation pauses safely when an authentication barrier is detected or requested.
+    2. JARVIS provides safe guidance ("Complete authentication directly in Edge. Do not enter credentials here.").
+    3. Human interacts directly with the real JARVIS-owned Microsoft Edge window (entering username, password, approving MFA, or solving CAPTCHA).
+    4. Mutating actions via JARVIS APIs are strictly blocked with `HUMAN_HANDOFF_ACTIVE` while paused.
+    5. Human explicitly clicks Resume in the Control Center.
+    6. JARVIS re-inspects fresh DOM state and evaluates deterministic verification conditions (`url-changed`, `url-equals`, `url-contains`, `target-present`, `target-absent`, `text-present`, `text-absent`).
+    7. Success transitions to `VERIFIED`; failure returns `NOT_CLEARED` (`HANDOFF_NOT_CLEARED`) without automated polling loops.
+- **Decision**:
+  1. **Strict State Machine**:
+     - States: `IDLE`, `PAUSED_FOR_HUMAN`, `RESUMING`, `VERIFIED`, `NOT_CLEARED`, `EXPIRED`, `CANCELLED`.
+     - Exactly one active handoff per browser page/context.
+  2. **Controlled Reason Codes**:
+     - `LOGIN_REQUIRED`, `MFA_REQUIRED`, `CAPTCHA_REQUIRED`, `USER_INTERACTION_REQUIRED`, `CONSENT_REQUIRED`, `SESSION_EXPIRED`.
+  3. **Zero Credential / MFA / CAPTCHA Automation**:
+     - Exactly 0 password typing, reading, storing, generating, or scraping.
+     - Exactly 0 OTP reading, TOTP generation, or push MFA auto-approval.
+     - Exactly 0 CAPTCHA solving, bypass, or third-party solving services.
+     - All sensitive interactions occur directly in the Microsoft Edge window by the human user.
+  4. **Safe Pause Boundary**:
+     - Mutating actions (`click`, `fill`, `executeAction`, `fillForm`, `prepareFormSubmission`, `submitForm`, `navigate`, `back`, `forward`, `refresh`) return `HUMAN_HANDOFF_ACTIVE`.
+     - Read-only inspection and status monitoring remain available.
+  5. **Explicit Resume & Verification Contract**:
+     - `POST /api/browser/handoff/resume` requires human trigger; zero automated polling or looping.
+     - Evaluates deterministic verification evidence from fresh dynamic state. Never reuses old snapshots.
+     - Repeated resume policy: A handoff may receive multiple explicit resume attempts before bounded TTL expires. Failed evaluation transitions to `NOT_CLEARED` and returns controlled `HANDOFF_NOT_CLEARED`.
+  6. **Opaque IDs & Bounded TTL**:
+     - Format: `handoff_<timestamp>_<randomHex>` (zero secrets, usernames, or tokens).
+     - TTL clamped to [1000, 1800000] ms with default 300,000 ms (`BROWSER_HANDOFF_TTL_MS`). Expired handoffs transition to `EXPIRED`.
+  7. **Strict Privacy & Sensitive Observation Mode**:
+     - UI, logs, and API responses never expose credentials, OTPs, CAPTCHAs, cookies, tokens, or storage.
+     - Automatic failure screenshot capture is suppressed during sensitive handoff states (`SCREENSHOT_SUPPRESSED_DURING_AUTH`).
+  8. **Isolation & Invalidation**:
+     - Bound strictly to a single page. Page close marks `PAGE_CLOSED`.
+     - Browser context replacement or session change marks `HANDOFF_CONTEXT_CHANGED`.
+     - Starting handoff invalidates pre-existing form confirmation tokens on the page.
+     - Successful handoff does NOT automatically call Save Session (preserves GREEN-035 rule).
+  9. **Zero AI / Zero External Dependencies**:
+     - Exactly 0 LLM calls, 0 search calls. Local loopback fixtures only.
+- **Consequences**:
+  - Deterministic, safe, privacy-preserving human authentication handoff subsystem.
+  - Level 1 offline test suite (1490 tests across 188 suites) and Level 2 real Edge browser test suite (82 tests across 26 categories) PASS cleanly.
+
 
 
 

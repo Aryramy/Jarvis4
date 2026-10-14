@@ -22,7 +22,7 @@ import { PageReaderError } from '../webpage/urlSafety.js';
 import { executePageQa, PageQaError } from '../webpage/pageQa.js';
 import { executeResearchOne, ResearchOneError } from '../research/researchOne.js';
 import { decideBrowserEscalation, BrowserEscalationError } from '../routing/browserEscalation.js';
-import { defaultBrowserManager, BrowserManager, BrowserManagerError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError } from '../browser/browserManager.js';
+import { defaultBrowserManager, BrowserManager, BrowserManagerError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError, HumanHandoffError } from '../browser/browserManager.js';
 import { TargetResolutionError, SUPPORTED_KINDS } from '../browser/targetResolver.js';
 import { ActionExecutionError } from '../browser/actionExecutor.js';
 
@@ -3043,6 +3043,190 @@ export function createRequestListener(options = {}) {
               ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
               : safeMessage;
           }
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage
+          }));
+        }
+      });
+      return;
+    }
+
+    // Route: GET /api/browser/handoff/status & GET /api/browser/handoff (Brick 36 Human Handoff)
+    if ((url.pathname === '/api/browser/handoff/status' || url.pathname === '/api/browser/handoff') && req.method === 'GET') {
+      const pageId = url.searchParams.get('pageId') || null;
+      const status = browserManager.getHandoffStatus(pageId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        ...status
+      }));
+      return;
+    }
+
+    // Route: POST /api/browser/handoff/start (Brick 36 Human Handoff)
+    if (url.pathname === '/api/browser/handoff/start') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.startHandoff(parsedBody);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'HANDOFF_START_FAILED';
+          let statusCode = 400;
+          if (errorCode === 'BROWSER_NOT_RUNNING') {
+            statusCode = 400;
+          } else if (errorCode === 'PAGE_NOT_FOUND' || errorCode === 'PAGE_CLOSED') {
+            statusCode = 404;
+          } else if (errorCode === 'HANDOFF_ALREADY_ACTIVE' || errorCode === 'TARGET_STALE') {
+            statusCode = 409;
+          }
+
+          let safeMessage = err.message || 'Failed to start human handoff.';
+          if (err instanceof BrowserManagerError || err instanceof HumanHandoffError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage
+          }));
+        }
+      });
+      return;
+    }
+
+    // Route: POST /api/browser/handoff/resume (Brick 36 Human Handoff)
+    if (url.pathname === '/api/browser/handoff/resume') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.resumeHandoff(parsedBody);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'HANDOFF_RESUME_FAILED';
+          let statusCode = 400;
+          if (errorCode === 'HANDOFF_NOT_FOUND') {
+            statusCode = 404;
+          } else if (errorCode === 'PAGE_CLOSED' || errorCode === 'HANDOFF_EXPIRED') {
+            statusCode = 410;
+          } else if (errorCode === 'HANDOFF_ALREADY_COMPLETED' || errorCode === 'HANDOFF_CONTEXT_CHANGED' || errorCode === 'HANDOFF_NEW_PAGE_REQUIRES_USER') {
+            statusCode = 409;
+          }
+
+          let safeMessage = err.message || 'Failed to resume human handoff.';
+          if (err instanceof BrowserManagerError || err instanceof HumanHandoffError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage
+          }));
+        }
+      });
+      return;
+    }
+
+    // Route: POST /api/browser/handoff/cancel (Brick 36 Human Handoff)
+    if (url.pathname === '/api/browser/handoff/cancel') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.cancelHandoff(parsedBody);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'HANDOFF_CANCEL_FAILED';
+          let statusCode = 400;
+          if (errorCode === 'HANDOFF_NOT_FOUND') {
+            statusCode = 404;
+          } else if (errorCode === 'HANDOFF_ALREADY_COMPLETED') {
+            statusCode = 409;
+          }
+
+          let safeMessage = err.message || 'Failed to cancel human handoff.';
+          if (err instanceof BrowserManagerError || err instanceof HumanHandoffError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
           res.writeHead(statusCode, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             success: false,

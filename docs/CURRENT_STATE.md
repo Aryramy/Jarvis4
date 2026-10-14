@@ -1,11 +1,45 @@
 Project: JARVIS4
-Current Brick: 35
-Status: BRICK-035 IN PROGRESS (Human-Authenticated Persistent Browser Sessions v1; Local Device Session Vault; Harness-First / No Password Automation)
-Last Verified Brick: BRICK-034
-Current Feature: Human-Authenticated Persistent Browser Sessions v1 & Local Device Session Vault
-Next Feature: NOT AUTHORIZED (Brick 36: Human Authentication Handoff, Continuation, MFA, & CAPTCHA Experience — NOT STARTED)
+Current Brick: 36
+Status: BRICK-036 IN PROGRESS (Human Authentication Handoff, Continuation, MFA & CAPTCHA Experience v1; Harness-First / Zero Password Automation)
+Last Verified Brick: BRICK-035
+Current Feature: Human Authentication Handoff, Continuation, MFA & CAPTCHA Experience v1
+Next Feature: NOT AUTHORIZED (Brick 37: File Downloads & Uploads v1 — NOT STARTED)
 
 ## Working capabilities
+
+- Human Authentication Handoff, Continuation, MFA & CAPTCHA Experience v1 (Brick 36) deterministic human handoff subsystem (`src/browser/humanHandoff.js`, `browserManager.js`, `server.js`, `index.html`):
+  - Deterministic State Machine:
+    - States: `IDLE`, `PAUSED_FOR_HUMAN`, `RESUMING`, `VERIFIED`, `NOT_CLEARED`, `EXPIRED`, `CANCELLED`.
+    - Single active handoff bound atomically to managed `pageId`, `documentVersion`, `semanticRevision`, `snapshotToken`, and loaded session profile.
+  - Authorized Reason Codes:
+    - `LOGIN_REQUIRED`, `MFA_REQUIRED`, `CAPTCHA_REQUIRED`, `USER_INTERACTION_REQUIRED`, `CONSENT_REQUIRED`, `SESSION_EXPIRED`.
+  - Human Interaction Boundary & Zero Credential Automation:
+    - Human interacts directly with the real JARVIS-owned Microsoft Edge window.
+    - Exactly 0 password typing, reading, storing, generating, or scraping.
+    - Exactly 0 OTP/SMS/email code reading, TOTP generation, or push MFA auto-approval.
+    - Exactly 0 CAPTCHA solving, bypassing, or external solving service integration.
+  - Safe Pause Boundary:
+    - Automation for the bound page pauses safely; mutating JARVIS actions return `HUMAN_HANDOFF_ACTIVE` (`click`, `fill`, `fillForm`, `prepareFormSubmission`, `submitForm`, `navigate`, etc.).
+  - Explicit Human Resume Contract:
+    - Resume endpoint (`POST /api/browser/handoff/resume`) signals that human interaction completed in Edge.
+    - Does NOT automatically assume success; immediately invalidates old snapshots, re-inspects fresh DOM state, and evaluates deterministic verification contracts (`url-changed`, `url-equals`, `url-contains`, `target-present`, `target-absent`, `text-present`, `text-absent`).
+    - Bounded Repeated Resume Policy: Verification failure transitions to `NOT_CLEARED` and returns `HANDOFF_NOT_CLEARED` without automated polling loops. Explicit human resume attempts are permitted until TTL expiration.
+  - Opaque IDs & Clamped TTL:
+    - Opaque identifier format: `handoff_<timestamp>_<randomHex>` (zero secrets or usernames encoded).
+    - Configurable TTL: `BROWSER_HANDOFF_TTL_MS` (default 300,000 ms, clamped between 1000 and 1,800,000 ms). Expired handoffs are blocked from resuming (`HANDOFF_EXPIRED`).
+  - Page & Context Isolation:
+    - Bound strictly to a single page; page closing cancels handoff (`PAGE_CLOSED`).
+    - Context replacement or session changes invalidate the handoff (`HANDOFF_CONTEXT_CHANGED`).
+    - Pre-auth form confirmation tokens on the page are immediately invalidated upon handoff start.
+    - Preserves GREEN-035 rule: successful handoff never auto-saves session state.
+  - Sensitive Observation Mode & Diagnostic Screenshot Suppression:
+    - Automatic failure screenshot capture is suppressed during active sensitive handoffs (`SCREENSHOT_SUPPRESSED_DURING_AUTH`).
+    - Zero leaks of passwords, OTPs, CAPTCHAs, cookies, tokens, or storage in APIs, logs, or UI.
+  - Developer Control Center UI:
+    - "Human Handoff (Login / MFA / CAPTCHA)" section displaying Status, Reason, Page ID, Remaining Time, safe banner, and Start/Resume/Cancel/Refresh buttons using strictly `.textContent` DOM updates.
+  - Verification Evidence:
+    - 1490/1490 offline unit, contract, and regression tests PASS (`npm run verify`).
+    - 82/82 real-browser acceptance tests across 26 categories PASS on Microsoft Edge (`npm run verify:browser`).
 
 - Human-Authenticated Persistent Browser Sessions v1 (Brick 35) deterministic local session vault and safe context restoration subsystem (`src/browser/sessionVault.js`, `browserManager.js`, `server.js`, `index.html`):
   - Human Manual Authentication Model:

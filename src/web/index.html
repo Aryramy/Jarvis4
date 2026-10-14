@@ -492,6 +492,36 @@
         <div style="color: #64748b; font-size: 0.85rem;">No saved sessions found.</div>
       </div>
     </div>
+
+    <!-- Human Handoff Section (Brick 36) -->
+    <div id="human-handoff-section" style="margin-top: 16px; border: 1px solid #334155; border-radius: 8px; padding: 12px; background: #0f172a;">
+      <h3 style="margin: 0 0 8px 0; font-size: 1rem; color: #f59e0b;">Human Handoff (Login / MFA / CAPTCHA)</h3>
+      <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; font-size: 0.85rem; color: #fbbf24; font-weight: 500;">
+        Complete authentication directly in Edge. Do not enter credentials here.
+      </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <select id="handoff-reason-select" style="padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;">
+          <option value="LOGIN_REQUIRED">LOGIN_REQUIRED</option>
+          <option value="MFA_REQUIRED">MFA_REQUIRED</option>
+          <option value="CAPTCHA_REQUIRED">CAPTCHA_REQUIRED</option>
+          <option value="USER_INTERACTION_REQUIRED">USER_INTERACTION_REQUIRED</option>
+          <option value="CONSENT_REQUIRED">CONSENT_REQUIRED</option>
+          <option value="SESSION_EXPIRED">SESSION_EXPIRED</option>
+        </select>
+        <button type="button" id="start-handoff-btn">Start Handoff</button>
+        <button type="button" id="resume-handoff-btn">Resume After Human Action</button>
+        <button type="button" id="cancel-handoff-btn">Cancel Handoff</button>
+        <button type="button" id="refresh-handoff-btn">Refresh Status</button>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; font-size: 0.85rem; color: #94a3b8; margin-bottom: 8px;">
+        <div>Status: <span id="handoff-status-display" style="color: #f1f5f9; font-weight: 600;">IDLE</span></div>
+        <div>Reason: <span id="handoff-reason-display" style="color: #f1f5f9; font-weight: 600;">(None)</span></div>
+        <div>Page ID: <span id="handoff-page-display" style="color: #f1f5f9; font-weight: 600;">(None)</span></div>
+        <div>Time: <span id="handoff-time-display" style="color: #f1f5f9; font-weight: 600;">(None)</span></div>
+      </div>
+      <div style="font-size: 0.82rem; color: #94a3b8; margin-bottom: 4px;">Guidance: <span id="handoff-guidance-display" style="color: #e2e8f0;">No active handoff.</span></div>
+      <div id="handoff-status-msg" style="font-size: 0.82rem; color: #64748b; margin-top: 6px;"></div>
+    </div>
   </div>
 
   <script type="module">
@@ -3423,6 +3453,156 @@
 
     if (refreshSessionsBtn) {
       refreshSessionsBtn.addEventListener('click', refreshSessions);
+    }
+
+    // Brick 36 Human Handoff Handlers
+    const handoffReasonSelect = document.getElementById('handoff-reason-select');
+    const startHandoffBtn = document.getElementById('start-handoff-btn');
+    const resumeHandoffBtn = document.getElementById('resume-handoff-btn');
+    const cancelHandoffBtn = document.getElementById('cancel-handoff-btn');
+    const refreshHandoffBtn = document.getElementById('refresh-handoff-btn');
+
+    const handoffStatusDisplay = document.getElementById('handoff-status-display');
+    const handoffReasonDisplay = document.getElementById('handoff-reason-display');
+    const handoffPageDisplay = document.getElementById('handoff-page-display');
+    const handoffTimeDisplay = document.getElementById('handoff-time-display');
+    const handoffGuidanceDisplay = document.getElementById('handoff-guidance-display');
+    const handoffStatusMsg = document.getElementById('handoff-status-msg');
+
+    let currentHandoffId = null;
+
+    async function refreshHandoffStatus() {
+      try {
+        const res = await fetch('/api/browser/handoff/status');
+        const data = await res.json();
+        const active = Boolean(data.active);
+        const handoff = data.handoff || null;
+
+        if (handoffStatusDisplay) {
+          handoffStatusDisplay.textContent = handoff ? handoff.status : (active ? 'ACTIVE' : 'IDLE');
+        }
+        if (handoffReasonDisplay) {
+          handoffReasonDisplay.textContent = handoff ? handoff.reason : '(None)';
+        }
+        if (handoffPageDisplay) {
+          handoffPageDisplay.textContent = handoff ? handoff.pageId : '(None)';
+        }
+        if (handoffGuidanceDisplay) {
+          handoffGuidanceDisplay.textContent = handoff ? handoff.guidance : 'No active handoff.';
+        }
+        if (handoffTimeDisplay) {
+          if (handoff && handoff.expiresAt) {
+            const exp = new Date(handoff.expiresAt).getTime();
+            const now = Date.now();
+            const remainSec = Math.max(0, Math.round((exp - now) / 1000));
+            handoffTimeDisplay.textContent = `${remainSec}s remaining`;
+          } else {
+            handoffTimeDisplay.textContent = '(None)';
+          }
+        }
+
+        if (handoff && handoff.handoffId) {
+          currentHandoffId = handoff.handoffId;
+        } else if (!active) {
+          currentHandoffId = null;
+        }
+      } catch (err) {
+        if (handoffStatusMsg) {
+          handoffStatusMsg.textContent = `Status refresh error: ${err.message}`;
+        }
+      }
+    }
+
+    if (startHandoffBtn) {
+      startHandoffBtn.addEventListener('click', async () => {
+        const reason = (handoffReasonSelect ? handoffReasonSelect.value : 'LOGIN_REQUIRED') || 'LOGIN_REQUIRED';
+        if (handoffStatusMsg) handoffStatusMsg.textContent = 'Starting handoff...';
+        startHandoffBtn.disabled = true;
+        try {
+          const res = await fetch('/api/browser/handoff/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            currentHandoffId = data.handoff ? data.handoff.handoffId : null;
+            if (handoffStatusMsg) handoffStatusMsg.textContent = `Handoff paused for human (${reason}). Complete auth in Edge window.`;
+          } else {
+            if (handoffStatusMsg) handoffStatusMsg.textContent = `Start error: ${data.message || data.error || 'Failed'}`;
+          }
+          await refreshHandoffStatus();
+        } catch (err) {
+          if (handoffStatusMsg) handoffStatusMsg.textContent = `Start request error: ${err.message}`;
+        } finally {
+          startHandoffBtn.disabled = false;
+        }
+      });
+    }
+
+    if (resumeHandoffBtn) {
+      resumeHandoffBtn.addEventListener('click', async () => {
+        if (!currentHandoffId) {
+          if (handoffStatusMsg) handoffStatusMsg.textContent = 'No active handoff ID to resume. Click Refresh Status first.';
+          return;
+        }
+        if (handoffStatusMsg) handoffStatusMsg.textContent = 'Resuming and verifying fresh state...';
+        resumeHandoffBtn.disabled = true;
+        try {
+          const res = await fetch('/api/browser/handoff/resume', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ handoffId: currentHandoffId })
+          });
+          const data = await res.json();
+          if (res.ok && data.verified) {
+            if (handoffStatusMsg) handoffStatusMsg.textContent = 'Verification succeeded! Human authentication completed.';
+          } else if (data.status === 'NOT_CLEARED' || data.code === 'HANDOFF_NOT_CLEARED') {
+            if (handoffStatusMsg) handoffStatusMsg.textContent = 'Barrier not cleared yet. Finish action in Edge and click Resume again.';
+          } else {
+            if (handoffStatusMsg) handoffStatusMsg.textContent = `Resume error: ${data.message || data.error || 'Failed'}`;
+          }
+          await refreshHandoffStatus();
+        } catch (err) {
+          if (handoffStatusMsg) handoffStatusMsg.textContent = `Resume request error: ${err.message}`;
+        } finally {
+          resumeHandoffBtn.disabled = false;
+        }
+      });
+    }
+
+    if (cancelHandoffBtn) {
+      cancelHandoffBtn.addEventListener('click', async () => {
+        if (!currentHandoffId) {
+          if (handoffStatusMsg) handoffStatusMsg.textContent = 'No active handoff to cancel.';
+          return;
+        }
+        if (handoffStatusMsg) handoffStatusMsg.textContent = 'Cancelling handoff...';
+        cancelHandoffBtn.disabled = true;
+        try {
+          const res = await fetch('/api/browser/handoff/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ handoffId: currentHandoffId })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            if (handoffStatusMsg) handoffStatusMsg.textContent = 'Handoff cancelled.';
+            currentHandoffId = null;
+          } else {
+            if (handoffStatusMsg) handoffStatusMsg.textContent = `Cancel error: ${data.message || data.error || 'Failed'}`;
+          }
+          await refreshHandoffStatus();
+        } catch (err) {
+          if (handoffStatusMsg) handoffStatusMsg.textContent = `Cancel request error: ${err.message}`;
+        } finally {
+          cancelHandoffBtn.disabled = false;
+        }
+      });
+    }
+
+    if (refreshHandoffBtn) {
+      refreshHandoffBtn.addEventListener('click', refreshHandoffStatus);
     }
   </script>
 </body>
