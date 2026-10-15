@@ -1,11 +1,55 @@
 Project: JARVIS4
-Current Brick: 39
-Status: BRICK-039 COMPLETE (Complex UI Contexts v1: Iframes + Open Shadow DOM; Harness-First / Zero AI)
-Last Verified Brick: BRICK-039
-Current Feature: Complex UI Contexts v1 (Iframes + Open Shadow DOM: Context Discovery + Scoped Semantic Operations)
-Next Feature: NOT AUTHORIZED (Brick 40 — NOT STARTED)
+Current Milestone: PRE-040A
+Status: PRE-040A COMPLETE (Runtime Agent Harness & Tool Contract Foundation; Governance Before Autonomy; Zero LLM Execution)
+Last Verified Milestone: PRE-040A
+Current Feature: Runtime Agent Harness Foundation (Tool Contracts, Risk Engine R0-R4, Clamped Budgets, Gated Human Confirmation, Finite Run States, Sanitized Evidence Envelopes, Untrusted Web Data Wrapping, Secret-Free Audit)
+Next Feature: NOT AUTHORIZED (PRE-040B OpenRouter Routing Gate / PRE-040C Eval Harness / Brick 40 — NOT STARTED)
 
 ## Working capabilities
+
+- Runtime Agent Harness Foundation (PRE-040A) deterministic governance subsystem (`src/agent/runtime/`):
+  - Zero AI / Zero Model Execution:
+    - Exactly 0 OpenRouter, 0 LLM, 0 Exa, 0 search calls.
+    - Deterministic governance gateway establishing contracts between future planner and BrowserManager primitives.
+    - Autonomous planner remains NOT IMPLEMENTED.
+  - Strict Tool Registry & Whitelist:
+    - Fixed 26-tool registry (`src/agent/runtime/toolRegistry.js`).
+    - Exact matching only; unknown tools fail closed with `TOOL_NOT_REGISTERED`.
+    - Zero dynamic method invocation on BrowserManager from user/model strings.
+    - Credential resume (`browser.resumeHandoff`) registered as PROHIBITED (`BLOCKED_BY_POLICY`).
+  - Strict Schema & Argument Validation:
+    - Deep argument validation rejecting raw selectors (`css`, `xpath`, `selector`), JS execution (`eval`, `script`, `function`), CDP, and raw DOM handles (`src/agent/runtime/toolValidator.js`).
+    - Model security overrides (`riskLevel`, `confirmed`, `isSafe`, `bypass`, `budgetOverride`) rejected deterministically with `SECURITY_OVERRIDE_REJECTED` or ignored.
+    - Semantic target validation requiring `kind` and identifier (`accessibleName`, `text`, `label`, `id`).
+  - Deterministic Risk Classification Engine:
+    - R0 (read-only observation), R1 (reversible interaction / safe same-origin navigation), R2 (cross-origin navigation, open/close page, transfer), R3 (form submission, consequential controls), R4 (prohibited credentials, raw JS, CDP, file system traversal).
+    - Calculated deterministically from tool, arguments, target characteristics, and state (`src/agent/runtime/riskPolicy.js`). Never model-supplied.
+  - Clamped Execution Budget:
+    - Per-run budget tracking `toolCalls`, `navigations`, `mutations`, `submissions`, `uploads`, `downloads`, `failures`, and `elapsedMs` (`src/agent/runtime/executionBudget.js`).
+    - Defaults: maxToolCalls=15, maxModelTurns=8, maxNavigations=4, maxMutations=10, maxFormSubmissions=1, maxUploads=2, maxDownloads=2, maxConsecutiveFailures=2, maxRuntimeMs=60000, maxTokens=25000.
+    - Clamped against model expansion; accounting performed before/atomically with execution.
+  - Human Confirmation Gate:
+    - Model NEVER sees, receives, or presents confirmation tokens (`src/agent/runtime/confirmationGate.js`).
+    - Consequential proposals pause in `WAITING_USER_CONFIRMATION` creating `pendingActionId` with safe metadata.
+    - Human operator approves via trusted boundary (`approvePendingAction`).
+    - Harness internally obtains and uses existing single-use GREEN-034 confirmation tokens.
+    - Single-use consumption blocks replay (`PENDING_ACTION_ALREADY_USED`).
+    - Stale snapshot/context changes invalidate approval (`APPROVAL_STALE`).
+  - Finite Runtime State Machine:
+    - Legal transitions enforced across `RECEIVED`, `READY`, `TOOL_PROPOSED`, `VALIDATING`, `WAITING_USER_CONFIRMATION`, `EXECUTING`, `VERIFYING`, `OBSERVING`, and terminal states (`src/agent/runtime/runtimeState.js`).
+    - Illegal transitions fail closed with `INVALID_STATE_TRANSITION`.
+  - Standardized Evidence Envelope:
+    - Structured evidence with `runId`, `step`, `tool`, `risk`, `executed`, `verified`, `evidenceType`, `observed`, `snapshotToken`, `documentVersion`, `semanticRevision`, `elapsedMs` (`src/agent/runtime/evidence.js`).
+    - Model `expectedOutcome` evaluated as a request, never treated as authoritative truth.
+  - Observation Sanitizer & Untrusted Web Data Wrapping:
+    - Redacts passwords, OTP, cookies, auth tokens, DPAPI keys, API keys, and local filesystem paths (`src/agent/runtime/observationSanitizer.js`).
+    - Machine-readable untrusted web data wrapping: `{ trust: 'untrusted_web_data', source: 'page', content: ... }`.
+    - Immune to prompt-injection privilege escalation.
+  - Secret-Free Execution Audit Trail:
+    - Records run steps, decisions, budget counters, and outcomes without logging credentials or raw secrets.
+  - Verification Evidence:
+    - 1677/1677 offline unit, contract, and regression tests PASS (`npm run verify`).
+    - 148/148 real-browser acceptance tests across 32 categories PASS on Microsoft Edge (`npm run verify:browser`).
 
 - Complex UI Contexts v1: Iframes + Open Shadow DOM (Brick 39) deterministic context discovery and scoped semantic operation subsystem (`src/browser/domContextManager.js`, `pageInspection.js`, `actionExecutor.js`, `structuredExtractor.js`, `browserManager.js`, `server.js`, `index.html`):
   - Zero AI / Deterministic DOM Context Discovery Engine:

@@ -67,6 +67,48 @@ The future voice architecture must adhere to the following principles:
 ## 4. Development, Verification & Harness Architecture
 
 Development verification, future coding agent orchestration, autonomous model evaluation, and runtime tool governance are formally defined in:
-- [HARNESS.md](file:///c:/Users/aurehman6521/Desktop/AI%20Projects/Jarvis4/docs/HARNESS.md)
+- [HARNESS.md](file:///c:/Users/arehman/Desktop/AI%20Projects/Jarvis4/docs/HARNESS.md)
 
 Refer to that document for harness layering (Test Harness, Real-Browser Harness, Development Agent Harness, Eval Harness, Runtime Agent Harness), repository mapping, maturity status, and operating contracts.
+
+---
+
+## 5. Runtime Agent Harness & Tool Governance Architecture (PRE-040A)
+
+Between future autonomous planning/LLM agents (Brick 40) and deterministic browser capabilities (Bricks 26-39), JARVIS4 enforces an unbypassable deterministic governance boundary:
+
+```text
+USER TASK
+   ↓
+AGENT MODEL (Brick 40 - Not Started)
+   ↓
+STRUCTURED TOOL PROPOSAL
+   ↓
+RUNTIME AGENT HARNESS (PRE-040A)
+   ↓
+Schema & Argument Validation (Rejects raw selectors, XPath, JS, privileged overrides)
+   ↓
+Runtime / Page / Context Validation (Snapshot freshness, subcontext checks)
+   ↓
+Deterministic Risk Classification (R0-R4)
+   ↓
+Execution Budget Check (Clamped counters tracked atomically)
+   ↓
+Permission / Confirmation Gate (Human operator approves R3; token hidden from model)
+   ↓
+Deterministic BrowserManager Primitive
+   ↓
+Deterministic Verification (Authoritative browser DOM state)
+   ↓
+Sanitized Evidence Envelope (Redacted secrets, untrusted web data wrapping)
+   ↓
+AGENT / AUDIT TRAIL
+```
+
+Key Architectural Invariants:
+1. **Zero LLM Execution in Governance**: Governance rules are 100% deterministic code. Exactly 0 LLM calls, 0 OpenRouter calls.
+2. **Whitelisted Tool Registry**: Exact 26 tools. Unknown tools fail closed (`TOOL_NOT_REGISTERED`). Zero dynamic method invocation on `BrowserManager`.
+3. **No Raw Selectors or Executable Code**: Schemas strictly reject CSS selectors, XPaths, JS code, and CDP commands.
+4. **Human Confirmation Boundary & Token Privacy**: The model NEVER receives or presents confirmation tokens. Consequential proposals pause in `WAITING_USER_CONFIRMATION`. Operator approves through trusted UI. Harness delegates into GREEN-034 single-use prepared submission.
+5. **Untrusted Web Data Wrapping**: Webpage content wrapped with `{ trust: 'untrusted_web_data', source: 'page' }` preventing prompt-injection privilege escalation.
+6. **Finite State Machine**: Legal state transitions strictly enforced across all run states.

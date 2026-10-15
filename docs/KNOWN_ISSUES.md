@@ -461,6 +461,16 @@ Currently tracked issues in JARVIS4:
     - **Context Hierarchy Limits**: Context tree discovery enforces conservative depth limits (`BROWSER_MAX_CONTEXT_DEPTH=6`, clamped [1, 16]) and context volume limits (`BROWSER_MAX_DOM_CONTEXTS=64`, clamped [1, 256]) to prevent denial-of-service from maliciously deep or infinite frame nesting.
     - **Zero AI / Zero Search**: Exactly 0 OpenRouter, 0 LLM, 0 Exa, and 0 search calls. All verification runs deterministically against local loopback fixtures.
 
+33. **Runtime Agent Harness Governance & Tool Contract Foundation (PRE-040A Verified)**:
+    - **Harness-First / Zero LLM Execution**: PRE-040A establishes the deterministic governance layer between the future agent planner and BrowserManager primitives. Exactly 0 OpenRouter, 0 LLM, 0 Exa, and 0 search calls are executed. The autonomous planner remains NOT IMPLEMENTED.
+    - **No Public Agent Run Endpoint**: PRE-040A exposes internal testable modules only (`src/agent/runtime/`). Public endpoints like `POST /api/agent/run` are not implemented and are deferred to Brick 40.
+    - **Confirmation Token Exposure Prohibited**: The model NEVER receives, sees, or presents confirmation tokens. Consequential proposals pause in `WAITING_USER_CONFIRMATION` creating a `pendingActionId`. The human operator approves through a trusted operator boundary outside the model's sight. The harness internally delegates into GREEN-034 single-use prepared submission.
+    - **No Dynamic BrowserManager Dispatch**: Tool proposals cannot dynamically invoke arbitrary BrowserManager methods. Every proposal must match an exact registered tool entry in `toolRegistry.js` (`TOOL_NOT_REGISTERED`).
+    - **No Raw Selectors or Executable Code**: Schemas strictly reject CSS selectors, XPaths, JS code, and CDP commands. Target resolution remains semantic only (`kind` and accessible identifiers).
+    - **Clamped Execution Budgets**: Budgets cannot be expanded by model proposals (`maxToolCalls: 15`, `maxNavigations: 4`, `maxMutations: 10`, `maxFormSubmissions: 1`, `maxRuntimeMs: 60000`). Counters are tracked before or atomically with execution.
+    - **No Automatic Mutation Retries**: Uncertain failures on mutating actions (click, fill, submit, upload, download) are never retried automatically. One proposal executes at most one mutating attempt.
+    - **Machine-Readable Untrusted Data**: All webpage-derived content is wrapped as `{ trust: 'untrusted_web_data', source: 'page' }` neutralizing prompt-injection instructions from compromising governance policies or security levels.
+
 
 
 

@@ -165,7 +165,25 @@ const REQUIRED_FILES = [
   'tests/browser-fixtures/extract-records.html',
   'tests/browser-fixtures/extract-dynamic.html',
   'tests/browser-fixtures/extract-multilingual.html',
-  'tests/browser-fixtures/extract-privacy.html'
+  'tests/browser-fixtures/extract-privacy.html',
+  'src/agent/runtime/runtimeErrors.js',
+  'src/agent/runtime/toolRegistry.js',
+  'src/agent/runtime/toolValidator.js',
+  'src/agent/runtime/riskPolicy.js',
+  'src/agent/runtime/executionBudget.js',
+  'src/agent/runtime/confirmationGate.js',
+  'src/agent/runtime/runtimeState.js',
+  'src/agent/runtime/observationSanitizer.js',
+  'src/agent/runtime/evidence.js',
+  'src/agent/runtime/runtimeHarness.js',
+  'src/agent/runtime/index.js',
+  'tests/unit/runtimeAgentRegistry.test.js',
+  'tests/unit/runtimeAgentValidator.test.js',
+  'tests/unit/runtimeAgentRiskBudget.test.js',
+  'tests/unit/runtimeAgentSanitizer.test.js',
+  'tests/unit/runtimeAgentHarness.test.js',
+  'tests/contract/runtimeAgentToolContracts.test.js',
+  'tests/regression/runtimeAgentSecurity.test.js'
 ];
 
 const REQUIRED_DIRS = [
@@ -176,6 +194,7 @@ const REQUIRED_DIRS = [
   'src/providers',
   'src/routing',
   'src/browser',
+  'src/agent/runtime',
   'src/webpage',
   'src/research',
   'src/config',

@@ -20,6 +20,9 @@ import { TargetResolutionError } from '../src/browser/targetResolver.js';
 import { ActionExecutionError } from '../src/browser/actionExecutor.js';
 import { HANDOFF_REASONS, HANDOFF_STATES } from '../src/browser/humanHandoff.js';
 import { registerTestConfirmationToken, getConfirmationToken } from '../src/browser/formSubmitter.js';
+import { RuntimeAgentHarness } from '../src/agent/runtime/runtimeHarness.js';
+import { ToolErrorCode } from '../src/agent/runtime/runtimeErrors.js';
+import { RUN_STATES } from '../src/agent/runtime/runtimeState.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -2739,8 +2742,271 @@ async function main() {
       assert.equal(inspectClosedFailed, true, 'Inspecting contexts of closed page must fail with PAGE_NOT_FOUND');
     });
 
-    // 135. Real browser cleanup succeeds
-    await runTest(135, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
+    // ==================================================
+    // CATEGORY 32: RUNTIME AGENT HARNESS GOVERNANCE (PRE-040A)
+    // ==================================================
+    const runtimeHarness = new RuntimeAgentHarness({ browserManager: bm });
+    let governanceRun = null;
+    let pendingSubmission = null;
+
+    // 135. R0 inspect through Runtime Harness succeeds
+    await runTest(135, 'R0 Inspect Through Runtime Harness Succeeds', 'Runtime Agent Harness Governance (PRE-040A)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/forms-basic.html`, { allowLoopbackTest: true });
+      await bm.waitForStable();
+      governanceRun = runtimeHarness.createRun({ task: 'Inspect forms basic fixture' });
+      assert.ok(governanceRun.runId.startsWith('run_'));
+      assert.equal(governanceRun.state, RUN_STATES.READY);
+
+      const inspectRes = await runtimeHarness.executeToolProposal(governanceRun.runId, {
+        tool: 'browser.inspectPage'
+      });
+
+      assert.equal(inspectRes.success, true);
+      assert.equal(inspectRes.evidence.tool, 'browser.inspectPage');
+      assert.equal(inspectRes.evidence.risk, 'R0');
+      assert.equal(inspectRes.evidence.executed, true);
+      assert.equal(inspectRes.evidence.verified, true);
+      assert.equal(inspectRes.evidence.observed.visibleText.trust, 'untrusted_web_data');
+    });
+
+    // 136. R1 fill/click through Runtime Harness succeeds and verifies
+    await runTest(136, 'R1 Fill & Check Through Runtime Harness Succeeds and Verifies', 'Runtime Agent Harness Governance (PRE-040A)', async () => {
+      const fillRes = await runtimeHarness.executeToolProposal(governanceRun.runId, {
+        tool: 'browser.fill',
+        snapshotToken: bm.snapshotToken,
+        arguments: {
+          target: { kind: 'input', label: 'Full Name' },
+          value: 'Governed real text value'
+        }
+      });
+      assert.equal(fillRes.success, true);
+      assert.equal(fillRes.evidence.risk, 'R1');
+      assert.equal(fillRes.evidence.verified, true);
+
+      const checkRes = await runtimeHarness.executeToolProposal(governanceRun.runId, {
+        tool: 'browser.check',
+        snapshotToken: bm.snapshotToken,
+        arguments: {
+          target: { kind: 'input', label: 'Subscribe to newsletter' }
+        }
+      });
+      assert.equal(checkRes.success, true);
+      assert.equal(checkRes.evidence.risk, 'R1');
+      assert.equal(checkRes.evidence.verified, true);
+    });
+
+    // 137. Stale snapshot through Harness is blocked
+    await runTest(137, 'Stale Snapshot Through Harness is Blocked', 'Runtime Agent Harness Governance (PRE-040A)', async () => {
+      let staleBlocked = false;
+      try {
+        await runtimeHarness.executeToolProposal(governanceRun.runId, {
+          tool: 'browser.fill',
+          snapshotToken: 'snap_stale_nonexistent_token_999',
+          arguments: {
+            target: { kind: 'input', label: 'Full Name' },
+            value: 'will fail'
+          }
+        });
+      } catch (err) {
+        if (err.code === 'TARGET_STALE' || err.code === 'ACTION_EXECUTION_FAILED' || err.code === 'EXECUTION_FAILED') {
+          staleBlocked = true;
+        }
+      }
+      assert.equal(staleBlocked, true, 'Action with stale snapshot token must fail');
+    });
+
+    // 138. Wrong or detached context through Harness is blocked
+    await runTest(138, 'Wrong Context Through Harness is Blocked', 'Runtime Agent Harness Governance (PRE-040A)', async () => {
+      const freshRun = runtimeHarness.createRun();
+      let wrongCtxBlocked = false;
+      try {
+        await runtimeHarness.executeToolProposal(freshRun.runId, {
+          tool: 'browser.fill',
+          contextId: 'ctx_detached_fake_9999',
+          snapshotToken: bm.snapshotToken,
+          arguments: {
+            target: { kind: 'input', label: 'Full Name' },
+            value: 'will fail'
+          }
+        });
+      } catch {
+        wrongCtxBlocked = true;
+      }
+      assert.equal(wrongCtxBlocked, true, 'Action with detached contextId must fail');
+    });
+
+    // 139. Active Human Handoff blocks mutation
+    await runTest(139, 'Active Human Handoff Blocks Mutating Proposal', 'Runtime Agent Harness Governance (PRE-040A)', async () => {
+      const handoffStart = await bm.startHandoff({
+        reason: HANDOFF_REASONS.LOGIN_REQUIRED
+      });
+      assert.equal(bm.isHandoffActive(), true);
+
+      const handoffRun = runtimeHarness.createRun();
+      let mutationBlocked = false;
+      try {
+        await runtimeHarness.executeToolProposal(handoffRun.runId, {
+          tool: 'browser.click',
+          snapshotToken: bm.snapshotToken,
+          arguments: {
+            target: { kind: 'button', accessibleName: 'Submit' }
+          }
+        });
+      } catch (err) {
+        if (err.code === ToolErrorCode.HUMAN_HANDOFF_ACTIVE) {
+          mutationBlocked = true;
+        }
+      }
+      assert.equal(mutationBlocked, true, 'Mutating proposal must be blocked when handoff is active');
+      assert.equal(runtimeHarness.getRun(handoffRun.runId).state, RUN_STATES.NEEDS_HUMAN_AUTH);
+
+      // Clean up handoff
+      await bm.cancelHandoff({ handoffId: handoffStart.handoff.handoffId });
+      assert.equal(bm.isHandoffActive(), false);
+    });
+
+    // 140. R3 submit proposal pauses before submission
+    await runTest(140, 'R3 Submit Proposal Pauses Before Submission', 'Runtime Agent Harness Governance (PRE-040A)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/forms-submit-success.html`, { allowLoopbackTest: true });
+      await bm.waitForStable();
+
+      const submitRun = runtimeHarness.createRun({ task: 'Submit form on real Edge' });
+      pendingSubmission = await runtimeHarness.executeToolProposal(submitRun.runId, {
+        tool: 'browser.submitForm',
+        snapshotToken: bm.snapshotToken,
+        arguments: {
+          form: { kind: 'form', accessibleName: 'Success Submission Form' }
+        }
+      });
+
+      assert.equal(pendingSubmission.success, false);
+      assert.equal(pendingSubmission.requiresConfirmation, true);
+      assert.equal(pendingSubmission.status, RUN_STATES.WAITING_USER_CONFIRMATION);
+      assert.ok(pendingSubmission.pendingAction.pendingActionId);
+
+      // Model NEVER receives internal confirmation token!
+      assert.equal(pendingSubmission.pendingAction.confirmationToken, undefined);
+      assert.equal(pendingSubmission.confirmationToken, undefined);
+    });
+
+    // 141. Zero submission occurs before human approval
+    await runTest(141, 'Zero Submission Occurs Before Human Approval', 'Runtime Agent Harness Governance (PRE-040A)', async () => {
+      // Assert URL and DOM are still on the form page, not navigated or submitted
+      assert.ok(bm.currentUrl.includes('forms-submit-success.html'));
+      const status = await bm.getPageStatus();
+      assert.equal(status.url.includes('forms-submit-success.html'), true);
+      assert.equal(status.url.includes('submitted.html'), false);
+    });
+
+    // 142. Approved pending action executes at most once through operator boundary
+    await runTest(142, 'Approved Pending Action Executes At Most Once Through Operator Boundary', 'Runtime Agent Harness Governance (PRE-040A)', async () => {
+      const approvedRes = await runtimeHarness.approvePendingAction(
+        pendingSubmission.runId,
+        pendingSubmission.pendingAction.pendingActionId,
+        { approved: true }
+      );
+
+      assert.equal(approvedRes.success, true);
+      assert.equal(approvedRes.evidence.verified, true);
+      assert.equal(approvedRes.evidence.tool, 'browser.submitForm');
+
+      // Real Edge now navigated to submitted.html
+      await bm.waitForStable();
+      assert.ok(bm.currentUrl.includes('submitted.html'));
+    });
+
+    // 143. Confirmation replay is blocked
+    await runTest(143, 'Confirmation Replay Is Blocked', 'Runtime Agent Harness Governance (PRE-040A)', async () => {
+      let replayBlocked = false;
+      try {
+        await runtimeHarness.approvePendingAction(
+          pendingSubmission.runId,
+          pendingSubmission.pendingAction.pendingActionId,
+          { approved: true }
+        );
+      } catch (err) {
+        if (err.code === ToolErrorCode.PENDING_ACTION_ALREADY_USED) {
+          replayBlocked = true;
+        }
+      }
+      assert.equal(replayBlocked, true, 'Replay of already consumed pending action must be blocked');
+    });
+
+    // 144. R4 prohibited tool rejected before BrowserManager mutation
+    await runTest(144, 'R4 Prohibited Tool Rejected Before BrowserManager Mutation', 'Runtime Agent Harness Governance (PRE-040A)', async () => {
+      const prohibitedRun = runtimeHarness.createRun();
+      let prohibitedBlocked = false;
+      try {
+        await runtimeHarness.executeToolProposal(prohibitedRun.runId, {
+          tool: 'browser.resumeHandoff'
+        });
+      } catch (err) {
+        if (err.code === ToolErrorCode.BLOCKED_BY_POLICY) {
+          prohibitedBlocked = true;
+        }
+      }
+      assert.equal(prohibitedBlocked, true, 'browser.resumeHandoff must be blocked by policy');
+      assert.equal(runtimeHarness.getRun(prohibitedRun.runId).state, RUN_STATES.BLOCKED_BY_POLICY);
+    });
+
+    // 145. Execution budget stops excess tool calls
+    await runTest(145, 'Execution Budget Stops Excess Tool Calls', 'Runtime Agent Harness Governance (PRE-040A)', async () => {
+      const budgetRun = runtimeHarness.createRun({ budget: { maxToolCalls: 2 } });
+      await runtimeHarness.executeToolProposal(budgetRun.runId, { tool: 'browser.getPageStatus' });
+      await runtimeHarness.executeToolProposal(budgetRun.runId, { tool: 'browser.getPageStatus' });
+
+      let budgetHalted = false;
+      try {
+        await runtimeHarness.executeToolProposal(budgetRun.runId, { tool: 'browser.getPageStatus' });
+      } catch (err) {
+        if (err.code === ToolErrorCode.BUDGET_EXCEEDED) {
+          budgetHalted = true;
+        }
+      }
+      assert.equal(budgetHalted, true, 'Excess tool calls must be halted with BUDGET_EXCEEDED');
+      assert.equal(runtimeHarness.getRun(budgetRun.runId).state, RUN_STATES.BUDGET_EXCEEDED);
+    });
+
+    // 146. Audit/evidence contains safe metadata (zero credentials/secrets)
+    await runTest(146, 'Audit & Evidence Contains Safe Metadata (Zero Secrets)', 'Runtime Agent Harness Governance (PRE-040A)', async () => {
+      const audits = runtimeHarness.getAuditLog(pendingSubmission.runId);
+      assert.ok(audits.length >= 3, 'Audit log must record lifecycle and execution entries');
+
+      const auditJson = JSON.stringify(audits);
+      assert.equal(auditJson.includes('internal_secret_token_never_leak'), false);
+      assert.equal(auditJson.includes('password'), false);
+      assert.equal(auditJson.includes('confirmationToken'), false);
+    });
+
+    // 147. Subcontext form submission rejection through harness
+    await runTest(147, 'Subcontext Form Submission Rejection Through Harness', 'Runtime Agent Harness Governance (PRE-040A)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/shadow-form.html`, { allowLoopbackTest: true });
+      await bm.waitForStable();
+      const ctxRes = await bm.inspectContexts();
+      const shadowCtx = ctxRes.contexts.find(c => c.type === 'shadow-root');
+      assert.ok(shadowCtx, 'Shadow context must be found');
+
+      const subRun = runtimeHarness.createRun();
+      let subBlocked = false;
+      try {
+        await runtimeHarness.executeToolProposal(subRun.runId, {
+          tool: 'browser.submitForm',
+          contextId: shadowCtx.contextId,
+          snapshotToken: 'snap_subcontext_test_token',
+          arguments: {
+            form: { kind: 'form', accessibleName: 'Shadow Form' }
+          }
+        });
+      } catch (err) {
+        if (err.code === ToolErrorCode.SUBCONTEXT_OPERATION_NOT_SUPPORTED) {
+          subBlocked = true;
+        }
+      }
+      assert.equal(subBlocked, true, 'Subcontext submit proposal must be rejected');
+    });
+
+    // 148. Real browser cleanup succeeds
+    await runTest(148, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
       await bm.close();
       assert.equal(bm.isBrowserConnected(), false);
       assert.equal(bm.pageCount, 0);
@@ -2811,6 +3077,7 @@ async function main() {
     'Transfer Cleanup (Brick 37)',
     'Structured Extraction (Brick 38)',
     'Complex UI Contexts (Brick 39)',
+    'Runtime Agent Harness Governance (PRE-040A)',
     'Cleanup'
   ];
 

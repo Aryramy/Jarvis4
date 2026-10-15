@@ -117,6 +117,15 @@ Status: VERIFIED
 BRICK-039 — Complex UI Contexts v1: Iframes + Open Shadow DOM (Context Discovery + Scoped Semantic Operations / Zero AI)
 Status: VERIFIED
 
-BRICK-040 — Next Feature / Browser Evolution
+PRE-040A — Runtime Agent Harness & Tool Contract Foundation (Governance Before Autonomy / Zero LLM Execution)
+Status: VERIFIED
+
+PRE-040B — OpenRouter Routing Gate & Provider Hardening
+Status: NOT STARTED / NOT AUTHORIZED
+
+PRE-040C — Eval Harness & Golden-Task Benchmark Framework
+Status: NOT STARTED / NOT AUTHORIZED
+
+BRICK-040 — Autonomous Web Agent & Multi-Step Planner
 Status: NOT STARTED / NOT AUTHORIZED
 

@@ -31,10 +31,10 @@ JARVIS4 distinguishes five distinct harness layers across development, verificat
   |     Scope: Golden tasks, trajectory evaluation, success scoring, safety
   |            scoring, tool correctness, latency, and cost benchmarking (Brick 40+).
   |
-  +-- [E] RUNTIME AGENT HARNESS (Autonomous Execution Governance) [PLANNED]
-  |     Scope: LLM action proposal → tool gate → schema validation → risk
-  |            classification → permission check → confirmation → execution →
-  |            deterministic verification → sanitized result → audit trail.
+  +-- [E] RUNTIME AGENT HARNESS (Autonomous Execution Governance) [FOUNDATION ACTIVE / NOT YET CONNECTED TO LLM]
+  |     Scope: Tool proposal → schema validation → risk classification →
+  |            budget check → permission / confirmation → deterministic execution →
+  |            sanitized evidence → secret-free audit. (0 LLM / 0 model calls).
 ```
 
 ---
@@ -106,27 +106,42 @@ JARVIS4 distinguishes five distinct harness layers across development, verificat
   - Release gating: Minimum threshold scores required before greenlighting autonomous features.
 
 ### Layer E: Runtime Agent Harness (Autonomous Execution Governance)
-- **Status**: `PLANNED`
-- **Purpose**: Real-time governance wrapper intercepting model actions in production before external execution.
-- **Expected Execution Pipeline**:
+- **Status**: `FOUNDATION ACTIVE / NOT YET CONNECTED TO LLM` (PRE-040A)
+- **Purpose**: Real-time governance wrapper intercepting model actions before BrowserManager execution.
+- **Current Realized Foundation (PRE-040A)**:
+  - Exact 26-tool registered whitelist mapping to deterministic `BrowserManager` primitives (`src/agent/runtime/toolRegistry.js`).
+  - Strict schema validation rejecting raw selectors (`css`, `xpath`, `selector`), JS execution, and model security overrides (`src/agent/runtime/toolValidator.js`).
+  - Deterministic R0-R4 risk engine based on tool, arguments, target characteristics, and state (`src/agent/runtime/riskPolicy.js`).
+  - Clamped execution budget tracking counters before/atomically with execution (`src/agent/runtime/executionBudget.js`).
+  - Human confirmation gate where the model NEVER sees or receives confirmation tokens; human approval through trusted operator boundary delegates into GREEN-034 single-use prepared submission (`src/agent/runtime/confirmationGate.js`).
+  - Finite runtime state machine with illegal state transition enforcement (`src/agent/runtime/runtimeState.js`).
+  - Standardized evidence envelope with expected outcome evaluation (`src/agent/runtime/evidence.js`).
+  - Observation sanitizer redacting credentials/paths and wrapping web text as `{ trust: 'untrusted_web_data', source: 'page' }` (`src/agent/runtime/observationSanitizer.js`).
+  - Secret-free execution audit trail (`src/agent/runtime/runtimeHarness.js`).
+  - Exactly 0 LLM calls, 0 OpenRouter calls, and 0 autonomous planner loops.
+- **Execution Pipeline**:
   ```text
-  Model Proposes Action
+  Agent Model Proposes Structured Action
           ↓
-  Tool Gate (Is action authorized for current Brick/scope?)
+  Runtime Agent Harness (Gate)
           ↓
-  Schema Validation (Strict parameter and type validation)
+  Schema & Type Validation (Rejects raw selectors / privileged overrides)
           ↓
-  Risk Classification (Read-only vs mutation vs financial/credential risk)
+  Runtime / Page / Context Validation (Snapshot freshness, subcontext checks)
           ↓
-  Permission / Confirmation (Require explicit human confirmation for consequential actions)
+  Deterministic Risk Classification (R0-R4)
           ↓
-  Execution Boundary (Playwright action, filesystem, network call)
+  Budget Check (Counters checked atomically)
           ↓
-  Deterministic Verification (Observe post-action evidence)
+  Permission / Confirmation Gate (Human approval required for R3; token hidden from model)
           ↓
-  Sanitized Result (Filter cookies, tokens, and raw secrets)
+  Deterministic BrowserManager Primitive
           ↓
-  Audit / Evidence Trail (Structured logging without credential leakage)
+  Deterministic Verification (Authoritative browser DOM state)
+          ↓
+  Sanitized Evidence Envelope (Credentials redacted, untrusted web data wrapped)
+          ↓
+  Agent / Audit Trail
   ```
 
 ---
@@ -212,7 +227,7 @@ All other mechanics—including form mechanics, state transitions, token invalid
 | **Automatic skill selection** | `PLANNED` | Agent skill dynamic loading based on task classification. |
 | **Bounded self-repair loop** | `PLANNED` | Bounded iteration loop allowing coding agents to fix failures deterministically. |
 | **Independent eval harness** | `PLANNED` | Benchmark harness for autonomous decision scoring, safety, and trajectory evals. |
-| **Runtime tool governance** | `PLANNED` | Preflight gate, risk categorization, and audit logging for model-issued tools. |
+| **Runtime tool governance** | `FOUNDATION ACTIVE / NOT YET CONNECTED TO LLM` | Preflight gate, schema validation, R0-R4 risk categorization, execution budgets, human confirmation gate, and secret-free audit trails (PRE-040A; zero LLM connection). |
 | **Parallel worktree agents** | `PLANNED` | Git worktree isolation allowing concurrent development and verification runs. |
 
 *(Note: Planned features are documented for architectural alignment and must not be treated as implemented).*
@@ -261,6 +276,21 @@ All other mechanics—including form mechanics, state transitions, token invalid
   - Verified truthful closed shadow root detection and rejection (`CLOSED_SHADOW_ROOT_UNSUPPORTED`).
   - Verified snapshot token isolation per context and subcontext form submission rejection (`SUBCONTEXT_OPERATION_NOT_SUPPORTED`).
   - Extended Level 1 offline test harness to 1599 tests across 197 suites (`npm run verify`).
+- **PRE-040A**:
+  - Extended Level 2 real-browser harness to 148 tests across 32 categories (`scripts/verify-browser.mjs`).
+  - Added Category 32 (Runtime Agent Harness Governance: PRE-040A) covering 13 new real Microsoft Edge governance scenarios (tests 135-147 plus renumbered cleanup test 148).
+  - Verified R0 observation execution through Runtime Harness.
+  - Verified R1 mutation (fill, check) through Runtime Harness with deterministic post-action verification.
+  - Verified stale snapshot tokens and invalid context IDs are blocked safely before execution.
+  - Verified mutating proposals are blocked during active Human Handoff (`HUMAN_HANDOFF_ACTIVE`).
+  - Verified R3 form submission proposal pauses execution in `WAITING_USER_CONFIRMATION` with 0 DOM submission before human approval.
+  - Verified pending action human approval through trusted operator boundary, single-use execution, and replay rejection (`PENDING_ACTION_ALREADY_USED`).
+  - Proved confirmation tokens are NEVER exposed to or presentable by the model/proposal.
+  - Verified R4 prohibited tool rejection before `BrowserManager` mutation (`BLOCKED_BY_POLICY`).
+  - Verified execution budget accounting halts excess tool calls (`BUDGET_EXCEEDED`).
+  - Verified audit and evidence envelopes contain zero passwords, tokens, auth cookies, or DPAPI keys.
+  - Verified subcontext form submission rejection through harness (`SUBCONTEXT_OPERATION_NOT_SUPPORTED`).
+  - Extended Level 1 offline test harness to 1677 tests across 260 suites (`npm run verify`).
 
 ---
 

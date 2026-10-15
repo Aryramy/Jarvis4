@@ -1206,11 +1206,28 @@
   6. Added 15 comprehensive browser fixtures in `tests/browser-fixtures/` covering basic/nested/dynamic/navigation iframes, basic/nested/dynamic/closed shadow roots, and mixed hierarchies.
   7. Added 9 unit tests and 10 contract tests.
   8. Added 12 real Microsoft Edge tests (123-134) in `scripts/verify-browser.mjs`.
+## ADR-0055: Runtime Agent Harness & Tool Contract Foundation (PRE-040A)
+- **Status**: Accepted (PRE-040A VERIFIED)
+- **Context**:
+  - Moving toward autonomous browser capabilities (Brick 40) creates critical security and stability risks if an LLM is directly wired to browser execution or raw browser automation APIs.
+  - Prior to introducing an autonomous planner or LLM loop, a deterministic governance layer must be established ("Governance Before Autonomy").
+  - The model must never call `BrowserManager`, Playwright, CDP, or operating system primitives directly.
+  - PRE-040A establishes the deterministic governance harness with zero LLM execution (0 OpenRouter, 0 LLM, 0 Exa, 0 search calls).
+- **Decision**:
+  1. **Strict Tool Registry Whitelist**: Exact 26-tool registry mapping agent-visible names (`browser.inspectPage`, `browser.click`, `browser.fill`, `browser.submitForm`, etc.) to deterministic `BrowserManager` primitives (`src/agent/runtime/toolRegistry.js`). Unknown tools fail closed with `TOOL_NOT_REGISTERED`. Dynamic method invocation from strings is strictly forbidden. Credential resumption (`browser.resumeHandoff`) is registered as `PROHIBITED` (`BLOCKED_BY_POLICY`).
+  2. **Strict Schema & Argument Validation**: Deep recursive validator (`src/agent/runtime/toolValidator.js`) rejecting raw selectors (`css`, `xpath`, `selector`, `locator`), raw JS (`eval`, `script`, `function`), and raw element handles. Model-supplied security overrides (`riskLevel`, `confirmed`, `isSafe`, `bypass`, `budgetOverride`) are rejected deterministically with `SECURITY_OVERRIDE_REJECTED` or ignored.
+  3. **Deterministic Risk Classification (R0-R4)**: Five-tier risk engine (`src/agent/runtime/riskPolicy.js`) calculating risk deterministically from tool, arguments, target characteristics, and state. R0 (read-only), R1 (reversible interaction), R2 (cross-origin / transfer / open-page), R3 (form submission / consequential actions), R4 (prohibited actions). Model-declared risk is strictly ignored.
+  4. **Human Confirmation Gate & Token Privacy Invariant**: The model NEVER receives, sees, or presents confirmation tokens (`src/agent/runtime/confirmationGate.js`). Consequential proposals pause execution in `WAITING_USER_CONFIRMATION` generating a `pendingActionId` with safe metadata. Human approval occurs through a trusted operator boundary. The harness internally delegates into GREEN-034 single-use prepared submission. Replay attempts fail with `PENDING_ACTION_ALREADY_USED`. Stale snapshots fail with `APPROVAL_STALE`.
+  5. **Clamped Execution Budgets**: Enforces strict run limits (`maxToolCalls: 15`, `maxNavigations: 4`, `maxMutations: 10`, `maxFormSubmissions: 1`, `maxRuntimeMs: 60000`, etc.) clamped against model expansion (`src/agent/runtime/executionBudget.js`). Accounting occurs before/atomically with execution.
+  6. **Finite Runtime State Machine**: Strict legal transitions across `RECEIVED`, `READY`, `TOOL_PROPOSED`, `VALIDATING`, `WAITING_USER_CONFIRMATION`, `EXECUTING`, `VERIFYING`, `OBSERVING`, and terminal states (`src/agent/runtime/runtimeState.js`). Illegal transitions fail closed with `INVALID_STATE_TRANSITION`.
+  7. **Standardized Evidence Envelopes**: Structured execution receipts capturing authoritative browser DOM state, step latency, and snapshot tokens (`src/agent/runtime/evidence.js`). Model `expectedOutcome` is treated as an unauthoritative request for verification (`EXPECTED_OUTCOME_UNSUPPORTED` if unprovable).
+  8. **Observation Sanitization & Untrusted Web Data Wrapping**: Credentials, OTPs, auth cookies, tokens, and full local paths are redacted (`src/agent/runtime/observationSanitizer.js`). All webpage-derived content is wrapped with machine-readable metadata (`{ trust: 'untrusted_web_data', source: 'page', content: ... }`) preventing prompt-injection privilege escalation.
+  9. **Secret-Free Execution Audit Trail**: Complete execution step logging without passwords, tokens, or DPAPI keys.
 - **Consequences**:
-  - Full scoped semantic interaction inside iframes and open shadow roots without leaking selectors.
-  - Complete truthfulness: closed shadow roots rejected with `CLOSED_SHADOW_ROOT_UNSUPPORTED`.
-  - 1599/1599 offline tests PASS (`npm run verify`).
-  - 135/135 real Microsoft Edge browser tests PASS (`npm run verify:browser`).
+  - Implements the complete middle governance layer between future planner and browser primitives.
+  - Zero LLM calls and zero autonomous loops introduced.
+  - 1677/1677 offline tests PASS (`npm run verify`).
+  - 148/148 real Microsoft Edge browser tests PASS (`npm run verify:browser`).
 
 
 
