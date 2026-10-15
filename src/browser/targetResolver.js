@@ -92,6 +92,8 @@ export function createSafeElementSummary(el, index, snapshotToken) {
   if (el.href) summary.href = el.href;
   if (el.target) summary.target = el.target;
   if (el.download !== undefined) summary.download = el.download;
+  if (el.accept) summary.accept = el.accept;
+  if (el.multiple) summary.multiple = true;
   if (el.disabled) summary.disabled = true;
   if (el.required) summary.required = true;
   if (el.checked !== undefined) summary.checked = el.checked;

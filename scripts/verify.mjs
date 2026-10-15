@@ -147,7 +147,15 @@ const REQUIRED_FILES = [
   'tests/browser-fixtures/auth-handoff-login.html',
   'tests/browser-fixtures/auth-handoff-mfa.html',
   'tests/browser-fixtures/auth-handoff-captcha.html',
-  'tests/browser-fixtures/auth-handoff-success.html'
+  'tests/browser-fixtures/auth-handoff-success.html',
+  'src/browser/fileTransfer.js',
+  'tests/unit/fileTransfer.test.js',
+  'tests/contract/fileTransferEndpoints.test.js',
+  'tests/browser-fixtures/file-upload-basic.html',
+  'tests/browser-fixtures/file-upload-validation.html',
+  'tests/browser-fixtures/file-download-basic.html',
+  'tests/browser-fixtures/file-download-large.html',
+  'tests/browser-fixtures/file-download-dangerous-name.html'
 ];
 
 const REQUIRED_DIRS = [
@@ -583,6 +591,37 @@ check('Human Handoff Subsystem Module Sanity Check (Brick 36)', async () => {
   });
   if (safeMeta.secretPassword || safeMeta.cookie) {
     throw new Error('toSafeHandoffMetadata leaked sensitive fields');
+  }
+});
+
+check('Browser File Transfer Module Sanity Check (Brick 37)', async () => {
+  const {
+    FileTransferManager,
+    FileTransferError,
+    validateAndNormalizeUploadPath,
+    isSensitiveFilePath,
+    sanitizeDownloadFilename,
+    validateAcceptConstraint,
+    getCollisionSafePath,
+    generateDownloadId
+  } = await import('../src/browser/fileTransfer.js');
+
+  if (typeof FileTransferManager !== 'function' || typeof FileTransferError !== 'function') {
+    throw new Error('fileTransfer module failed to export required classes');
+  }
+  if (!isSensitiveFilePath('C:\\Users\\user\\.ssh\\id_rsa')) {
+    throw new Error('isSensitiveFilePath failed to detect id_rsa');
+  }
+  if (!isSensitiveFilePath('my-secrets.kdbx')) {
+    throw new Error('isSensitiveFilePath failed to detect .kdbx file');
+  }
+  const sanitized = sanitizeDownloadFilename('../../evil.exe');
+  if (sanitized.filename.includes('/') || sanitized.filename.includes('\\') || !sanitized.isExecutable) {
+    throw new Error('sanitizeDownloadFilename failed sanity check on malicious executable');
+  }
+  const dlId = generateDownloadId();
+  if (!dlId.startsWith('dl_')) {
+    throw new Error('generateDownloadId failed sanity check');
   }
 });
 

@@ -1104,7 +1104,44 @@
      - Exactly 0 LLM calls, 0 search calls. Local loopback fixtures only.
 - **Consequences**:
   - Deterministic, safe, privacy-preserving human authentication handoff subsystem.
-  - Level 1 offline test suite (1490 tests across 188 suites) and Level 2 real Edge browser test suite (82 tests across 26 categories) PASS cleanly.
+## ADR-0052: Safe File Upload & Download v1 (Brick 37)
+- **Status**: Accepted
+- **Context**:
+  - Web tasks often require uploading local documents (e.g., invoices, resumes, profile pictures) or downloading generated reports and data.
+  - Giving a web agent unrestricted filesystem access creates catastrophic security vulnerabilities: arbitrary file read, directory traversal, silent uploads of confidential keys/passwords, unbounded downloads, and accidental execution of downloaded malware.
+  - Brick 37 establishes a deterministic, strictly bounded, user-authorized file transfer subsystem for both upload and download:
+    1. Upload requires an explicitly supplied local file path (`POST /api/browser/upload-file`); JARVIS never enumerates directories, guesses files, or searches Desktop/Documents.
+    2. Path normalization rejects traversal (`../`, `..\`), URLs, and control characters.
+    3. Conservative sensitive file denylist blocks private keys, SSH material, certificates, credential databases, `.env` files, and browser profile databases (`SENSITIVE_FILE_NOT_ALLOWED`).
+    4. Size limit: `BROWSER_UPLOAD_MAX_BYTES` (default 50 MB) rejects oversized files before browser interaction without buffering entire files in memory.
+    5. HTML accept attribute constraints (`<input accept=...>`) are enforced conservatively (`FILE_TYPE_NOT_ACCEPTED`).
+    6. Multiple file uploads are rejected unless `multiple` is present on the target input (`MULTIPLE_UPLOAD_NOT_SUPPORTED`).
+    7. Generic action `fill` on file inputs remains strictly blocked (`FILE_INPUT_NOT_ALLOWED`).
+    8. Upload uses Playwright's native `setInputFiles` and verifies browser-side DOM state safely without auto-submitting the form.
+    9. Downloads require explicit authorization via dedicated endpoint `POST /api/browser/download`. Generic clicks are not download-enabled.
+    10. Real browser download events are required as proof of download.
+    11. Downloads are confined strictly to an approved JARVIS download directory (`runtime/downloads/`). Arbitrary destination paths are prohibited.
+    12. Filename sanitization strips traversal and escapes reserved Windows device names (`CON`, `NUL`, `PRN`, etc. -> `_CON`).
+    13. Executables and scripts (`.exe`, `.msi`, `.bat`, `.cmd`, `.ps1`, `.scr`) are blocked with `DOWNLOAD_TYPE_NOT_ALLOWED`. Zero auto-execution; zero archive auto-extraction.
+    14. Collision-safe naming (`report (1).pdf`) never overwrites existing downloads.
+    15. Bounded size limit `BROWSER_DOWNLOAD_MAX_BYTES` deletes oversized files immediately with `DOWNLOAD_TOO_LARGE`.
+    16. Bounded timeout `BROWSER_DOWNLOAD_TIMEOUT_MS` (30s) aborts with `DOWNLOAD_TIMEOUT` and zero auto-retry.
+    17. Completed downloads are registered with opaque IDs (`dl_...`) and exposed via `GET /api/browser/downloads` without exposing full filesystem paths.
+    18. File transfer is strictly blocked while Human Handoff is active (`HUMAN_HANDOFF_ACTIVE`).
+- **Decision**:
+  1. Implemented `src/browser/fileTransfer.js` with `FileTransferManager`, `validateAndNormalizeUploadPath`, `isSensitiveFilePath`, `validateAcceptConstraint`, `sanitizeDownloadFilename`, `getCollisionSafePath`, and `generateDownloadId`.
+  2. Integrated file transfer methods into `BrowserManager`: `uploadFile`, `downloadFile`, `listDownloads`, `getDownload`.
+  3. Added server endpoints `POST /api/browser/upload-file`, `POST /api/browser/download`, `GET /api/browser/downloads` in `src/web/server.js`.
+  4. Added "File Transfer" developer section to `src/web/index.html` with safe UI controls and `.textContent` DOM updates.
+  5. Added deterministic loopback fixtures and download routes in `tests/browser-fixtures/server.js` and HTML fixtures.
+  6. Added 38 unit tests and 12 contract tests.
+  7. Added 27 real Microsoft Edge tests (82-108) in `scripts/verify-browser.mjs`.
+- **Consequences**:
+  - Deterministic, secure, bounded browser file upload and download capability.
+  - Zero arbitrary filesystem access, zero credential leakage, zero auto-execution, zero AI calls.
+  - 1540/1540 offline tests PASS (`npm run verify`).
+  - 108/108 real Microsoft Edge browser tests PASS (`npm run verify:browser`).
+
 
 
 

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>File Upload Basic Fixture</title>
+</head>
+<body>
+  <h1>File Upload Basic Fixture</h1>
+  <form id="upload-form" action="/api/test/submit" method="POST">
+    <div style="margin-bottom: 12px;">
+      <label for="basic-file-input">Upload Document</label>
+      <input type="file" id="basic-file-input" name="document" />
+    </div>
+    <div style="margin-bottom: 12px;">
+      <button type="submit" id="submit-btn">Submit Form</button>
+    </div>
+  </form>
+
+  <div id="file-info" style="margin-top: 16px;">
+    <div>Selected File: <span id="file-name-display">None</span></div>
+    <div>File Size: <span id="file-size-display">0</span></div>
+  </div>
+
+  <script>
+    const fileInput = document.getElementById('basic-file-input');
+    const nameDisplay = document.getElementById('file-name-display');
+    const sizeDisplay = document.getElementById('file-size-display');
+
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (file) {
+        nameDisplay.textContent = file.name;
+        sizeDisplay.textContent = String(file.size);
+      } else {
+        nameDisplay.textContent = 'None';
+        sizeDisplay.textContent = '0';
+      }
+    });
+  </script>
+</body>
+</html>

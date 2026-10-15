@@ -25,8 +25,9 @@ import { populateForm, FormPopulationError } from './formPopulator.js';
 import { prepareFormSubmission, executeFormSubmission, getConfirmationToken, clearConfirmationTokens, FormSubmissionError } from './formSubmitter.js';
 import { SessionVault, SessionVaultError, generateSessionId, isValidSessionId } from './sessionVault.js';
 import { HumanHandoffManager, HumanHandoffError, HANDOFF_REASONS, HANDOFF_STATES, clampHandoffTtl, toSafeHandoffMetadata } from './humanHandoff.js';
+import { FileTransferManager, FileTransferError, validateAndNormalizeUploadPath, isSensitiveFilePath, sanitizeDownloadFilename } from './fileTransfer.js';
 
-export { ActionExecutionError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError, HumanHandoffError, HANDOFF_REASONS, HANDOFF_STATES };
+export { ActionExecutionError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError, HumanHandoffError, FileTransferError, HANDOFF_REASONS, HANDOFF_STATES };
 
 export class BrowserManagerError extends Error {
   /**
@@ -139,6 +140,13 @@ export class BrowserManager {
       defaultTtlMs: this._handoffTtlMs
     });
     this._handoffManager.setBrowserManager(this);
+
+    this._fileTransferManager = options.fileTransferManager || new FileTransferManager({
+      downloadDir: options.downloadDir,
+      uploadMaxBytes: options.uploadMaxBytes,
+      downloadMaxBytes: options.downloadMaxBytes,
+      downloadTimeoutMs: options.downloadTimeoutMs
+    });
 
     this._launchPromise = null;
     this._closePromise = null;
@@ -3687,6 +3695,101 @@ export class BrowserManager {
       throw new BrowserManagerError('Human handoff subsystem is not initialized.', 'SUB_SYSTEM_NOT_AVAILABLE');
     }
     return await this._handoffManager.cancelHandoff(request, options);
+  }
+
+  /**
+   * File transfer manager getter (Brick 37).
+   */
+  get fileTransferManager() {
+    return this._fileTransferManager;
+  }
+
+  /**
+   * Approved download directory getter (Brick 37).
+   */
+  get downloadDir() {
+    return this._fileTransferManager ? this._fileTransferManager.downloadDir : null;
+  }
+
+  /**
+   * Executes a user-authorized file upload on managed page (Brick 37).
+   *
+   * @param {Object} request
+   * @param {Object} [options]
+   * @returns {Promise<Object>}
+   */
+  async uploadFile(request = {}, options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError('Browser is not running. Please launch the browser first.', 'BROWSER_NOT_RUNNING');
+    }
+
+    const pageId = request.pageId || this._activePageId;
+    const pageEntry = this._pages.get(pageId);
+    if (!pageEntry || !pageEntry.page || (typeof pageEntry.page.isClosed === 'function' && pageEntry.page.isClosed())) {
+      throw new BrowserManagerError('Target page not found or closed.', 'PAGE_NOT_FOUND', { pageId });
+    }
+
+    const mergedOptions = { ...request.options, ...options };
+    return await this._fileTransferManager.uploadFile({
+      pageEntry,
+      target: request.target,
+      expectedSnapshotToken: request.expectedSnapshotToken,
+      filePath: request.filePath,
+      filePaths: request.filePaths,
+      browserManager: this,
+      options: mergedOptions
+    });
+  }
+
+  /**
+   * Executes a user-authorized file download triggered by semantic target on managed page (Brick 37).
+   *
+   * @param {Object} request
+   * @param {Object} [options]
+   * @returns {Promise<Object>}
+   */
+  async downloadFile(request = {}, options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError('Browser is not running. Please launch the browser first.', 'BROWSER_NOT_RUNNING');
+    }
+
+    const pageId = request.pageId || this._activePageId;
+    const pageEntry = this._pages.get(pageId);
+    if (!pageEntry || !pageEntry.page || (typeof pageEntry.page.isClosed === 'function' && pageEntry.page.isClosed())) {
+      throw new BrowserManagerError('Target page not found or closed.', 'PAGE_NOT_FOUND', { pageId });
+    }
+
+    const mergedOptions = { ...request.options, ...options };
+    return await this._fileTransferManager.downloadFile({
+      pageEntry,
+      target: request.target,
+      expectedSnapshotToken: request.expectedSnapshotToken,
+      browserManager: this,
+      options: mergedOptions
+    });
+  }
+
+  /**
+   * Lists completed downloads from the safe registry (Brick 37).
+   *
+   * @returns {Array<Object>}
+   */
+  listDownloads() {
+    return this._fileTransferManager ? this._fileTransferManager.listDownloads() : [];
+  }
+
+  /**
+   * Retrieves safe metadata for a specific download (Brick 37).
+   *
+   * @param {string} downloadId
+   * @returns {Object|null}
+   */
+  getDownload(downloadId) {
+    return this._fileTransferManager ? this._fileTransferManager.getDownload(downloadId) : null;
   }
 }
 

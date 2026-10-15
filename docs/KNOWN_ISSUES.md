@@ -424,6 +424,23 @@ Currently tracked issues in JARVIS4:
     - **Explicit Session Save Rule**: Successful handoff verification never automatically triggers Save Session. Preserves GREEN-035 rule: session profiles may only be saved via explicit user request.
     - **Zero AI / Zero Search**: Exactly 0 LLM calls, 0 OpenRouter calls, 0 search calls. Local loopback fixtures only.
 
+30. **Safe File Upload & Download v1 Observations & Limitations (Brick 37 In Progress)**:
+    - **Explicit File Upload Authorization**: Uploading a file requires explicit caller specification of the local path via `POST /api/browser/upload-file`. JARVIS never autonomously searches the filesystem, enumerates user directories, selects "latest file", or infers files based on prompt/content.
+    - **Generic File Action Block Preserved**: The generic `fill` browser action targeting file inputs remains strictly blocked with `FILE_INPUT_NOT_ALLOWED`. Only the dedicated `upload-file` endpoint with explicit authorization can set file input elements.
+    - **Snapshot & Target Binding**: Uploads require `expectedSnapshotToken` bound to `pageId`, `documentVersion`, and `semanticRevision`. Stale tokens immediately block transfer with `TARGET_STALE`.
+    - **Sensitive Upload Path Denylist**: Uploads are restricted by a deterministic denylist of sensitive file extensions and paths (`.ssh`, `.gnupg`, `.aws`, `.pem`, `.key`, `.id_rsa`, `.kdbx`, `.wallet`, `.sqlite`, `.sqlite3`, `.db`, `.pfx`, `.p12`). Denied files fail closed with `SENSITIVE_FILE_NOT_ALLOWED` without inspecting file contents.
+    - **Bounded File Sizes**: Uploads and downloads are bounded by configurable limits (`BROWSER_UPLOAD_MAX_BYTES=52428800` [50MB], `BROWSER_DOWNLOAD_MAX_BYTES=52428800` [50MB]). Oversized transfers fail closed (`UPLOAD_FILE_TOO_LARGE`, `DOWNLOAD_TOO_LARGE`) and partial/oversized downloads are cleaned up immediately.
+    - **Strictly Bounded Download Directory**: All downloads are saved strictly within a designated JARVIS download directory (`runtime/downloads/`). Arbitrary destination paths, directory traversal, absolute path injection, or saving to system folders are prohibited.
+    - **Filename Sanitization & Deterministic Collision Handling**: Download filenames suggested by servers or headers are sanitized against directory traversal (`../`, `..\`), reserved Windows filenames (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`), and forbidden characters. Filename collisions deterministically append numbered suffixes (`report (1).pdf`) without overwriting existing files.
+    - **Executable & Script Download Policy**: Obvious executable and script extensions (`.exe`, `.msi`, `.bat`, `.cmd`, `.ps1`, `.scr`, `.vbs`, `.js`, `.com`) are blocked with `DOWNLOAD_TYPE_NOT_ALLOWED`. Downloaded files are never automatically executed or launched.
+    - **Zero Archive Auto-Extraction**: Compressed archives (`.zip`, `.tar`, `.gz`, `.7z`, `.rar`) are saved as-is without automatic unpacking or extraction.
+    - **Single Action Semantics & Strictly Zero Download Auto-Retry**: Triggering a download via `POST /api/browser/download` performs at most one click action. If the download times out (`DOWNLOAD_TIMEOUT`) or fails, it is never retried automatically, preventing duplicate server-side mutations or rate limiting.
+    - **Real Browser Download Event as Ground Truth**: Downloads succeed only when the real browser emits a verified `download` event and saves a non-empty regular file. Click completion alone does not constitute proof of download.
+    - **Local Path Privacy**: Public API responses, UI displays, logs, and test diagnostics only expose opaque `downloadId`s, basenames, sizes, and MIME types. Full local filesystem paths are never leaked to websites or exposed in responses.
+    - **Mutual Exclusion with Human Handoff**: File upload and download operations are strictly blocked with `HUMAN_HANDOFF_ACTIVE` whenever a Human Handoff session is active on the bound page.
+    - **Zero AI / Zero Search**: Exactly 0 LLM calls, 0 OpenRouter calls, 0 search calls. All verification runs against deterministic local loopback fixtures.
+
+
 
 
 

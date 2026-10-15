@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>File Upload Validation Fixture</title>
+</head>
+<body>
+  <h1>File Upload Validation Fixture</h1>
+
+  <!-- 1. PDF only file input -->
+  <div style="margin-bottom: 16px;">
+    <label for="pdf-only-input">Upload PDF Document</label>
+    <input type="file" id="pdf-only-input" name="pdfDocument" accept=".pdf, application/pdf" />
+    <span id="pdf-status">No PDF</span>
+  </div>
+
+  <!-- 2. Multiple images input -->
+  <div style="margin-bottom: 16px;">
+    <label for="multiple-images-input">Upload Photo Gallery</label>
+    <input type="file" id="multiple-images-input" name="photos" multiple accept="image/*" />
+    <span id="photos-status">0 photos</span>
+  </div>
+
+  <!-- 3. Disabled file input -->
+  <div style="margin-bottom: 16px;">
+    <label for="disabled-file-input">Disabled Document</label>
+    <input type="file" id="disabled-file-input" name="disabledDoc" disabled />
+  </div>
+
+  <script>
+    const pdfInput = document.getElementById('pdf-only-input');
+    const pdfStatus = document.getElementById('pdf-status');
+    pdfInput.addEventListener('change', () => {
+      pdfStatus.textContent = pdfInput.files && pdfInput.files[0] ? pdfInput.files[0].name : 'No PDF';
+    });
+
+    const multiInput = document.getElementById('multiple-images-input');
+    const photosStatus = document.getElementById('photos-status');
+    multiInput.addEventListener('change', () => {
+      photosStatus.textContent = `${multiInput.files ? multiInput.files.length : 0} photos`;
+    });
+  </script>
+</body>
+</html>

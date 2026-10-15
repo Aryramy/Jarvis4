@@ -70,6 +70,72 @@ export async function startFixtureServer(options = {}) {
         return;
       }
 
+      // File Download Fixture Routes (Brick 37)
+      if (pathname.startsWith('/api/download/')) {
+        const sub = pathname.replace('/api/download/', '');
+        if (sub === 'sample.txt') {
+          const content = Buffer.from('Hello JARVIS safe download fixture\n');
+          res.writeHead(200, {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Content-Length': content.length,
+            'Content-Disposition': 'attachment; filename="sample.txt"',
+            'Cache-Control': 'no-store'
+          });
+          res.end(content);
+          return;
+        }
+
+        if (sub === 'report.pdf') {
+          const content = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\nxref\n0 1\ntrailer<</Size 1/Root 1 0 R>>\nstartxref\n9\n%%EOF');
+          res.writeHead(200, {
+            'Content-Type': 'application/pdf',
+            'Content-Length': content.length,
+            'Content-Disposition': 'attachment; filename="report.pdf"',
+            'Cache-Control': 'no-store'
+          });
+          res.end(content);
+          return;
+        }
+
+        if (sub === 'large.bin') {
+          const size = Number(parsedUrl.searchParams.get('size') || 100000); // 100 KB
+          const content = Buffer.alloc(size, 0x41);
+          res.writeHead(200, {
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': content.length,
+            'Content-Disposition': 'attachment; filename="large.bin"',
+            'Cache-Control': 'no-store'
+          });
+          res.end(content);
+          return;
+        }
+
+        if (sub === 'dangerous') {
+          const name = parsedUrl.searchParams.get('name') || 'evil.txt';
+          const content = Buffer.from('Dangerous name fixture test\n');
+          res.writeHead(200, {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Content-Length': content.length,
+            'Content-Disposition': `attachment; filename="${name}"`,
+            'Cache-Control': 'no-store'
+          });
+          res.end(content);
+          return;
+        }
+
+        if (sub === 'malicious.exe') {
+          const content = Buffer.from('MZ fake executable header\n');
+          res.writeHead(200, {
+            'Content-Type': 'application/x-msdownload',
+            'Content-Length': content.length,
+            'Content-Disposition': 'attachment; filename="malicious.exe"',
+            'Cache-Control': 'no-store'
+          });
+          res.end(content);
+          return;
+        }
+      }
+
       // Auth Fixture Routes (Brick 35)
       if (pathname === '/auth/do-login') {
         const user = parsedUrl.searchParams.get('user') || 'UserA';

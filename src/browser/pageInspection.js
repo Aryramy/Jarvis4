@@ -372,6 +372,13 @@ export function extractDomSnapshot(limits = {}) {
       if (inputType === 'checkbox' || inputType === 'radio') {
         record.checked = Boolean(el.checked || (el.hasAttribute && el.hasAttribute('checked')));
       }
+      if (inputType === 'file') {
+        const acceptAttr = el.getAttribute ? el.getAttribute('accept') : null;
+        if (acceptAttr) record.accept = acceptAttr;
+        if (Boolean(el.multiple || (el.hasAttribute && el.hasAttribute('multiple')))) {
+          record.multiple = true;
+        }
+      }
       // STRICT PRIVACY: NEVER RECORD `value`!
     }
 
@@ -723,6 +730,10 @@ export function inspectHtmlString(html, options = {}) {
       }
       if (inputType === 'checkbox' || inputType === 'radio') {
         record.checked = attribs.checked !== undefined;
+      }
+      if (inputType === 'file') {
+        if (attribs.accept) record.accept = attribs.accept;
+        if (attribs.multiple !== undefined) record.multiple = true;
       }
       // STRICT PRIVACY: NEVER RECORD `value`!
     }

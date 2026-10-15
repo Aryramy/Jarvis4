@@ -106,7 +106,11 @@ BRICK-035 — Human-Authenticated Persistent Browser Sessions v1 (Local Device S
 Status: VERIFIED
 
 BRICK-036 — Human Authentication Handoff, Continuation, MFA & CAPTCHA Experience
+Status: VERIFIED
+
+BRICK-037 — Safe File Upload & Download v1
 Status: IN PROGRESS (Awaiting Checkpoint)
 
-BRICK-037 — File Downloads & Uploads v1
+BRICK-038 — Browser Automation Evolution / Next Brick
 Status: NOT STARTED / NOT AUTHORIZED
+

@@ -22,7 +22,7 @@ import { PageReaderError } from '../webpage/urlSafety.js';
 import { executePageQa, PageQaError } from '../webpage/pageQa.js';
 import { executeResearchOne, ResearchOneError } from '../research/researchOne.js';
 import { decideBrowserEscalation, BrowserEscalationError } from '../routing/browserEscalation.js';
-import { defaultBrowserManager, BrowserManager, BrowserManagerError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError, HumanHandoffError } from '../browser/browserManager.js';
+import { defaultBrowserManager, BrowserManager, BrowserManagerError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError, HumanHandoffError, FileTransferError } from '../browser/browserManager.js';
 import { TargetResolutionError, SUPPORTED_KINDS } from '../browser/targetResolver.js';
 import { ActionExecutionError } from '../browser/actionExecutor.js';
 
@@ -3236,6 +3236,154 @@ export function createRequestListener(options = {}) {
           }));
         }
       });
+      return;
+    }
+
+    // Route: POST /api/browser/upload-file & POST /api/browser/upload (Brick 37 Safe File Upload)
+    if (url.pathname === '/api/browser/upload-file' || url.pathname === '/api/browser/upload') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.uploadFile(parsedBody);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'UPLOAD_FAILED';
+          let statusCode = 400;
+          if (errorCode === 'PAGE_CLOSED' || errorCode === 'PAGE_NOT_FOUND' || errorCode === 'FILE_NOT_FOUND') {
+            statusCode = 404;
+          } else if (errorCode === 'TARGET_STALE' || errorCode === 'HUMAN_HANDOFF_ACTIVE') {
+            statusCode = 409;
+          } else if (errorCode === 'SENSITIVE_FILE_NOT_ALLOWED') {
+            statusCode = 403;
+          } else if (errorCode === 'UPLOAD_FILE_TOO_LARGE') {
+            statusCode = 413;
+          } else if (errorCode === 'BROWSER_ERROR') {
+            statusCode = 500;
+          }
+
+          let safeMessage = err.message || 'File upload failed.';
+          if (err instanceof BrowserManagerError || err instanceof FileTransferError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage,
+            details: err.details || {}
+          }));
+        }
+      });
+      return;
+    }
+
+    // Route: POST /api/browser/download (Brick 37 Safe File Download)
+    if (url.pathname === '/api/browser/download') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.downloadFile(parsedBody);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'DOWNLOAD_FAILED';
+          let statusCode = 400;
+          if (errorCode === 'PAGE_CLOSED' || errorCode === 'PAGE_NOT_FOUND' || errorCode === 'TARGET_NOT_FOUND') {
+            statusCode = 404;
+          } else if (errorCode === 'TARGET_STALE' || errorCode === 'HUMAN_HANDOFF_ACTIVE') {
+            statusCode = 409;
+          } else if (errorCode === 'DOWNLOAD_TIMEOUT') {
+            statusCode = 408;
+          } else if (errorCode === 'DOWNLOAD_TOO_LARGE') {
+            statusCode = 413;
+          } else if (errorCode === 'DOWNLOAD_TYPE_NOT_ALLOWED') {
+            statusCode = 403;
+          } else if (errorCode === 'BROWSER_ERROR' || errorCode === 'DOWNLOAD_FAILED') {
+            statusCode = 500;
+          }
+
+          let safeMessage = err.message || 'File download failed.';
+          if (err instanceof BrowserManagerError || err instanceof FileTransferError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage,
+            details: err.details || {}
+          }));
+        }
+      });
+      return;
+    }
+
+    // Route: GET /api/browser/downloads (Brick 37 List Downloads)
+    if (url.pathname === '/api/browser/downloads' && req.method === 'GET') {
+      try {
+        const downloads = browserManager.listDownloads();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          downloads
+        }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: 'DOWNLOAD_LIST_FAILED',
+          message: err.message || 'Failed to list downloads'
+        }));
+      }
       return;
     }
 

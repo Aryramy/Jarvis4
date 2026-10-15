@@ -91,7 +91,10 @@ function clamp(val, min, max, defaultVal) {
     maxDynamicWaits: clamp(overrides.BROWSER_MAX_DYNAMIC_WAITS ?? process.env.BROWSER_MAX_DYNAMIC_WAITS, 1, 20, 4),
     submitVerifyTimeoutMs: clamp(overrides.BROWSER_SUBMIT_VERIFY_TIMEOUT_MS ?? process.env.BROWSER_SUBMIT_VERIFY_TIMEOUT_MS, 100, 30000, 10000),
     submitConfirmationTtlMs: clamp(overrides.BROWSER_CONFIRMATION_TTL_MS ?? process.env.BROWSER_CONFIRMATION_TTL_MS, 1000, 300000, 60000),
-    handoffTtlMs: clamp(overrides.BROWSER_HANDOFF_TTL_MS ?? process.env.BROWSER_HANDOFF_TTL_MS, 1000, 1800000, 300000)
+    handoffTtlMs: clamp(overrides.BROWSER_HANDOFF_TTL_MS ?? process.env.BROWSER_HANDOFF_TTL_MS, 1000, 1800000, 300000),
+    uploadMaxBytes: clamp(overrides.BROWSER_UPLOAD_MAX_BYTES ?? process.env.BROWSER_UPLOAD_MAX_BYTES, 1024, 500 * 1024 * 1024, 50 * 1024 * 1024),
+    downloadMaxBytes: clamp(overrides.BROWSER_DOWNLOAD_MAX_BYTES ?? process.env.BROWSER_DOWNLOAD_MAX_BYTES, 1024, 500 * 1024 * 1024, 50 * 1024 * 1024),
+    downloadTimeoutMs: clamp(overrides.BROWSER_DOWNLOAD_TIMEOUT_MS ?? process.env.BROWSER_DOWNLOAD_TIMEOUT_MS, 1000, 300000, 30000)
   });
 
   return Object.freeze({

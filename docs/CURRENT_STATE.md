@@ -1,11 +1,49 @@
 Project: JARVIS4
-Current Brick: 36
-Status: BRICK-036 IN PROGRESS (Human Authentication Handoff, Continuation, MFA & CAPTCHA Experience v1; Harness-First / Zero Password Automation)
-Last Verified Brick: BRICK-035
-Current Feature: Human Authentication Handoff, Continuation, MFA & CAPTCHA Experience v1
-Next Feature: NOT AUTHORIZED (Brick 37: File Downloads & Uploads v1 — NOT STARTED)
+Current Brick: 37
+Status: BRICK-037 IN PROGRESS (Safe File Upload & Download v1; Explicit Authorization + Bounded File Access + Verified Transfers)
+Last Verified Brick: BRICK-036
+Current Feature: Safe File Upload & Download v1
+Next Feature: NOT AUTHORIZED (Brick 38 — NOT STARTED)
 
 ## Working capabilities
+
+- Safe File Upload & Download v1 (Brick 37) deterministic file transfer subsystem (`src/browser/fileTransfer.js`, `browserManager.js`, `server.js`, `index.html`):
+  - Strict Security Principles & Zero Arbitrary Filesystem Access:
+    - Exactly 0 filesystem scanning or directory enumeration.
+    - Exactly 0 auto-execution of downloaded files or scripts (`.exe`, `.msi`, `.bat`, `.cmd`, `.ps1`, `.scr` strictly blocked with `DOWNLOAD_TYPE_NOT_ALLOWED`).
+    - Exactly 0 archive auto-extraction (`.zip`, `.rar`, `.tar`, `.gz` downloaded as plain files only).
+    - Exactly 0 AI/LLM involvement in file-selection or transfer decisions (0 OpenRouter, 0 LLM, 0 Exa search).
+  - Explicit Upload Authorization Contract:
+    - Dedicated endpoint: `POST /api/browser/upload-file` (or `/api/browser/upload`).
+    - Explicit caller-supplied local file path required; JARVIS never searches Desktop, Documents, or guesses files.
+    - Pre-interaction path normalization and validation: regular file check, existence check (`FILE_NOT_FOUND`), directory rejection (`FILE_IS_DIRECTORY`), path traversal prevention (`INVALID_FILE_PATH`), and conservative sensitive file denylist (`SENSITIVE_FILE_NOT_ALLOWED` for private keys, certificates, SSH keys, credentials, `.env` files, browser profiles).
+    - Size limits: Configurable `BROWSER_UPLOAD_MAX_BYTES` (default 50 MB, clamped [1024, 500 MB]) rejects oversized files with `UPLOAD_FILE_TOO_LARGE` before browser interaction without loading full file into memory.
+    - Target binding: Resolves unique, high-confidence file input (`kind: 'input'`, `inputType: 'file'`) bound to current page and fresh `expectedSnapshotToken`. Stale tokens reject with `TARGET_STALE`.
+    - HTML accept constraint validation: Enforces `<input accept=...>` conservatively; mismatched files reject with `FILE_TYPE_NOT_ACCEPTED`.
+    - Multiple files constraint: Rejects multiple files on single inputs with `MULTIPLE_UPLOAD_NOT_SUPPORTED`.
+    - Generic action protection: Generic `fill` action on file inputs remains strictly blocked (`FILE_INPUT_NOT_ALLOWED` / `FILE_INTERACTION_NOT_AUTHORIZED`).
+    - Upload execution: Uses Playwright's native `setInputFiles` mechanism; never types into OS dialogs or uses arbitrary JavaScript assignment.
+    - State verification: Evaluates browser-side DOM state safely (`files` array count, name, size).
+    - Zero auto-submit: Setting file input never submits the form; GREEN-034 two-step confirmation remains required.
+    - Full path privacy: Upload API and UI responses return only safe basename and size; full local filesystem paths and drive letters are never leaked.
+  - Dedicated Download Authorization Contract:
+    - Dedicated endpoint: `POST /api/browser/download`.
+    - Requires semantic target query (`kind`, `text`, `name`) and fresh `expectedSnapshotToken`. Regular generic clicks are NOT download-enabled globally.
+    - Real Browser Download Event as Proof: Success requires the real browser to emit a verified download event and report no download failure.
+    - Approved JARVIS Download Directory: All downloads save strictly into a JARVIS-controlled area (`runtime/downloads/` or configured test directory). Arbitrary destination paths are prohibited.
+    - Filename sanitization & traversal defense: Strips `../`, `..\`, absolute paths, control codes, and dangerous characters. Escapes Windows reserved device names (`CON`, `NUL`, `PRN`, `AUX`, `COM1-9`, `LPT1-9` -> `_CON`, etc.).
+    - Collision-safe naming: Never silently overwrites existing downloads; generates deterministic incremented suffixes (`file (1).ext`, `file (2).ext`).
+    - Bounded download limits & timeouts: `BROWSER_DOWNLOAD_MAX_BYTES` (default 50 MB) deletes oversized artifacts immediately with `DOWNLOAD_TOO_LARGE`. `BROWSER_DOWNLOAD_TIMEOUT_MS` (default 30,000 ms) bounds wait time with `DOWNLOAD_TIMEOUT`.
+    - Zero auto-retry: Exactly one download-triggering action per authorization; never retries automatically on failure or timeout.
+    - Opaque download IDs & Safe Registry: Completed downloads are registered with opaque IDs (`dl_<timestamp>_<hex>`). Public listing endpoint `GET /api/browser/downloads` exposes only `downloadId`, `filename`, `size`, `createdAt`, `status` without internal destination paths.
+  - Human Handoff & Session Protection:
+    - Mutating file upload and download operations are strictly blocked with `HUMAN_HANDOFF_ACTIVE` while human authentication handoff is paused.
+    - Transfers inside restored persistent sessions maintain complete session isolation; zero cookies or storage tokens leak into transfer metadata.
+  - Developer Control Center UI:
+    - "File Transfer" developer section with Upload panel (target query, explicit path, Upload button), Download panel (target query, Download button), and Recent Completed Downloads table. Rendered strictly with `.textContent` DOM updates.
+  - Verification Evidence:
+    - 1540/1540 offline unit, contract, and regression tests PASS (`npm run verify`).
+    - 108/108 real-browser acceptance tests across 29 categories PASS on Microsoft Edge (`npm run verify:browser`).
 
 - Human Authentication Handoff, Continuation, MFA & CAPTCHA Experience v1 (Brick 36) deterministic human handoff subsystem (`src/browser/humanHandoff.js`, `browserManager.js`, `server.js`, `index.html`):
   - Deterministic State Machine:

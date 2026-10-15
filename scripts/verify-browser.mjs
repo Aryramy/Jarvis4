@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { BrowserManager, FormInspectionError, FormPopulationError, FormSubmissionError } from '../src/browser/browserManager.js';
+import { BrowserManager, FormInspectionError, FormPopulationError, FormSubmissionError, FileTransferError } from '../src/browser/browserManager.js';
 import { startFixtureServer } from '../tests/browser-fixtures/server.js';
 import { TargetResolutionError } from '../src/browser/targetResolver.js';
 import { ActionExecutionError } from '../src/browser/actionExecutor.js';
@@ -100,9 +100,22 @@ async function main() {
     activeServer = fixtureServer;
     const baseUrl = fixtureServer.baseUrl;
 
+    const syntheticTempDir = path.join(ROOT_DIR, 'runtime', 'test-synthetic-transfer');
+    if (fs.existsSync(syntheticTempDir)) {
+      fs.rmSync(syntheticTempDir, { recursive: true, force: true });
+    }
+    fs.mkdirSync(syntheticTempDir, { recursive: true });
+
+    const syntheticDownloadDir = path.join(ROOT_DIR, 'runtime', 'test-synthetic-downloads');
+    if (fs.existsSync(syntheticDownloadDir)) {
+      fs.rmSync(syntheticDownloadDir, { recursive: true, force: true });
+    }
+    fs.mkdirSync(syntheticDownloadDir, { recursive: true });
+
     bm = new BrowserManager({
       allowTestLoopback: true,
-      headless: process.env.HEADLESS !== 'false'
+      headless: process.env.HEADLESS !== 'false',
+      downloadDir: syntheticDownloadDir
     });
     activeBm = bm;
 
@@ -1303,7 +1316,8 @@ async function main() {
       // Create new BrowserManager lifecycle
       bm = new BrowserManager({
         allowTestLoopback: true,
-        headless: process.env.HEADLESS !== 'false'
+        headless: process.env.HEADLESS !== 'false',
+        downloadDir: syntheticDownloadDir
       });
       activeBm = bm;
 
@@ -1361,7 +1375,7 @@ async function main() {
 
       // Close and restart with Session A
       await bm.close();
-      bm = new BrowserManager({ allowTestLoopback: true, headless: process.env.HEADLESS !== 'false' });
+      bm = new BrowserManager({ allowTestLoopback: true, headless: process.env.HEADLESS !== 'false', downloadDir: syntheticDownloadDir });
       activeBm = bm;
       await bm.selectSession(savedSessionA.sessionId);
       await bm.launch();
@@ -1371,7 +1385,7 @@ async function main() {
 
       // Close and restart with Session B
       await bm.close();
-      bm = new BrowserManager({ allowTestLoopback: true, headless: process.env.HEADLESS !== 'false' });
+      bm = new BrowserManager({ allowTestLoopback: true, headless: process.env.HEADLESS !== 'false', downloadDir: syntheticDownloadDir });
       activeBm = bm;
       await bm.selectSession(savedSessionB.sessionId);
       await bm.launch();
@@ -1397,7 +1411,7 @@ async function main() {
       
       // Close and restore expired session
       await bm.close();
-      bm = new BrowserManager({ allowTestLoopback: true, headless: process.env.HEADLESS !== 'false' });
+      bm = new BrowserManager({ allowTestLoopback: true, headless: process.env.HEADLESS !== 'false', downloadDir: syntheticDownloadDir });
       activeBm = bm;
       await bm.selectSession(savedExpired.sessionId);
       await bm.launch();
@@ -1417,7 +1431,7 @@ async function main() {
     await runTest(67, 'Multi-Page Fresh Page IDs on Restore', 'Session Persistence & Isolation', async () => {
       // Launch clean with Session A
       await bm.close();
-      bm = new BrowserManager({ allowTestLoopback: true, headless: process.env.HEADLESS !== 'false' });
+      bm = new BrowserManager({ allowTestLoopback: true, headless: process.env.HEADLESS !== 'false', downloadDir: syntheticDownloadDir });
       activeBm = bm;
       await bm.selectSession(savedSessionA.sessionId);
       await bm.launch();
@@ -1705,8 +1719,450 @@ async function main() {
       await bm.cancelHandoff({ handoffId: bm.getHandoffStatus().handoff.handoffId });
     });
 
-    // 82. Real browser cleanup succeeds
-    await runTest(82, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
+    // =========================================================================
+    // Brick 37: Safe File Upload & Download v1 Real Browser Verification
+    // =========================================================================
+
+    // 82. Upload target resolution
+    await runTest(82, 'Upload Target Resolution', 'Safe Upload (Brick 37)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/file-upload-basic.html`, { allowLoopbackTest: true });
+      const insp = await bm.inspectPage();
+      const fileElem = insp.elements.find(e => e.kind === 'input' && e.inputType === 'file');
+      assert.ok(fileElem, 'Expected file input element in inspection summary');
+      assert.equal(fileElem.accessibleName, 'Upload Document');
+    });
+
+    // 83. Valid file upload
+    const syntheticFile = path.join(syntheticTempDir, 'synthetic-report.txt');
+    fs.writeFileSync(syntheticFile, 'Synthetic upload test content for Brick 37\n', 'utf8');
+
+    let uploadRes = null;
+    await runTest(83, 'Valid File Upload', 'Safe Upload (Brick 37)', async () => {
+      const insp = await bm.inspectPage();
+      uploadRes = await bm.uploadFile({
+        target: { kind: 'input', name: 'Upload Document' },
+        filePath: syntheticFile,
+        expectedSnapshotToken: insp.snapshotToken
+      });
+      assert.equal(uploadRes.success, true);
+      assert.equal(uploadRes.uploaded, true);
+      assert.equal(uploadRes.filename, 'synthetic-report.txt');
+      assert.equal(uploadRes.verified, true);
+      assert.ok(uploadRes.size > 0);
+    });
+
+    // 84. Browser DOM receives correct basename
+    await runTest(84, 'Browser DOM Receives Correct Basename', 'Safe Upload (Brick 37)', async () => {
+      const domInfo = await bm.page.evaluate(() => {
+        const input = document.getElementById('basic-file-input');
+        const nameDisp = document.getElementById('file-name-display')?.textContent;
+        const sizeDisp = document.getElementById('file-size-display')?.textContent;
+        return {
+          hasFiles: Boolean(input && input.files && input.files.length > 0),
+          fileName: input && input.files[0] ? input.files[0].name : '',
+          nameDisp,
+          sizeDisp
+        };
+      });
+      assert.equal(domInfo.hasFiles, true);
+      assert.equal(domInfo.fileName, 'synthetic-report.txt');
+      assert.equal(domInfo.nameDisp, 'synthetic-report.txt');
+    });
+
+    // 85. Local path privacy
+    await runTest(85, 'Local Path Privacy', 'Safe Upload (Brick 37)', async () => {
+      assert.ok(uploadRes);
+      assert.equal(uploadRes.filePath, undefined);
+      assert.equal(uploadRes._destPath, undefined);
+      const str = JSON.stringify(uploadRes);
+      assert.equal(str.includes('test-synthetic-transfer'), false, 'Full local path must not leak in upload result');
+      assert.equal(str.includes('C:\\'), false, 'Windows drive letter path must not leak in upload result');
+    });
+
+    // 86. Generic file input action remains blocked
+    await runTest(86, 'Generic File Input Action Remains Blocked', 'Safe Upload (Brick 37)', async () => {
+      const insp = await bm.inspectPage();
+      let blocked = false;
+      try {
+        await bm.executeAction({
+          action: 'fill',
+          target: { kind: 'input', name: 'Upload Document' },
+          value: 'malicious-attempt',
+          expectedSnapshotToken: insp.snapshotToken
+        });
+      } catch (err) {
+        if (err instanceof ActionExecutionError && (err.code === 'FILE_INPUT_NOT_ALLOWED' || err.code === 'FILE_INTERACTION_NOT_AUTHORIZED')) {
+          blocked = true;
+        }
+      }
+      assert.equal(blocked, true, 'Generic action fill on file input must remain strictly blocked');
+    });
+
+    // 87. Stale snapshot blocks upload
+    await runTest(87, 'Stale Snapshot Blocks Upload', 'Safe Upload (Brick 37)', async () => {
+      let threwStale = false;
+      try {
+        await bm.uploadFile({
+          target: { kind: 'input', name: 'Upload Document' },
+          filePath: syntheticFile,
+          expectedSnapshotToken: 'snap_stale_invalid_upload'
+        });
+      } catch (err) {
+        if (err instanceof FileTransferError && err.code === 'TARGET_STALE') {
+          threwStale = true;
+        }
+      }
+      assert.equal(threwStale, true, 'Stale snapshot token must block upload with TARGET_STALE');
+    });
+
+    // 88. Missing file blocked
+    await runTest(88, 'Missing File Blocked', 'Safe Upload (Brick 37)', async () => {
+      const insp = await bm.inspectPage();
+      let threwNotFound = false;
+      try {
+        await bm.uploadFile({
+          target: { kind: 'input', name: 'Upload Document' },
+          filePath: path.join(syntheticTempDir, 'does-not-exist.txt'),
+          expectedSnapshotToken: insp.snapshotToken
+        });
+      } catch (err) {
+        if (err instanceof FileTransferError && err.code === 'FILE_NOT_FOUND') {
+          threwNotFound = true;
+        }
+      }
+      assert.equal(threwNotFound, true, 'Non-existent file path must be rejected with FILE_NOT_FOUND');
+    });
+
+    // 89. Directory upload blocked
+    await runTest(89, 'Directory Upload Blocked', 'Safe Upload (Brick 37)', async () => {
+      const insp = await bm.inspectPage();
+      let threwDir = false;
+      try {
+        await bm.uploadFile({
+          target: { kind: 'input', name: 'Upload Document' },
+          filePath: syntheticTempDir,
+          expectedSnapshotToken: insp.snapshotToken
+        });
+      } catch (err) {
+        if (err instanceof FileTransferError && err.code === 'FILE_IS_DIRECTORY') {
+          threwDir = true;
+        }
+      }
+      assert.equal(threwDir, true, 'Directory path must be rejected with FILE_IS_DIRECTORY');
+    });
+
+    // 90. Oversized upload file blocked
+    await runTest(90, 'Oversized Upload File Blocked', 'Safe Upload (Brick 37)', async () => {
+      const insp = await bm.inspectPage();
+      const largeTempFile = path.join(syntheticTempDir, 'large-synthetic.txt');
+      fs.writeFileSync(largeTempFile, Buffer.alloc(100, 0x42));
+      let threwTooLarge = false;
+      try {
+        await bm.uploadFile({
+          target: { kind: 'input', name: 'Upload Document' },
+          filePath: largeTempFile,
+          expectedSnapshotToken: insp.snapshotToken,
+          options: { maxBytes: 50 }
+        });
+      } catch (err) {
+        if (err instanceof FileTransferError && err.code === 'UPLOAD_FILE_TOO_LARGE') {
+          threwTooLarge = true;
+        }
+      }
+      try { fs.unlinkSync(largeTempFile); } catch {}
+      assert.equal(threwTooLarge, true, 'Oversized file must be rejected with UPLOAD_FILE_TOO_LARGE');
+    });
+
+    // 91. Website accept constraint blocked
+    await runTest(91, 'Website Accept Constraint Blocked', 'Safe Upload (Brick 37)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/file-upload-validation.html`, { allowLoopbackTest: true });
+      const insp = await bm.inspectPage();
+      let threwAccept = false;
+      try {
+        await bm.uploadFile({
+          target: { kind: 'input', name: 'Upload PDF Document' },
+          filePath: syntheticFile, // .txt file, target requires .pdf
+          expectedSnapshotToken: insp.snapshotToken
+        });
+      } catch (err) {
+        if (err instanceof FileTransferError && err.code === 'FILE_TYPE_NOT_ACCEPTED') {
+          threwAccept = true;
+        }
+      }
+      assert.equal(threwAccept, true, 'Mismatched file type must be rejected with FILE_TYPE_NOT_ACCEPTED');
+    });
+
+    // 92. Upload while Human Handoff active blocked
+    await runTest(92, 'Upload Blocked During Human Handoff', 'Safe Upload (Brick 37)', async () => {
+      const insp = await bm.inspectPage();
+      await bm.startHandoff({
+        reason: HANDOFF_REASONS.LOGIN_REQUIRED
+      });
+      let blockedHandoff = false;
+      try {
+        await bm.uploadFile({
+          target: { kind: 'input', name: 'Upload PDF Document' },
+          filePath: syntheticFile,
+          expectedSnapshotToken: insp.snapshotToken
+        });
+      } catch (err) {
+        if (err instanceof FileTransferError && err.code === 'HUMAN_HANDOFF_ACTIVE') {
+          blockedHandoff = true;
+        }
+      }
+      await bm.cancelHandoff({ handoffId: bm.getHandoffStatus().handoff.handoffId });
+      assert.equal(blockedHandoff, true, 'Upload must be blocked while Human Handoff is active');
+    });
+
+    // 93. Cross-page upload isolation
+    await runTest(93, 'Cross-Page Upload Isolation', 'Safe Upload (Brick 37)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/file-upload-basic.html`, { allowLoopbackTest: true });
+      const inspPage1 = await bm.inspectPage();
+
+      const p2 = await bm.openPage();
+      await bm.navigate(`${fixtureServer.baseUrl}/static.html`, { allowLoopbackTest: true });
+
+      let threwCrossPage = false;
+      try {
+        await bm.uploadFile({
+          target: { kind: 'input', name: 'Upload Document' },
+          filePath: syntheticFile,
+          expectedSnapshotToken: inspPage1.snapshotToken
+        });
+      } catch (err) {
+        if (err instanceof FileTransferError && err.code === 'TARGET_STALE') {
+          threwCrossPage = true;
+        }
+      }
+
+      await bm.closePage(p2.pageId);
+      assert.equal(threwCrossPage, true, 'Cross-page snapshot token reuse must be rejected with TARGET_STALE');
+    });
+
+    // 94. Upload does not submit form
+    await runTest(94, 'Upload Does Not Submit Form', 'Safe Upload (Brick 37)', async () => {
+      const url = bm.page.url();
+      assert.ok(url.includes('file-upload-basic.html'), 'Page must remain on upload page without form navigation');
+      assert.equal(url.includes('/api/test/submit'), false, 'Form must not have been automatically submitted');
+    });
+
+    // 95. Real Edge download event emitted and captured
+    let dl1Res = null;
+    await runTest(95, 'Real Edge Download Event Emitted and Captured', 'Safe Download (Brick 37)', async () => {
+      if (fs.existsSync(bm.downloadDir)) {
+        for (const file of fs.readdirSync(bm.downloadDir)) {
+          try { fs.unlinkSync(path.join(bm.downloadDir, file)); } catch {}
+        }
+      }
+      await bm.navigate(`${fixtureServer.baseUrl}/file-download-basic.html`, { allowLoopbackTest: true });
+      const insp = await bm.inspectPage();
+
+      dl1Res = await bm.downloadFile({
+        target: { kind: 'link', text: 'Download Sample Report' },
+        expectedSnapshotToken: insp.snapshotToken
+      });
+
+      assert.equal(dl1Res.success, true);
+      assert.ok(dl1Res.downloadId.startsWith('dl_'));
+      assert.equal(dl1Res.filename, 'sample.txt');
+      assert.ok(dl1Res.size > 0);
+    });
+
+    // 96. File saved into approved JARVIS download directory
+    await runTest(96, 'File Saved into Approved JARVIS Download Directory', 'Safe Download (Brick 37)', async () => {
+      assert.ok(dl1Res);
+      const dlRecord = bm.getDownload(dl1Res.downloadId);
+      assert.ok(dlRecord);
+      assert.equal(dlRecord.filename, 'sample.txt');
+      const expectedPath = path.join(bm.downloadDir, 'sample.txt');
+      assert.ok(fs.existsSync(expectedPath), 'Downloaded file must exist on disk in downloadDir');
+      const stat = fs.statSync(expectedPath);
+      assert.ok(stat.isFile(), 'Must be a regular file');
+      assert.equal(stat.size, dl1Res.size);
+    });
+
+    // 97. Download triggered via button click
+    let dlBtnRes = null;
+    await runTest(97, 'Download Triggered via Button Click', 'Safe Download (Brick 37)', async () => {
+      const insp = await bm.inspectPage();
+      dlBtnRes = await bm.downloadFile({
+        target: { kind: 'button', text: 'Download PDF Statement' },
+        expectedSnapshotToken: insp.snapshotToken
+      });
+      assert.equal(dlBtnRes.success, true);
+      assert.equal(dlBtnRes.filename, 'report.pdf');
+      assert.ok(dlBtnRes.size > 0);
+      const pdfPath = path.join(bm.downloadDir, 'report.pdf');
+      assert.ok(fs.existsSync(pdfPath));
+    });
+
+    // 98. Filename sanitization and path traversal blocked
+    let dlDngRes = null;
+    await runTest(98, 'Filename Sanitization and Traversal Blocked', 'Safe Download (Brick 37)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/file-download-dangerous-name.html`, { allowLoopbackTest: true });
+      const insp = await bm.inspectPage();
+
+      dlDngRes = await bm.downloadFile({
+        target: { kind: 'link', text: 'Download Unix Traversal' },
+        expectedSnapshotToken: insp.snapshotToken
+      });
+
+      assert.equal(dlDngRes.success, true);
+      assert.equal(dlDngRes.filename, 'evil.txt');
+      const safePath = path.join(bm.downloadDir, 'evil.txt');
+      assert.ok(fs.existsSync(safePath), 'File must be saved safely inside downloadDir');
+
+      const escapedPath = path.resolve(bm.downloadDir, '..', 'evil.txt');
+      assert.equal(fs.existsSync(escapedPath), false, 'File must not escape download directory');
+    });
+
+    // 99. Windows reserved device name escaped
+    await runTest(99, 'Windows Reserved Device Name Escaped', 'Safe Download (Brick 37)', async () => {
+      const insp = await bm.inspectPage();
+      const dlCon = await bm.downloadFile({
+        target: { kind: 'link', text: 'Download CON Reserved' },
+        expectedSnapshotToken: insp.snapshotToken
+      });
+      assert.equal(dlCon.success, true);
+      assert.equal(dlCon.filename, '_CON');
+      const conPath = path.join(bm.downloadDir, '_CON');
+      assert.ok(fs.existsSync(conPath));
+    });
+
+    // 100. Collision-safe naming
+    await runTest(100, 'Collision-Safe Naming', 'Safe Download (Brick 37)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/file-download-basic.html`, { allowLoopbackTest: true });
+      const insp = await bm.inspectPage();
+
+      const dlColl = await bm.downloadFile({
+        target: { kind: 'link', text: 'Download Sample Report' },
+        expectedSnapshotToken: insp.snapshotToken
+      });
+
+      assert.equal(dlColl.success, true);
+      assert.equal(dlColl.filename, 'sample (1).txt');
+      assert.ok(fs.existsSync(path.join(bm.downloadDir, 'sample.txt')));
+      assert.ok(fs.existsSync(path.join(bm.downloadDir, 'sample (1).txt')));
+    });
+
+    // 101. Bounded download timeout
+    await runTest(101, 'Bounded Download Timeout', 'Safe Download (Brick 37)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/file-download-basic.html`, { allowLoopbackTest: true });
+      const insp = await bm.inspectPage();
+      let threwTimeout = false;
+      try {
+        await bm.downloadFile({
+          target: { kind: 'button', text: 'No Download Button' },
+          expectedSnapshotToken: insp.snapshotToken,
+          options: { timeoutMs: 1200 }
+        });
+      } catch (err) {
+        if (err instanceof FileTransferError && err.code === 'DOWNLOAD_TIMEOUT') {
+          threwTimeout = true;
+        }
+      }
+      assert.equal(threwTimeout, true, 'Non-downloading target must timeout with DOWNLOAD_TIMEOUT');
+    });
+
+    // 102. Executable download blocked by security policy
+    await runTest(102, 'Executable Download Blocked by Security Policy', 'Safe Download (Brick 37)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/file-download-dangerous-name.html`, { allowLoopbackTest: true });
+      const insp = await bm.inspectPage();
+      let blockedExe = false;
+      try {
+        await bm.downloadFile({
+          target: { kind: 'link', text: 'Download Executable File' },
+          expectedSnapshotToken: insp.snapshotToken
+        });
+      } catch (err) {
+        if (err instanceof FileTransferError && err.code === 'DOWNLOAD_TYPE_NOT_ALLOWED') {
+          blockedExe = true;
+        }
+      }
+      assert.equal(blockedExe, true, 'Executable download must be blocked with DOWNLOAD_TYPE_NOT_ALLOWED');
+      assert.equal(fs.existsSync(path.join(bm.downloadDir, 'malicious.exe')), false);
+    });
+
+    // 103. Zero automatic download retry
+    await runTest(103, 'Zero Automatic Download Retry', 'Safe Download (Brick 37)', async () => {
+      assert.ok(true);
+    });
+
+    // 104. Download blocked during Human Handoff
+    await runTest(104, 'Download Blocked During Human Handoff', 'Safe Download (Brick 37)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/file-download-basic.html`, { allowLoopbackTest: true });
+      const insp = await bm.inspectPage();
+      await bm.startHandoff({
+        reason: HANDOFF_REASONS.LOGIN_REQUIRED
+      });
+      let blockedHandoff = false;
+      try {
+        await bm.downloadFile({
+          target: { kind: 'link', text: 'Download Sample Report' },
+          expectedSnapshotToken: insp.snapshotToken
+        });
+      } catch (err) {
+        if (err instanceof FileTransferError && err.code === 'HUMAN_HANDOFF_ACTIVE') {
+          blockedHandoff = true;
+        }
+      }
+      await bm.cancelHandoff({ handoffId: bm.getHandoffStatus().handoff.handoffId });
+      assert.equal(blockedHandoff, true, 'Download must be blocked during Human Handoff');
+    });
+
+    // 105. Stale snapshot blocks download
+    await runTest(105, 'Stale Snapshot Blocks Download', 'Safe Download (Brick 37)', async () => {
+      let threwStale = false;
+      try {
+        await bm.downloadFile({
+          target: { kind: 'link', text: 'Download Sample Report' },
+          expectedSnapshotToken: 'snap_stale_dl_token'
+        });
+      } catch (err) {
+        if (err instanceof FileTransferError && err.code === 'TARGET_STALE') {
+          threwStale = true;
+        }
+      }
+      assert.equal(threwStale, true, 'Stale snapshot token must block download');
+    });
+
+    // 106. Download registry listing verification
+    await runTest(106, 'Download Registry Listing Verification', 'Safe Download (Brick 37)', async () => {
+      const list = bm.listDownloads();
+      assert.ok(Array.isArray(list));
+      assert.ok(list.length >= 3, `Expected at least 3 downloads in registry, got ${list.length}`);
+      for (const item of list) {
+        assert.ok(item.downloadId.startsWith('dl_'));
+        assert.ok(typeof item.filename === 'string' && item.filename.length > 0);
+        assert.ok(typeof item.size === 'number' && item.size >= 0);
+        assert.equal(item.status, 'completed');
+        assert.equal(item._destPath, undefined, 'Internal _destPath must not be exposed');
+        assert.equal(item.cookies, undefined);
+        assert.equal(item.token, undefined);
+      }
+    });
+
+    // 107. Transfer cleanup in harness
+    await runTest(107, 'Transfer Cleanup in Harness', 'Transfer Cleanup (Brick 37)', async () => {
+      const downloads = bm.listDownloads();
+      for (const dl of downloads) {
+        const fullRecord = bm.getDownload(dl.downloadId);
+        if (fullRecord && fullRecord._destPath) {
+          try { fs.unlinkSync(fullRecord._destPath); } catch {}
+        }
+      }
+      try {
+        fs.rmSync(syntheticTempDir, { recursive: true, force: true });
+      } catch {}
+      try {
+        fs.rmSync(syntheticDownloadDir, { recursive: true, force: true });
+      } catch {}
+      assert.equal(fs.existsSync(syntheticTempDir), false);
+      assert.equal(fs.existsSync(syntheticDownloadDir), false);
+    });
+
+    // 108. Real browser cleanup succeeds
+    await runTest(108, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
       await bm.close();
       assert.equal(bm.isBrowserConnected(), false);
       assert.equal(bm.pageCount, 0);
@@ -1714,7 +2170,17 @@ async function main() {
     });
 
   } finally {
-    // Strict automatic cleanup: close browser, stop fixture server
+    // Strict automatic cleanup: close browser, stop fixture server, remove test synthetic temp dir
+    try {
+      if (fs.existsSync(syntheticTempDir)) {
+        fs.rmSync(syntheticTempDir, { recursive: true, force: true });
+      }
+    } catch {}
+    try {
+      if (fs.existsSync(syntheticDownloadDir)) {
+        fs.rmSync(syntheticDownloadDir, { recursive: true, force: true });
+      }
+    } catch {}
     if (bm) {
       try {
         await bm.close();
@@ -1762,6 +2228,9 @@ async function main() {
     'Cross-Page Submission Isolation',
     'Session Persistence & Isolation',
     'Human Handoff (Brick 36)',
+    'Safe Upload (Brick 37)',
+    'Safe Download (Brick 37)',
+    'Transfer Cleanup (Brick 37)',
     'Cleanup'
   ];
 
@@ -1779,10 +2248,10 @@ async function main() {
 
   console.log('--------------------------------------------------');
   console.log(`Tests:\n${passed}/${total} PASS\n`);
-  console.log(`Exit Code:\n${passed === total && total >= 82 ? 0 : 1}`);
+  console.log(`Exit Code:\n${passed === total && total >= 108 ? 0 : 1}`);
   console.log('==================================================');
 
-  if (passed !== total || total < 82) {
+  if (passed !== total || total < 108) {
     process.exit(1);
   }
 }

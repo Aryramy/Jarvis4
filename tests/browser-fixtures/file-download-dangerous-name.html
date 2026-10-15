@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>File Download Dangerous Name Fixture</title>
+</head>
+<body>
+  <h1>File Download Dangerous Name Fixture</h1>
+
+  <!-- Traversal download links -->
+  <div style="margin-bottom: 12px;">
+    <a id="download-traversal-unix" href="/api/download/dangerous?name=../../evil.txt">Download Unix Traversal</a>
+  </div>
+  <div style="margin-bottom: 12px;">
+    <a id="download-traversal-win" href="/api/download/dangerous?name=..\\..\\evil.txt">Download Windows Traversal</a>
+  </div>
+  <div style="margin-bottom: 12px;">
+    <a id="download-absolute-win" href="/api/download/dangerous?name=C:%5CWindows%5Cevil.txt">Download Absolute Path</a>
+  </div>
+  <div style="margin-bottom: 12px;">
+    <a id="download-con-reserved" href="/api/download/dangerous?name=CON">Download CON Reserved</a>
+  </div>
+  <div style="margin-bottom: 12px;">
+    <a id="download-nul-reserved" href="/api/download/dangerous?name=NUL">Download NUL Reserved</a>
+  </div>
+  <div style="margin-bottom: 12px;">
+    <a id="download-executable" href="/api/download/malicious.exe">Download Executable File</a>
+  </div>
+</body>
+</html>

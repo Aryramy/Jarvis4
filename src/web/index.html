@@ -522,6 +522,49 @@
       <div style="font-size: 0.82rem; color: #94a3b8; margin-bottom: 4px;">Guidance: <span id="handoff-guidance-display" style="color: #e2e8f0;">No active handoff.</span></div>
       <div id="handoff-status-msg" style="font-size: 0.82rem; color: #64748b; margin-top: 6px;"></div>
     </div>
+
+    <!-- File Transfer Section (Brick 37) -->
+    <div id="file-transfer-section" style="margin-top: 16px; border: 1px solid #334155; border-radius: 8px; padding: 12px; background: #0f172a;">
+      <h3 style="margin: 0 0 8px 0; font-size: 1rem; color: #38bdf8;">File Transfer</h3>
+      <p style="font-size: 0.82rem; color: #94a3b8; margin: 0 0 10px 0;">
+        Explicit user authorization and bounded access for safe file upload and download.
+      </p>
+
+      <!-- Upload Subsection -->
+      <div style="font-size: 0.9rem; font-weight: 600; color: #38bdf8; text-align: left; margin-bottom: 6px;">Upload File</div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <input type="text" id="upload-snapshot-token" placeholder="Expected Snapshot Token" style="flex: 1; min-width: 160px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <select id="upload-target-kind" style="padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;">
+          <option value="input">input</option>
+        </select>
+        <input type="text" id="upload-target-name" placeholder="Target Name / Label (e.g. Choose file)" style="flex: 1; min-width: 160px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+      </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <input type="text" id="upload-file-path" placeholder="Explicit Local File Path (e.g. C:\path\to\doc.pdf)" style="flex: 2; min-width: 200px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <button type="button" id="upload-file-btn">Upload File</button>
+      </div>
+      <div id="upload-status" class="mic-status">Upload: Idle</div>
+      <div id="upload-result" class="response-area" style="display: none; max-height: 160px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
+
+      <!-- Download Subsection -->
+      <div style="font-size: 0.9rem; font-weight: 600; color: #38bdf8; text-align: left; margin-top: 14px; margin-bottom: 6px;">Download</div>
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <input type="text" id="download-snapshot-token" placeholder="Expected Snapshot Token" style="flex: 1; min-width: 160px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <select id="download-target-kind" style="padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;">
+          <option value="link">link</option>
+          <option value="button">button</option>
+        </select>
+        <input type="text" id="download-target-name" placeholder="Target Name / Accessible text (e.g. Download Report)" style="flex: 1; min-width: 160px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <button type="button" id="download-btn">Download</button>
+        <button type="button" id="refresh-downloads-btn" class="secondary">Refresh Downloads</button>
+      </div>
+      <div id="download-status" class="mic-status">Download: Idle</div>
+      <div id="download-result" class="response-area" style="display: none; max-height: 160px; overflow-y: auto; margin-top: 4px; white-space: pre-wrap;"></div>
+      <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-top: 8px; margin-bottom: 4px;">Recent Downloads:</div>
+      <div id="downloads-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto;">
+        <div style="color: #64748b; font-size: 0.85rem;">No downloads recorded.</div>
+      </div>
+    </div>
   </div>
 
   <script type="module">
@@ -3603,6 +3646,182 @@
 
     if (refreshHandoffBtn) {
       refreshHandoffBtn.addEventListener('click', refreshHandoffStatus);
+    }
+
+    // Brick 37 File Transfer UI Controls
+    const uploadSnapshotToken = document.getElementById('upload-snapshot-token');
+    const uploadTargetKind = document.getElementById('upload-target-kind');
+    const uploadTargetName = document.getElementById('upload-target-name');
+    const uploadFilePath = document.getElementById('upload-file-path');
+    const uploadFileBtn = document.getElementById('upload-file-btn');
+    const uploadStatus = document.getElementById('upload-status');
+    const uploadResult = document.getElementById('upload-result');
+
+    const downloadSnapshotToken = document.getElementById('download-snapshot-token');
+    const downloadTargetKind = document.getElementById('download-target-kind');
+    const downloadTargetName = document.getElementById('download-target-name');
+    const downloadBtn = document.getElementById('download-btn');
+    const refreshDownloadsBtn = document.getElementById('refresh-downloads-btn');
+    const downloadStatus = document.getElementById('download-status');
+    const downloadResult = document.getElementById('download-result');
+    const downloadsList = document.getElementById('downloads-list');
+
+    const refreshDownloadsList = async () => {
+      if (!downloadsList) return;
+      try {
+        const res = await fetch('/api/browser/downloads');
+        const data = await res.json();
+        if (res.ok && data.success && Array.isArray(data.downloads)) {
+          downloadsList.replaceChildren();
+          if (data.downloads.length === 0) {
+            const empty = document.createElement('div');
+            empty.style.color = '#64748b';
+            empty.style.fontSize = '0.85rem';
+            empty.textContent = 'No downloads recorded.';
+            downloadsList.appendChild(empty);
+            return;
+          }
+          for (const dl of data.downloads) {
+            const item = document.createElement('div');
+            item.style.padding = '6px 10px';
+            item.style.background = '#1e293b';
+            item.style.borderRadius = '4px';
+            item.style.fontSize = '0.85rem';
+            item.style.color = '#e2e8f0';
+            item.textContent = `${dl.filename} (${dl.size} bytes) - [${dl.downloadId}] - ${dl.status}`;
+            downloadsList.appendChild(item);
+          }
+        }
+      } catch {}
+    };
+
+    if (uploadFileBtn) {
+      uploadFileBtn.addEventListener('click', async () => {
+        const token = uploadSnapshotToken ? uploadSnapshotToken.value.trim() : '';
+        const kind = uploadTargetKind ? uploadTargetKind.value : 'input';
+        const name = uploadTargetName ? uploadTargetName.value.trim() : '';
+        const filePath = uploadFilePath ? uploadFilePath.value.trim() : '';
+
+        if (!token || !name || !filePath) {
+          if (uploadStatus) {
+            uploadStatus.textContent = 'Upload: Expected Snapshot Token, Target Name, and File Path are required';
+            uploadStatus.className = 'mic-status error';
+          }
+          return;
+        }
+
+        if (uploadStatus) {
+          uploadStatus.textContent = 'Upload: Uploading file...';
+          uploadStatus.className = 'mic-status running';
+        }
+        if (uploadResult) uploadResult.style.display = 'none';
+        uploadFileBtn.disabled = true;
+
+        try {
+          const res = await fetch('/api/browser/upload-file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              expectedSnapshotToken: token,
+              target: { kind, name },
+              filePath
+            })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            if (uploadStatus) {
+              uploadStatus.textContent = `Upload: Complete (${data.filename}, ${data.size} bytes)`;
+              uploadStatus.className = 'mic-status captured';
+            }
+            if (uploadResult) {
+              uploadResult.textContent = JSON.stringify(data, null, 2);
+              uploadResult.style.display = 'block';
+            }
+          } else {
+            if (uploadStatus) {
+              uploadStatus.textContent = `Upload Error: ${data.code || data.error || 'Failed'}`;
+              uploadStatus.className = 'mic-status error';
+            }
+            if (uploadResult) {
+              uploadResult.textContent = JSON.stringify(data, null, 2);
+              uploadResult.style.display = 'block';
+            }
+          }
+        } catch (err) {
+          if (uploadStatus) {
+            uploadStatus.textContent = `Upload Request Error: ${err.message}`;
+            uploadStatus.className = 'mic-status error';
+          }
+        } finally {
+          uploadFileBtn.disabled = false;
+        }
+      });
+    }
+
+    if (downloadBtn) {
+      downloadBtn.addEventListener('click', async () => {
+        const token = downloadSnapshotToken ? downloadSnapshotToken.value.trim() : '';
+        const kind = downloadTargetKind ? downloadTargetKind.value : 'link';
+        const name = downloadTargetName ? downloadTargetName.value.trim() : '';
+
+        if (!token || !name) {
+          if (downloadStatus) {
+            downloadStatus.textContent = 'Download: Expected Snapshot Token and Target Name are required';
+            downloadStatus.className = 'mic-status error';
+          }
+          return;
+        }
+
+        if (downloadStatus) {
+          downloadStatus.textContent = 'Download: Triggering download and waiting for browser event...';
+          downloadStatus.className = 'mic-status running';
+        }
+        if (downloadResult) downloadResult.style.display = 'none';
+        downloadBtn.disabled = true;
+
+        try {
+          const res = await fetch('/api/browser/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              expectedSnapshotToken: token,
+              target: { kind, name }
+            })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            if (downloadStatus) {
+              downloadStatus.textContent = `Download: Complete (${data.filename}, ${data.size} bytes)`;
+              downloadStatus.className = 'mic-status captured';
+            }
+            if (downloadResult) {
+              downloadResult.textContent = JSON.stringify(data, null, 2);
+              downloadResult.style.display = 'block';
+            }
+            await refreshDownloadsList();
+          } else {
+            if (downloadStatus) {
+              downloadStatus.textContent = `Download Error: ${data.code || data.error || 'Failed'}`;
+              downloadStatus.className = 'mic-status error';
+            }
+            if (downloadResult) {
+              downloadResult.textContent = JSON.stringify(data, null, 2);
+              downloadResult.style.display = 'block';
+            }
+          }
+        } catch (err) {
+          if (downloadStatus) {
+            downloadStatus.textContent = `Download Request Error: ${err.message}`;
+            downloadStatus.className = 'mic-status error';
+          }
+        } finally {
+          downloadBtn.disabled = false;
+        }
+      });
+    }
+
+    if (refreshDownloadsBtn) {
+      refreshDownloadsBtn.addEventListener('click', refreshDownloadsList);
     }
   </script>
 </body>

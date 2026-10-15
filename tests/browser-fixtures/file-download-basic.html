@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>File Download Basic Fixture</title>
+</head>
+<body>
+  <h1>File Download Basic Fixture</h1>
+
+  <!-- 1. Direct download link -->
+  <div style="margin-bottom: 16px;">
+    <a id="download-sample-link" href="/api/download/sample.txt" download="sample.txt">Download Sample Report</a>
+  </div>
+
+  <!-- 2. Download button triggering PDF download -->
+  <div style="margin-bottom: 16px;">
+    <button type="button" id="download-pdf-button">Download PDF Statement</button>
+  </div>
+
+  <!-- 3. Button that does not trigger a download (for timeout test) -->
+  <div style="margin-bottom: 16px;">
+    <button type="button" id="no-download-button">No Download Button</button>
+  </div>
+
+  <div id="download-trigger-status" style="margin-top: 12px;">Ready</div>
+
+  <script>
+    const btn = document.getElementById('download-pdf-button');
+    const status = document.getElementById('download-trigger-status');
+    btn.addEventListener('click', () => {
+      status.textContent = 'PDF download initiated';
+      window.location.href = '/api/download/report.pdf';
+    });
+  </script>
+</body>
+</html>

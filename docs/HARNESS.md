@@ -74,6 +74,9 @@ JARVIS4 distinguishes five distinct harness layers across development, verificat
     - Confirmed form submission, single-use confirmation tokens, and evidence verification.
     - Human-authenticated persistent session vault, DPAPI protection, and lifecycle restore.
     - Human authentication handoff, safe pause boundary, mutating action blocking, explicit human resume, fresh state re-inspection, deterministic barrier clearance verification, repeated explicit resume policy, and diagnostic screenshot suppression.
+    - Safe file upload: target resolution on file inputs, path normalization, existence validation, directory upload blocking, size limits, sensitive file denylist, accept attribute constraint enforcement, Playwright native setInputFiles, verified DOM state, zero auto-submit, and full path privacy.
+    - Safe file download: explicit authorization, real Edge download events as proof, approved download directory confinement, filename sanitization and path traversal defense, Windows reserved device name escaping, collision-safe naming, bounded download timeout, blocked executable/script types, zero auto-retry, and opaque download IDs.
+    - Transfer cleanup: guaranteed synthetic upload and download test artifact removal.
 
 ### Layer C: Development Agent Harness (Coding Agent Governance)
 - **Status**: `PARTIAL / PLANNED`
