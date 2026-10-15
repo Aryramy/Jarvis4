@@ -22,7 +22,7 @@ import { PageReaderError } from '../webpage/urlSafety.js';
 import { executePageQa, PageQaError } from '../webpage/pageQa.js';
 import { executeResearchOne, ResearchOneError } from '../research/researchOne.js';
 import { decideBrowserEscalation, BrowserEscalationError } from '../routing/browserEscalation.js';
-import { defaultBrowserManager, BrowserManager, BrowserManagerError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError, HumanHandoffError, FileTransferError } from '../browser/browserManager.js';
+import { defaultBrowserManager, BrowserManager, BrowserManagerError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError, HumanHandoffError, FileTransferError, StructuredExtractionError } from '../browser/browserManager.js';
 import { TargetResolutionError, SUPPORTED_KINDS } from '../browser/targetResolver.js';
 import { ActionExecutionError } from '../browser/actionExecutor.js';
 
@@ -3384,6 +3384,65 @@ export function createRequestListener(options = {}) {
           message: err.message || 'Failed to list downloads'
         }));
       }
+      return;
+    }
+
+    // Route: POST /api/browser/extract (Brick 38 Structured Extraction & Scraping)
+    if (url.pathname === '/api/browser/extract') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+          return;
+        }
+
+        try {
+          const result = await browserManager.extractStructuredData(parsedBody);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'EXTRACTION_FAILED';
+          let statusCode = 400;
+          if (errorCode === 'PAGE_CLOSED' || errorCode === 'PAGE_NOT_FOUND') {
+            statusCode = 404;
+          } else if (errorCode === 'TARGET_STALE' || errorCode === 'PAGE_CHANGED' || errorCode === 'HUMAN_HANDOFF_ACTIVE') {
+            statusCode = 409;
+          } else if (errorCode === 'BROWSER_ERROR') {
+            statusCode = 500;
+          }
+
+          let safeMessage = err.message || 'Structured extraction failed.';
+          if (err instanceof BrowserManagerError || err instanceof StructuredExtractionError) {
+            safeMessage = typeof err.message === 'string'
+              ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
+              : safeMessage;
+          }
+
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage,
+            details: err.details || {}
+          }));
+        }
+      });
       return;
     }
 

@@ -26,8 +26,9 @@ import { prepareFormSubmission, executeFormSubmission, getConfirmationToken, cle
 import { SessionVault, SessionVaultError, generateSessionId, isValidSessionId } from './sessionVault.js';
 import { HumanHandoffManager, HumanHandoffError, HANDOFF_REASONS, HANDOFF_STATES, clampHandoffTtl, toSafeHandoffMetadata } from './humanHandoff.js';
 import { FileTransferManager, FileTransferError, validateAndNormalizeUploadPath, isSensitiveFilePath, sanitizeDownloadFilename } from './fileTransfer.js';
+import { extractStructuredData, StructuredExtractionError, EXTRACTION_TYPES, ALL_EXTRACTION_TYPES } from './structuredExtractor.js';
 
-export { ActionExecutionError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError, HumanHandoffError, FileTransferError, HANDOFF_REASONS, HANDOFF_STATES };
+export { ActionExecutionError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError, HumanHandoffError, FileTransferError, StructuredExtractionError, EXTRACTION_TYPES, ALL_EXTRACTION_TYPES, HANDOFF_REASONS, HANDOFF_STATES };
 
 export class BrowserManagerError extends Error {
   /**
@@ -3790,6 +3791,115 @@ export class BrowserManager {
    */
   getDownload(downloadId) {
     return this._fileTransferManager ? this._fileTransferManager.getDownload(downloadId) : null;
+  }
+
+  /**
+   * Executes deterministic structured extraction from the active managed page (Brick 38).
+   *
+   * @param {Object} request
+   * @param {Object} [options]
+   * @returns {Promise<Object>}
+   */
+  async extractStructuredData(request = {}, options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError('Browser is not running. Please launch the browser first.', 'BROWSER_NOT_RUNNING');
+    }
+
+    const targetPageId = options.pageId || request.pageId || this._activePageId;
+    const entry = this._pages.get(targetPageId);
+    if (!entry || !entry.page || (typeof entry.page.isClosed === 'function' && entry.page.isClosed())) {
+      throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND', { pageId: targetPageId });
+    }
+
+    if (this.isHandoffActive(targetPageId)) {
+      throw new StructuredExtractionError(
+        'A human authentication handoff is currently active on this page. Structured extraction is paused.',
+        'HUMAN_HANDOFF_ACTIVE',
+        { pageId: targetPageId }
+      );
+    }
+
+    // Require expectedSnapshotToken (Section 6)
+    const expectedSnapshotToken = request.expectedSnapshotToken || options.expectedSnapshotToken;
+    if (!expectedSnapshotToken || typeof expectedSnapshotToken !== 'string') {
+      throw new StructuredExtractionError(
+        'expectedSnapshotToken is required for structured extraction.',
+        'TARGET_STALE',
+        { pageId: targetPageId }
+      );
+    }
+
+    if (!this.isSnapshotTokenValid(expectedSnapshotToken, targetPageId)) {
+      throw new StructuredExtractionError(
+        'Snapshot token is stale or invalid for target page.',
+        'TARGET_STALE',
+        { pageId: targetPageId, expectedSnapshotToken }
+      );
+    }
+
+    // Capture atomic context before extraction (Hotfix C & Sections 6, 7, 19, 43)
+    const initialPage = entry.page;
+    const initialPageId = entry.pageId;
+    const initialDocVersion = entry.documentVersion ?? 1;
+    const initialSemanticRev = entry.semanticRevision ?? 0;
+    const initialSnapshotToken = entry.snapshotToken;
+
+    // Execute extraction
+    const extractRes = await extractStructuredData(initialPage, {
+      types: request.types,
+      limits: { ...request.limits, ...options.limits },
+      ...options
+    });
+
+    // Post-check atomic page context and state staleness
+    if (typeof initialPage.isClosed === 'function' && initialPage.isClosed()) {
+      throw new StructuredExtractionError('Page closed during structured extraction.', 'PAGE_CLOSED', { pageId: initialPageId });
+    }
+
+    const currentEntry = this._pages.get(initialPageId);
+    if (!currentEntry || currentEntry.page !== initialPage) {
+      throw new StructuredExtractionError('Page context changed during structured extraction.', 'PAGE_CLOSED', { pageId: initialPageId });
+    }
+
+    if (currentEntry.documentVersion !== initialDocVersion || currentEntry.semanticRevision !== initialSemanticRev) {
+      throw new StructuredExtractionError(
+        'Page state changed during structured extraction.',
+        'PAGE_CHANGED',
+        {
+          pageId: initialPageId,
+          expectedRevision: initialSemanticRev,
+          currentRevision: currentEntry.semanticRevision
+        }
+      );
+    }
+
+    let currentUrl = '';
+    let currentTitle = '';
+    try {
+      currentUrl = typeof initialPage.url === 'function' ? initialPage.url() : (currentEntry.currentUrl || '');
+      currentTitle = typeof initialPage.title === 'function' ? await initialPage.title() : (currentEntry.title || '');
+    } catch {
+      currentUrl = currentEntry.currentUrl || '';
+      currentTitle = currentEntry.title || '';
+    }
+
+    return {
+      success: true,
+      pageId: initialPageId,
+      currentUrl,
+      title: currentTitle,
+      documentVersion: initialDocVersion,
+      semanticRevision: initialSemanticRev,
+      snapshotToken: initialSnapshotToken,
+      data: extractRes.data,
+      counts: extractRes.counts,
+      limits: extractRes.limits,
+      truncated: extractRes.truncated,
+      truncationReason: extractRes.truncationReason,
+      durationMs: extractRes.durationMs
+    };
   }
 }
 

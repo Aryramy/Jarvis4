@@ -440,6 +440,19 @@ Currently tracked issues in JARVIS4:
     - **Mutual Exclusion with Human Handoff**: File upload and download operations are strictly blocked with `HUMAN_HANDOFF_ACTIVE` whenever a Human Handoff session is active on the bound page.
     - **Zero AI / Zero Search**: Exactly 0 LLM calls, 0 OpenRouter calls, 0 search calls. All verification runs against deterministic local loopback fixtures.
 
+31. **Structured Extraction & Scraping v1 Observations & Limitations (Brick 38 In Progress)**:
+    - **Main Document Confined**: Brick 38 structured extraction operates strictly on the main document DOM. Cross-origin iframes, nested frame hierarchies, and shadow roots are not traversed or extracted (deferred to Brick 39).
+    - **Zero Arbitrary Script / XPath Execution**: Extraction operates exclusively through safe, fixed semantic categories (`metadata`, `headings`, `links`, `tables`, `lists`, `definitions`, `records`). The API does not expose arbitrary CSS selector execution, arbitrary XPath querying, or caller-provided JavaScript execution.
+    - **Zero Autonomous Crawling or Pagination**: Extraction extracts data from the current active page state only. It does not automatically scroll, click "Load More", traverse pagination links, or perform website crawling. Autonomous multi-page agent behavior belongs to Brick 40+.
+    - **Dynamic Page State Staleness**: Extraction requires an atomic snapshot token bound to `documentVersion` and `semanticRevision`. If mutations occur mid-extraction, it rejects with `TARGET_STALE` or `PAGE_CHANGED` without auto-retry. Callers should precede extraction with `waitForStable()`.
+    - **Visible Content Filtering**: Hidden elements (`display:none`, `visibility:hidden`, `hidden` attribute, and `aria-hidden="true"`) are filtered out by default.
+    - **Page-Derived Data Is Untrusted**: All extracted webpage content represents untrusted external data. Strings such as "Ignore previous instructions" remain plain extracted text; zero AI calls exist in Brick 38 anyway, and future runtime harnesses must preserve this boundary.
+    - **Strict Form Value Privacy**: Current values typed into form controls (`input`, `textarea`, `select`), password fields, file upload paths, and hidden form inputs are strictly excluded from structured extraction.
+    - **Conservative Data Limits & Clamped Truncation**: Configured limits (`maxRecords: 500`, `maxTextChars: 200000`, `maxFieldChars: 4000`, `maxNestingDepth: 5`, `timeoutMs: 10000`) bound memory and payload size. Truncated extractions explicitly report `truncated: true` and `truncationReason`.
+    - **Mutual Exclusion with Human Handoff**: When a sensitive Human Handoff session is active on the page, structured extraction is blocked with `HUMAN_HANDOFF_ACTIVE` to prevent scraping credential or MFA challenge pages.
+    - **Zero AI / Zero Search**: Exactly 0 OpenRouter, 0 LLM, 0 Exa, and 0 search calls. All verification runs deterministically against local loopback fixtures.
+
+
 
 
 

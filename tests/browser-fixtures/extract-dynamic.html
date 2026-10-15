@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Extract Dynamic Fixture</title>
+</head>
+<body>
+  <h1>Dynamic Content Container</h1>
+  <div id="dynamic-area">
+    <p>Static initial content.</p>
+  </div>
+  <button id="add-dynamic-btn" type="button">Add Dynamic Element</button>
+
+  <script>
+    document.getElementById('add-dynamic-btn').addEventListener('click', () => {
+      const p = document.createElement('p');
+      p.id = 'new-dynamic-paragraph';
+      p.textContent = 'Newly injected dynamic paragraph.';
+      document.getElementById('dynamic-area').appendChild(p);
+    });
+  </script>
+</body>
+</html>

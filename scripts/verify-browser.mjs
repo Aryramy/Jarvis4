@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { BrowserManager, FormInspectionError, FormPopulationError, FormSubmissionError, FileTransferError } from '../src/browser/browserManager.js';
+import { BrowserManager, FormInspectionError, FormPopulationError, FormSubmissionError, FileTransferError, StructuredExtractionError } from '../src/browser/browserManager.js';
 import { startFixtureServer } from '../tests/browser-fixtures/server.js';
 import { TargetResolutionError } from '../src/browser/targetResolver.js';
 import { ActionExecutionError } from '../src/browser/actionExecutor.js';
@@ -2161,8 +2161,295 @@ async function main() {
       assert.equal(fs.existsSync(syntheticDownloadDir), false);
     });
 
-    // 108. Real browser cleanup succeeds
-    await runTest(108, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
+    // 108. Page Metadata Extraction (Brick 38)
+    await runTest(108, 'Page Metadata Extraction', 'Structured Extraction (Brick 38)', async () => {
+      await bm.navigate(`${baseUrl}/extract-basic.html`);
+      await bm.waitForStable();
+      const snap = await bm.waitForStable();
+      const res = await bm.extractStructuredData({
+        expectedSnapshotToken: snap.snapshotToken,
+        types: ['metadata']
+      });
+      assert.equal(res.success, true);
+      assert.ok(res.data.metadata, 'Metadata must be returned');
+      assert.equal(res.data.metadata.title, 'Extract Basic Fixture');
+      assert.equal(res.data.metadata.language, 'en');
+      assert.ok(res.data.metadata.canonicalUrl.includes('/extract-basic.html'));
+      assert.equal(res.data.metadata.description, 'A deterministic fixture for basic metadata and headings extraction.');
+      assert.equal(res.truncated, false);
+      assert.equal(res.truncationReason, null);
+    });
+
+    // 109. Headings Extraction with DOM Order & Visibility Filtering (Brick 38)
+    await runTest(109, 'Headings Extraction with DOM Order & Visibility Filtering', 'Structured Extraction (Brick 38)', async () => {
+      const snap = await bm.waitForStable();
+      const res = await bm.extractStructuredData({
+        expectedSnapshotToken: snap.snapshotToken,
+        types: ['headings']
+      });
+      assert.equal(res.success, true);
+      assert.equal(res.data.headings.length, 7, `Expected 7 visible headings, got ${res.data.headings.length}`);
+      assert.equal(res.data.headings[0].level, 1);
+      assert.equal(res.data.headings[0].text, 'Page Header 1');
+      assert.equal(res.data.headings[1].level, 2);
+      assert.equal(res.data.headings[1].text, 'Sub Header 2');
+      for (const h of res.data.headings) {
+        assert.ok(!h.text.includes('Hidden'), 'Hidden headings must be filtered out');
+      }
+    });
+
+    // 110. Links Extraction with Same-Origin Detection (Brick 38)
+    await runTest(110, 'Links Extraction with Same-Origin Detection', 'Structured Extraction (Brick 38)', async () => {
+      const snap = await bm.waitForStable();
+      const res = await bm.extractStructuredData({
+        expectedSnapshotToken: snap.snapshotToken,
+        types: ['links']
+      });
+      assert.equal(res.success, true);
+      assert.ok(res.data.links.length >= 2, `Expected at least 2 visible links, got ${res.data.links.length}`);
+      const aboutLink = res.data.links.find(l => l.text === 'About Us');
+      assert.ok(aboutLink, 'About Us link must be present');
+      assert.equal(aboutLink.sameOrigin, true);
+      assert.ok(aboutLink.href.startsWith('http://127.0.0.1:'), 'Relative link must resolve against page URL');
+      const extLink = res.data.links.find(l => l.text === 'Docs' || l.accessibleName === 'External Documentation');
+      assert.ok(extLink, 'External link must be present');
+      assert.equal(extLink.sameOrigin, false);
+      for (const l of res.data.links) {
+        assert.ok(!l.text.includes('Hidden'), 'Hidden links must be filtered out');
+      }
+    });
+
+    // 111. Regular Table Extraction with Caption, Thead & Tbody (Brick 38)
+    await runTest(111, 'Regular Table Extraction with Caption, Thead & Tbody', 'Structured Extraction (Brick 38)', async () => {
+      await bm.navigate(`${baseUrl}/extract-table.html`);
+      await bm.waitForStable();
+      const snap = await bm.waitForStable();
+      const res = await bm.extractStructuredData({
+        expectedSnapshotToken: snap.snapshotToken,
+        types: ['tables']
+      });
+      assert.equal(res.success, true);
+      assert.ok(res.data.tables.length >= 2, `Expected at least 2 tables, got ${res.data.tables.length}`);
+      const regular = res.data.tables[0];
+      assert.equal(regular.caption, 'Team Directory');
+      assert.deepEqual(regular.headers, ['Name', 'Department', 'Status']);
+      assert.equal(regular.rows.length, 3);
+      assert.deepEqual(regular.rows[0], ['Ahmed', 'Content', 'Completed']);
+      assert.deepEqual(regular.rows[1], ['Sara', 'Digital Media', 'In Progress']);
+      assert.equal(regular.irregular, false);
+    });
+
+    // 112. Multiple Tables & Irregular Table Detection (Brick 38)
+    await runTest(112, 'Multiple Tables & Irregular Table Detection', 'Structured Extraction (Brick 38)', async () => {
+      const snap = await bm.waitForStable();
+      const res = await bm.extractStructuredData({
+        expectedSnapshotToken: snap.snapshotToken,
+        types: ['tables']
+      });
+      assert.equal(res.success, true);
+      assert.equal(res.data.tables.length, 2);
+      const irregular = res.data.tables[1];
+      assert.equal(irregular.caption, 'Quarterly Financials');
+      assert.equal(irregular.irregular, true, 'Table with colspans/uneven columns must be flagged irregular');
+      assert.ok(irregular.rows.length >= 1);
+    });
+
+    // 113. Lists Extraction & Nested List Bounded Depth (Brick 38)
+    await runTest(113, 'Lists Extraction & Nested List Bounded Depth', 'Structured Extraction (Brick 38)', async () => {
+      await bm.navigate(`${baseUrl}/extract-lists.html`);
+      await bm.waitForStable();
+      const snap = await bm.waitForStable();
+      const res = await bm.extractStructuredData({
+        expectedSnapshotToken: snap.snapshotToken,
+        types: ['lists']
+      });
+      assert.equal(res.success, true);
+      assert.ok(res.data.lists.length >= 3, `Expected at least 3 lists, got ${res.data.lists.length}`);
+      const unord = res.data.lists.find(l => l.ordered === false);
+      assert.ok(unord, 'Unordered list must be present');
+      const ord = res.data.lists.find(l => l.ordered === true);
+      assert.ok(ord, 'Ordered list must be present');
+      const ariaList = res.data.lists.find(l => l.items && l.items.includes('Primary Objective'));
+      assert.ok(ariaList, 'ARIA list items must be extracted');
+    });
+
+    // 114. Definitions Extraction (dl/dt/dd) (Brick 38)
+    await runTest(114, 'Definitions Extraction (dl/dt/dd)', 'Structured Extraction (Brick 38)', async () => {
+      await bm.navigate(`${baseUrl}/extract-basic.html`);
+      await bm.waitForStable();
+      const snap = await bm.waitForStable();
+      const res = await bm.extractStructuredData({
+        expectedSnapshotToken: snap.snapshotToken,
+        types: ['definitions']
+      });
+      assert.equal(res.success, true);
+      assert.ok(res.data.definitions.length >= 2, `Expected at least 2 definitions, got ${res.data.definitions.length}`);
+      const proj = res.data.definitions.find(d => d.key === 'Project');
+      assert.ok(proj, 'Project definition must be present');
+      assert.equal(proj.value, 'JARVIS4');
+    });
+
+    // 115. Repeated Semantic Records Extraction (Brick 38)
+    await runTest(115, 'Repeated Semantic Records Extraction', 'Structured Extraction (Brick 38)', async () => {
+      await bm.navigate(`${baseUrl}/extract-records.html`);
+      await bm.waitForStable();
+      const snap = await bm.waitForStable();
+      const res = await bm.extractStructuredData({
+        expectedSnapshotToken: snap.snapshotToken,
+        types: ['records']
+      });
+      assert.equal(res.success, true);
+      assert.equal(res.data.records.length, 2, `Expected 2 semantic article records, got ${res.data.records.length}`);
+      for (const rec of res.data.records) {
+        assert.equal(rec.tag, 'article');
+        assert.ok(rec.heading.startsWith('Release'));
+        assert.ok(rec.text.length > 0);
+        assert.ok(Array.isArray(rec.links));
+        assert.ok(Array.isArray(rec.fields));
+      }
+    });
+
+    // 116. Arabic & Multilingual Unicode Extraction (Brick 38)
+    await runTest(116, 'Arabic & Multilingual Unicode Extraction', 'Structured Extraction (Brick 38)', async () => {
+      await bm.navigate(`${baseUrl}/extract-multilingual.html`);
+      await bm.waitForStable();
+      const snap = await bm.waitForStable();
+      const res = await bm.extractStructuredData({
+        expectedSnapshotToken: snap.snapshotToken
+      });
+      assert.equal(res.success, true);
+      assert.ok(res.data.metadata.title.includes('تقرير النظام الموحد'), 'Arabic title must be preserved');
+      assert.equal(res.data.metadata.language, 'ar');
+      assert.ok(res.data.headings.some(h => h.text.includes('لوحة التحكم الرئيسية')), 'Arabic heading must be preserved');
+      assert.ok(res.data.tables.some(t => t.caption.includes('دليل المهندسين')), 'Arabic table caption preserved');
+      assert.ok(res.data.definitions.some(d => d.key.includes('المنظومة')), 'Arabic definition key preserved');
+    });
+
+    // 117. Privacy Protection & Sensitive Field Exclusion (Brick 38)
+    await runTest(117, 'Privacy Protection & Sensitive Field Exclusion', 'Structured Extraction (Brick 38)', async () => {
+      await bm.navigate(`${baseUrl}/extract-privacy.html`);
+      await bm.waitForStable();
+      const snap = await bm.waitForStable();
+      const res = await bm.extractStructuredData({
+        expectedSnapshotToken: snap.snapshotToken
+      });
+      assert.equal(res.success, true);
+      const serialized = JSON.stringify(res);
+      assert.ok(!serialized.includes('TopSecretPassword123'), 'Password value must NEVER be extracted');
+      assert.ok(!serialized.includes('user-confidential-input'), 'Text input value must NEVER be extracted');
+      assert.ok(!serialized.includes('textarea-confidential-notes'), 'Textarea value must NEVER be extracted');
+      assert.ok(!serialized.includes('hidden_vault_token_999'), 'Hidden input value must NEVER be extracted');
+      assert.ok(!serialized.includes('auth-cookie-value'), 'Cookies must NEVER be extracted');
+      assert.ok(!serialized.includes('localstorage-secret-key'), 'LocalStorage must NEVER be extracted');
+      assert.ok(!serialized.includes('session-token-abc'), 'Session tokens must NEVER be extracted');
+    });
+
+    // 118. Large-Result Bounded Limits & Truncation Metadata (Brick 38)
+    await runTest(118, 'Large-Result Bounded Limits & Truncation Metadata', 'Structured Extraction (Brick 38)', async () => {
+      await bm.navigate(`${baseUrl}/extract-basic.html`);
+      await bm.waitForStable();
+      const snap = await bm.waitForStable();
+      const res = await bm.extractStructuredData({
+        expectedSnapshotToken: snap.snapshotToken,
+        limits: { maxRecords: 2 }
+      });
+      assert.equal(res.success, true);
+      assert.equal(res.truncated, true);
+      assert.equal(res.truncationReason, 'MAX_RECORDS');
+      assert.equal(res.limits.maxRecords, 2);
+    });
+
+    // 119. Dynamic Mutation Invalidates Extraction Snapshot (Brick 38)
+    await runTest(119, 'Dynamic Mutation Invalidates Extraction Snapshot', 'Structured Extraction (Brick 38)', async () => {
+      await bm.navigate(`${baseUrl}/extract-dynamic.html`);
+      await bm.waitForStable();
+      const snap = await bm.waitForStable();
+      await bm.page.evaluate(() => {
+        const btn = document.getElementById('btn-add-dynamic');
+        if (btn) btn.click();
+      });
+      await bm.waitForStable();
+      let threwStale = false;
+      try {
+        await bm.extractStructuredData({
+          expectedSnapshotToken: snap.snapshotToken
+        });
+      } catch (err) {
+        if (err instanceof StructuredExtractionError && (err.code === 'TARGET_STALE' || err.code === 'PAGE_CHANGED')) {
+          threwStale = true;
+        }
+      }
+      assert.equal(threwStale, true, 'Stale snapshot after dynamic mutation must be rejected');
+    });
+
+    // 120. Cross-Page Structured Extraction Isolation (Brick 38)
+    await runTest(120, 'Cross-Page Structured Extraction Isolation', 'Structured Extraction (Brick 38)', async () => {
+      await bm.navigate(`${baseUrl}/extract-basic.html`);
+      await bm.waitForStable();
+      const snapA = await bm.waitForStable();
+      const pageAId = bm.activePageId;
+
+      const pageBRes = await bm.openPage(`${baseUrl}/extract-records.html`);
+      const pageBId = pageBRes.pageId;
+      await bm.waitForStable({ pageId: pageBId });
+      const snapB = await bm.waitForStable({ pageId: pageBId });
+
+      // Extract from active Page B
+      const resB = await bm.extractStructuredData({
+        expectedSnapshotToken: snapB.snapshotToken,
+        types: ['records']
+      });
+      assert.equal(resB.pageId, pageBId);
+      assert.equal(resB.data.records.length, 2);
+
+      // Switch to Page A and extract
+      await bm.switchPage(pageAId);
+      const resA = await bm.extractStructuredData({
+        expectedSnapshotToken: snapA.snapshotToken,
+        types: ['records']
+      });
+      assert.equal(resA.pageId, pageAId);
+      assert.equal(resA.data.records.length, 0, 'Page A must have 0 article records');
+
+      await bm.closePage(pageBId);
+    });
+
+    // 121. Session-Compatible Extraction without Leaking Credentials (Brick 38)
+    await runTest(121, 'Session-Compatible Extraction without Leaking Credentials', 'Structured Extraction (Brick 38)', async () => {
+      const snap = await bm.waitForStable();
+      const res = await bm.extractStructuredData({
+        expectedSnapshotToken: snap.snapshotToken,
+        types: ['metadata', 'headings']
+      });
+      assert.equal(res.success, true);
+      assert.equal(res._sessionVault, undefined);
+      assert.equal(res._cookies, undefined);
+    });
+
+    // 122. Extraction Blocked During Active Human Handoff (Brick 38)
+    await runTest(122, 'Extraction Blocked During Active Human Handoff', 'Structured Extraction (Brick 38)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/auth-handoff-login.html`, { allowLoopbackTest: true });
+      const snap = await bm.waitForStable();
+      const handoffRes = await bm.startHandoff({
+        reason: HANDOFF_REASONS.LOGIN_REQUIRED,
+        verification: { type: 'url-contains', targetUrl: 'auth-handoff-success.html' }
+      });
+      let blocked = false;
+      try {
+        await bm.extractStructuredData({
+          expectedSnapshotToken: snap.snapshotToken
+        });
+      } catch (err) {
+        if ((err instanceof StructuredExtractionError || err.code === 'HUMAN_HANDOFF_ACTIVE')) {
+          blocked = true;
+        }
+      }
+      await bm.cancelHandoff({ handoffId: handoffRes.handoff.handoffId });
+      assert.equal(blocked, true, 'Extraction must be blocked with HUMAN_HANDOFF_ACTIVE');
+    });
+
+    // 123. Real browser cleanup succeeds
+    await runTest(123, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
       await bm.close();
       assert.equal(bm.isBrowserConnected(), false);
       assert.equal(bm.pageCount, 0);
@@ -2231,6 +2518,7 @@ async function main() {
     'Safe Upload (Brick 37)',
     'Safe Download (Brick 37)',
     'Transfer Cleanup (Brick 37)',
+    'Structured Extraction (Brick 38)',
     'Cleanup'
   ];
 
@@ -2248,10 +2536,10 @@ async function main() {
 
   console.log('--------------------------------------------------');
   console.log(`Tests:\n${passed}/${total} PASS\n`);
-  console.log(`Exit Code:\n${passed === total && total >= 108 ? 0 : 1}`);
+  console.log(`Exit Code:\n${passed === total && total >= 123 ? 0 : 1}`);
   console.log('==================================================');
 
-  if (passed !== total || total < 108) {
+  if (passed !== total || total < 123) {
     process.exit(1);
   }
 }

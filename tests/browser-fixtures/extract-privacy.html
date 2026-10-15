@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Account Settings Privacy Fixture</title>
+</head>
+<body>
+  <h1>Account Settings</h1>
+  <p>Manage your account preferences and credentials securely.</p>
+
+  <form id="privacy-form">
+    <label for="pwd-field">Password:</label>
+    <input type="password" id="pwd-field" value="SuperSecretPassword123!" />
+
+    <label for="text-field">Username:</label>
+    <input type="text" id="text-field" value="SensitiveUserText456" />
+
+    <label for="textarea-field">Private Notes:</label>
+    <textarea id="textarea-field">ConfidentialNotes789</textarea>
+
+    <input type="hidden" id="csrf-field" value="csrf_token_secret_abc" />
+    <input type="file" id="file-field" />
+  </form>
+</body>
+</html>

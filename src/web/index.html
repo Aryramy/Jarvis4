@@ -565,6 +565,34 @@
         <div style="color: #64748b; font-size: 0.85rem;">No downloads recorded.</div>
       </div>
     </div>
+
+    <!-- Structured Extraction Section (Brick 38) -->
+    <div id="structured-extraction-section" style="margin-top: 16px; border: 1px solid #334155; border-radius: 8px; padding: 12px; background: #0f172a;">
+      <h3 style="margin: 0 0 8px 0; font-size: 1rem; color: #38bdf8;">Structured Extraction</h3>
+      <p style="font-size: 0.82rem; color: #94a3b8; margin: 0 0 10px 0;">
+        Deterministic, read-only structured data extraction from the active managed page.
+      </p>
+
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+        <input type="text" id="extract-snapshot-token" placeholder="Expected Snapshot Token (Required)" style="flex: 2; min-width: 200px; padding: 6px 10px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem;" />
+        <button type="button" id="extract-data-btn">Extract Current Page</button>
+      </div>
+
+      <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-align: left; margin-bottom: 6px;">Select Extraction Types:</div>
+      <div style="display: flex; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; font-size: 0.85rem; color: #e2e8f0;">
+        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;"><input type="checkbox" id="extract-type-metadata" checked /> Metadata</label>
+        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;"><input type="checkbox" id="extract-type-headings" checked /> Headings</label>
+        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;"><input type="checkbox" id="extract-type-links" checked /> Links</label>
+        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;"><input type="checkbox" id="extract-type-tables" checked /> Tables</label>
+        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;"><input type="checkbox" id="extract-type-lists" checked /> Lists</label>
+        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;"><input type="checkbox" id="extract-type-definitions" checked /> Definitions</label>
+        <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;"><input type="checkbox" id="extract-type-records" checked /> Records</label>
+      </div>
+
+      <div id="extract-status" class="mic-status">Extraction: Idle</div>
+      <div id="extract-summary" style="display: none; font-size: 0.85rem; color: #94a3b8; margin-top: 6px; text-align: left;"></div>
+      <div id="extract-result" class="response-area" style="display: none; max-height: 240px; overflow-y: auto; margin-top: 6px; white-space: pre-wrap;"></div>
+    </div>
   </div>
 
   <script type="module">
@@ -3822,6 +3850,103 @@
 
     if (refreshDownloadsBtn) {
       refreshDownloadsBtn.addEventListener('click', refreshDownloadsList);
+    }
+
+    // Brick 38 Structured Extraction UI Controls
+    const extractSnapshotToken = document.getElementById('extract-snapshot-token');
+    const extractDataBtn = document.getElementById('extract-data-btn');
+    const extractStatus = document.getElementById('extract-status');
+    const extractSummary = document.getElementById('extract-summary');
+    const extractResult = document.getElementById('extract-result');
+
+    const extractTypeMap = [
+      { id: 'extract-type-metadata', type: 'metadata' },
+      { id: 'extract-type-headings', type: 'headings' },
+      { id: 'extract-type-links', type: 'links' },
+      { id: 'extract-type-tables', type: 'tables' },
+      { id: 'extract-type-lists', type: 'lists' },
+      { id: 'extract-type-definitions', type: 'definitions' },
+      { id: 'extract-type-records', type: 'records' }
+    ];
+
+    if (extractDataBtn) {
+      extractDataBtn.addEventListener('click', async () => {
+        const token = extractSnapshotToken ? extractSnapshotToken.value.trim() : '';
+        if (!token) {
+          if (extractStatus) {
+            extractStatus.textContent = 'Extraction: Expected Snapshot Token is required';
+            extractStatus.className = 'mic-status error';
+          }
+          return;
+        }
+
+        const selectedTypes = [];
+        for (const item of extractTypeMap) {
+          const cb = document.getElementById(item.id);
+          if (cb && cb.checked) {
+            selectedTypes.push(item.type);
+          }
+        }
+
+        if (selectedTypes.length === 0) {
+          if (extractStatus) {
+            extractStatus.textContent = 'Extraction: Select at least one extraction type';
+            extractStatus.className = 'mic-status error';
+          }
+          return;
+        }
+
+        if (extractStatus) {
+          extractStatus.textContent = 'Extraction: Extracting structured data from active page...';
+          extractStatus.className = 'mic-status running';
+        }
+        if (extractSummary) extractSummary.style.display = 'none';
+        if (extractResult) extractResult.style.display = 'none';
+        extractDataBtn.disabled = true;
+
+        try {
+          const res = await fetch('/api/browser/extract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              expectedSnapshotToken: token,
+              types: selectedTypes
+            })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            if (extractStatus) {
+              extractStatus.textContent = `Extraction: Success in ${data.durationMs}ms${data.truncated ? ' (TRUNCATED: ' + data.truncationReason + ')' : ''}`;
+              extractStatus.className = 'mic-status captured';
+            }
+            if (extractSummary) {
+              const counts = data.counts || {};
+              extractSummary.textContent = `Page: ${data.pageId} | URL: ${data.currentUrl || 'N/A'} | Revision: ${data.semanticRevision} | Headings: ${counts.headings || 0}, Links: ${counts.links || 0}, Tables: ${counts.tables || 0}, Lists: ${counts.lists || 0}, Defs: ${counts.definitions || 0}, Records: ${counts.records || 0}`;
+              extractSummary.style.display = 'block';
+            }
+            if (extractResult) {
+              extractResult.textContent = JSON.stringify(data, null, 2);
+              extractResult.style.display = 'block';
+            }
+          } else {
+            if (extractStatus) {
+              extractStatus.textContent = `Extraction Error: ${data.code || data.error || 'Failed'}`;
+              extractStatus.className = 'mic-status error';
+            }
+            if (extractResult) {
+              extractResult.textContent = JSON.stringify(data, null, 2);
+              extractResult.style.display = 'block';
+            }
+          }
+        } catch (err) {
+          if (extractStatus) {
+            extractStatus.textContent = `Extraction Request Error: ${err.message}`;
+            extractStatus.className = 'mic-status error';
+          }
+        } finally {
+          extractDataBtn.disabled = false;
+        }
+      });
     }
   </script>
 </body>

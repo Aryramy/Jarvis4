@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Extract Lists Fixture</title>
+</head>
+<body>
+  <h1>Structured Lists</h1>
+
+  <!-- Unordered List with nesting -->
+  <ul id="skills-list">
+    <li>Architecture</li>
+    <li>Security
+      <ul>
+        <li>Authorization</li>
+        <li>Bound Isolation</li>
+      </ul>
+    </li>
+    <li>Verification</li>
+    <li style="display:none;">Hidden Secret Skill</li>
+  </ul>
+
+  <!-- Ordered List -->
+  <ol id="steps-list">
+    <li>Build Foundation</li>
+    <li>Execute Automated Harness</li>
+    <li>Verify Evidence</li>
+  </ol>
+
+  <!-- ARIA List -->
+  <div role="list" id="aria-list">
+    <div role="listitem">Primary Objective</div>
+    <div role="listitem">Secondary Objective</div>
+  </div>
+</body>
+</html>

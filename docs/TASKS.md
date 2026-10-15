@@ -109,8 +109,11 @@ BRICK-036 — Human Authentication Handoff, Continuation, MFA & CAPTCHA Experien
 Status: VERIFIED
 
 BRICK-037 — Safe File Upload & Download v1
+Status: VERIFIED
+
+BRICK-038 — Structured Extraction & Scraping v1 (Deterministic Page Data Extraction / Zero AI)
 Status: IN PROGRESS (Awaiting Checkpoint)
 
-BRICK-038 — Browser Automation Evolution / Next Brick
+BRICK-039 — Iframes & Shadow DOM Extraction / Browser Evolution
 Status: NOT STARTED / NOT AUTHORIZED
 

@@ -94,7 +94,12 @@ function clamp(val, min, max, defaultVal) {
     handoffTtlMs: clamp(overrides.BROWSER_HANDOFF_TTL_MS ?? process.env.BROWSER_HANDOFF_TTL_MS, 1000, 1800000, 300000),
     uploadMaxBytes: clamp(overrides.BROWSER_UPLOAD_MAX_BYTES ?? process.env.BROWSER_UPLOAD_MAX_BYTES, 1024, 500 * 1024 * 1024, 50 * 1024 * 1024),
     downloadMaxBytes: clamp(overrides.BROWSER_DOWNLOAD_MAX_BYTES ?? process.env.BROWSER_DOWNLOAD_MAX_BYTES, 1024, 500 * 1024 * 1024, 50 * 1024 * 1024),
-    downloadTimeoutMs: clamp(overrides.BROWSER_DOWNLOAD_TIMEOUT_MS ?? process.env.BROWSER_DOWNLOAD_TIMEOUT_MS, 1000, 300000, 30000)
+    downloadTimeoutMs: clamp(overrides.BROWSER_DOWNLOAD_TIMEOUT_MS ?? process.env.BROWSER_DOWNLOAD_TIMEOUT_MS, 1000, 300000, 30000),
+    extractMaxRecords: clamp(overrides.BROWSER_EXTRACT_MAX_RECORDS ?? process.env.BROWSER_EXTRACT_MAX_RECORDS, 10, 5000, 500),
+    extractMaxTextChars: clamp(overrides.BROWSER_EXTRACT_MAX_TEXT_CHARS ?? process.env.BROWSER_EXTRACT_MAX_TEXT_CHARS, 1000, 2000000, 200000),
+    extractMaxFieldChars: clamp(overrides.BROWSER_EXTRACT_MAX_FIELD_CHARS ?? process.env.BROWSER_EXTRACT_MAX_FIELD_CHARS, 100, 50000, 4000),
+    extractMaxNestingDepth: clamp(overrides.BROWSER_EXTRACT_MAX_NESTING_DEPTH ?? process.env.BROWSER_EXTRACT_MAX_NESTING_DEPTH, 1, 20, 5),
+    extractTimeoutMs: clamp(overrides.BROWSER_EXTRACT_TIMEOUT_MS ?? process.env.BROWSER_EXTRACT_TIMEOUT_MS, 500, 60000, 10000)
   });
 
   return Object.freeze({

@@ -1,11 +1,51 @@
 Project: JARVIS4
-Current Brick: 37
-Status: BRICK-037 IN PROGRESS (Safe File Upload & Download v1; Explicit Authorization + Bounded File Access + Verified Transfers)
-Last Verified Brick: BRICK-036
-Current Feature: Safe File Upload & Download v1
-Next Feature: NOT AUTHORIZED (Brick 38 — NOT STARTED)
+Current Brick: 38
+Status: BRICK-038 IN PROGRESS (Structured Extraction & Scraping v1; Deterministic Page Data Extraction; Harness-First / Zero AI)
+Last Verified Brick: BRICK-037
+Current Feature: Structured Extraction & Scraping v1
+Next Feature: NOT AUTHORIZED (Brick 39 — NOT STARTED)
 
 ## Working capabilities
+
+- Structured Extraction & Scraping v1 (Brick 38) deterministic page data extraction subsystem (`src/browser/structuredExtractor.js`, `browserManager.js`, `server.js`, `index.html`):
+  - Zero AI / Deterministic Extraction Engine:
+    - Exactly 0 OpenRouter, 0 LLM, 0 Exa, 0 search calls.
+    - Pure browser DOM traversal and semantic element extraction.
+    - Exactly 0 arbitrary CSS selector execution API, 0 arbitrary XPath API, 0 arbitrary JavaScript execution API, 0 website crawling, 0 pagination, 0 auto-scrolling, 0 "Load more" clicking, and 0 multi-page planning.
+  - Dedicated Extraction Endpoint:
+    - Dedicated endpoint: `POST /api/browser/extract`.
+    - Requires atomic page binding and caller-provided `expectedSnapshotToken`.
+    - If snapshot is missing or stale -> rejected with `TARGET_STALE`.
+    - If page state, `semanticRevision`, or `documentVersion` changes during extraction -> rejected with `PAGE_CHANGED` / `TARGET_STALE`. Zero auto-retry.
+  - Main Document Only (Strict Brick 38 Scope):
+    - 0 iframe traversal, 0 shadow-root traversal (deferred to Brick 39).
+    - Visible content default: filters out `display:none`, `visibility:hidden`, `hidden` attribute, and `aria-hidden="true"`.
+  - 7 Structured Extraction Categories:
+    - `metadata`: title, url, language, canonicalUrl, description (zero arbitrary meta secrets, zero script execution).
+    - `headings`: h1 through h6 in DOM order with level and text, filtering out hidden headings and preserving Unicode.
+    - `links`: text, accessibleName, href (relative URLs resolved against page URL), sameOrigin boolean. Does not navigate or click.
+    - `tables`: caption, headers, rows from thead/tbody/th/td. Detects irregular tables (colspans, uneven columns) and flags them truthful (`irregular: true`) without silent data shifting.
+    - `lists`: ul, ol, ARIA `role="list"` / `role="listitem"`, ordered boolean, and recursive sublists bounded by `maxNestingDepth`.
+    - `definitions`: dl, dt, dd semantic key-value pairs (`[{ key, value }]`). Zero invention of mappings from arbitrary prose.
+    - `records`: repeated semantic structures (`<article>`, `<li>`, ARIA listitem) with heading, text, links, and fields. Zero div-card guessing; zero AI schema inference.
+  - Strict Privacy Exclusions & Form Value Protection:
+    - Structured extraction strictly never exposes password values, text input current values, textarea current contents, file input paths, hidden input values, cookies, localStorage, sessionStorage, IndexedDB, or session tokens.
+    - Scripts, styles, and framework hydration JSON payloads are never extracted.
+  - Conservative Limits & Truncation Metadata:
+    - Clamped limits: `maxRecords` (500), `maxTextChars` (200000), `maxFieldChars` (4000), `maxNestingDepth` (5), `timeoutMs` (10000).
+    - If limits are reached -> returns partial safe result with explicit metadata `truncated: true` and `truncationReason` (`MAX_RECORDS` / `MAX_TEXT_CHARS`).
+  - Multilingual & Unicode Fidelity:
+    - Full fidelity preservation of Unicode characters, Arabic RTL text, diacritics, and mixed scripts without translation or alteration.
+  - Atomic Page Isolation & Human Handoff Mutual Exclusion:
+    - Multi-page extraction operates strictly on the bound managed page without cross-page contamination.
+    - Extraction is blocked with `HUMAN_HANDOFF_ACTIVE` while sensitive human authentication handoff is active.
+    - Operates safely within restored authenticated sessions without exposing session vault artifacts.
+  - Developer Control Center UI:
+    - Dedicated "Structured Extraction" developer section in `src/web/index.html` with category checkboxes, snapshot token input, "Extract Current Page" button, status indicators, and formatted JSON preview rendered strictly via `.textContent = JSON.stringify(...)` (0 HTML injection).
+  - Verification Evidence:
+    - 1575/1575 offline unit, contract, and regression tests PASS (`npm run verify`).
+    - 123/123 real-browser acceptance tests across 30 categories PASS on Microsoft Edge (`npm run verify:browser`).
+
 
 - Safe File Upload & Download v1 (Brick 37) deterministic file transfer subsystem (`src/browser/fileTransfer.js`, `browserManager.js`, `server.js`, `index.html`):
   - Strict Security Principles & Zero Arbitrary Filesystem Access:

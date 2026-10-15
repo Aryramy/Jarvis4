@@ -155,7 +155,17 @@ const REQUIRED_FILES = [
   'tests/browser-fixtures/file-upload-validation.html',
   'tests/browser-fixtures/file-download-basic.html',
   'tests/browser-fixtures/file-download-large.html',
-  'tests/browser-fixtures/file-download-dangerous-name.html'
+  'tests/browser-fixtures/file-download-dangerous-name.html',
+  'src/browser/structuredExtractor.js',
+  'tests/unit/structuredExtractor.test.js',
+  'tests/contract/extractionEndpoints.test.js',
+  'tests/browser-fixtures/extract-basic.html',
+  'tests/browser-fixtures/extract-table.html',
+  'tests/browser-fixtures/extract-lists.html',
+  'tests/browser-fixtures/extract-records.html',
+  'tests/browser-fixtures/extract-dynamic.html',
+  'tests/browser-fixtures/extract-multilingual.html',
+  'tests/browser-fixtures/extract-privacy.html'
 ];
 
 const REQUIRED_DIRS = [
@@ -622,6 +632,28 @@ check('Browser File Transfer Module Sanity Check (Brick 37)', async () => {
   const dlId = generateDownloadId();
   if (!dlId.startsWith('dl_')) {
     throw new Error('generateDownloadId failed sanity check');
+  }
+});
+
+check('Structured Extractor Module Sanity Check (Brick 38)', async () => {
+  const {
+    StructuredExtractionError,
+    ALL_EXTRACTION_TYPES,
+    extractStructuredDataFromHtml
+  } = await import('../src/browser/structuredExtractor.js');
+
+  if (typeof StructuredExtractionError !== 'function' || typeof extractStructuredDataFromHtml !== 'function') {
+    throw new Error('structuredExtractor module failed to export required classes or functions');
+  }
+
+  if (ALL_EXTRACTION_TYPES.length !== 7) {
+    throw new Error('ALL_EXTRACTION_TYPES must have exactly 7 supported types');
+  }
+
+  const sampleHtml = '<html><head><title>Sanity Title</title></head><body><h1>Main Heading</h1><p>Test paragraph</p></body></html>';
+  const extracted = extractStructuredDataFromHtml(sampleHtml, { types: ['metadata', 'headings'] });
+  if (extracted.data.metadata?.title !== 'Sanity Title' || extracted.data.headings[0]?.text !== 'Main Heading') {
+    throw new Error('structuredExtractor sanity extraction failed');
   }
 });
 

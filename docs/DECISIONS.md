@@ -1142,6 +1142,45 @@
   - 1540/1540 offline tests PASS (`npm run verify`).
   - 108/108 real Microsoft Edge browser tests PASS (`npm run verify:browser`).
 
+## ADR-0053: Structured Extraction & Scraping v1 (Brick 38)
+- **Status**: Accepted
+- **Context**:
+  - Web applications and documents contain rich structured data (metadata, headings, links, data tables, semantic lists, definition lists, and repeated records).
+  - Extracting this data using AI/LLM models causes high latency, hallucinated values, non-deterministic schemas, and cost inefficiencies.
+  - Web agents often make dangerous mistakes: scraping form inputs and passwords, running arbitrary user-supplied XPath or CSS selector scripts, recursively crawling sites, or extracting hidden content.
+  - Brick 38 introduces deterministic, zero-AI, privacy-preserving structured page extraction bound atomically to the active managed page:
+    1. Zero AI: Exactly 0 OpenRouter, 0 LLM, 0 Exa, 0 search calls. Pure deterministic DOM extraction.
+    2. Atomic page binding: Requires `expectedSnapshotToken` (`POST /api/browser/extract`). If the snapshot is stale, or if dynamic mutations/SPA transitions alter `semanticRevision` or `documentVersion` mid-extraction, extraction fails safely with `TARGET_STALE` or `PAGE_CHANGED`. Zero auto-retry.
+    3. Main document only: Scope is strictly confined to the main document. Zero iframe traversal and zero shadow DOM traversal (deferred to Brick 39).
+    4. 7 Deterministic categories:
+       - `metadata`: title, URL, language, canonical URL, description.
+       - `headings`: h1-h6 in DOM order with level and text, visible only, preserving Unicode.
+       - `links`: text, accessibleName, href (resolved relative URLs), sameOrigin boolean.
+       - `tables`: caption, headers, rows from thead/tbody/th/td. Detects irregular tables (colspans/uneven columns) truthfully (`irregular: true`) without silent data shifting.
+       - `lists`: ul, ol, ARIA role="list"/"listitem", ordered boolean, bounded depth nesting.
+       - `definitions`: dl, dt, dd key-value pairs (`[{ key, value }]`).
+       - `records`: repeated semantic structures (`<article>`, `<li>`, ARIA listitem) with heading, text, links, and fields. Zero div-card guessing or AI schema inference.
+    5. Strict privacy protection: Zero scraping of password values, text input current values, textarea current contents, file paths, hidden inputs, cookies, localStorage, sessionStorage, IndexedDB, or auth tokens.
+    6. Visible content default: Hidden elements (`display:none`, `visibility:hidden`, `hidden`, `aria-hidden="true"`) are excluded.
+    7. Conservative limits & truncation: `maxRecords` (500), `maxTextChars` (200000), `maxFieldChars` (4000), `maxNestingDepth` (5), `timeoutMs` (10000). Reaching limits sets `truncated: true` and `truncationReason`.
+    8. Multilingual fidelity: Preserves Arabic RTL, diacritics, and Unicode characters faithfully without translation.
+    9. Human Handoff mutual exclusion: Extraction returns `HUMAN_HANDOFF_ACTIVE` if sensitive authentication handoff is paused on the page.
+    10. Control Center UI: Dedicated developer section in `src/web/index.html` with preview strictly rendered via `.textContent = JSON.stringify(...)` (zero HTML injection).
+- **Decision**:
+  1. Implemented `src/browser/structuredExtractor.js` with `StructuredExtractionError`, `cleanText`, `truncate`, `extractStructuredDataSnapshot`, `extractStructuredDataFromHtml`, and `extractStructuredData`.
+  2. Integrated structured extraction into `BrowserManager` with atomic page binding, snapshot verification, and mutual exclusion with human handoff.
+  3. Added server endpoint `POST /api/browser/extract` in `src/web/server.js`.
+  4. Added "Structured Extraction" developer section to `src/web/index.html` with safe `.textContent` JSON formatting.
+  5. Added 7 deterministic browser fixtures in `tests/browser-fixtures/extract-*.html`.
+  6. Added 26 unit tests and 9 contract tests.
+  7. Added 15 real Microsoft Edge tests (108-122) in `scripts/verify-browser.mjs`.
+- **Consequences**:
+  - Deterministic, high-speed, zero-AI structured extraction capability.
+  - Complete protection of sensitive form inputs, passwords, cookies, and tokens.
+  - 1575/1575 offline tests PASS (`npm run verify`).
+  - 123/123 real Microsoft Edge browser tests PASS (`npm run verify:browser`).
+
+
 
 
 
