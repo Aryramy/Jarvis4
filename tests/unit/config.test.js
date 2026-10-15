@@ -9,6 +9,21 @@ describe('Configuration Utility', () => {
     'CHEAPER_INFERENCE_MODEL',
     'CHEAPER_INFERENCE_TIMEOUT_MS',
     'OPENROUTER_API_KEY',
+    'OPENROUTER_TEXT_BASE_URL',
+    'OPENROUTER_TEXT_MODEL',
+    'OPENROUTER_TEXT_TIMEOUT_MS',
+    'OPENROUTER_FAST_ROUTING_MODE',
+    'OPENROUTER_FAST_MODEL',
+    'OPENROUTER_FAST_FALLBACK_MODELS',
+    'OPENROUTER_FAST_TIMEOUT_MS',
+    'OPENROUTER_REASONING_ROUTING_MODE',
+    'OPENROUTER_REASONING_MODEL',
+    'OPENROUTER_REASONING_COST_TIER',
+    'OPENROUTER_AUTO_COST_TIER',
+    'OPENROUTER_REASONING_TIMEOUT_MS',
+    'OPENROUTER_SEARCH_BASE_URL',
+    'OPENROUTER_SEARCH_MODEL',
+    'OPENROUTER_SEARCH_TIMEOUT_MS',
     'OPENROUTER_STT_BASE_URL',
     'OPENROUTER_STT_MODEL',
     'OPENROUTER_STT_TIMEOUT_MS',
@@ -229,6 +244,42 @@ describe('Configuration Utility', () => {
     assert.equal(envCfg.openRouter.textBaseUrl, 'https://env-text.openrouter.ai/v1');
     assert.equal(envCfg.openRouter.textModel, 'env-text-model');
     assert.equal(envCfg.openRouter.textTimeoutMs, 20000);
+  });
+
+  test('should load openRouter routing profile defaults (PRE-040B)', () => {
+    const defaultCfg = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'info' });
+    assert.equal(defaultCfg.openRouter.fastRoutingMode, 'pinned');
+    assert.equal(defaultCfg.openRouter.fastModel, 'deepseek/deepseek-v4-flash-0731');
+    assert.deepEqual(defaultCfg.openRouter.fastFallbackModels, []);
+    assert.equal(defaultCfg.openRouter.fastTimeoutMs, 30000);
+    assert.equal(defaultCfg.openRouter.reasoningRoutingMode, 'auto');
+    assert.equal(defaultCfg.openRouter.reasoningModel, 'openrouter/auto');
+    assert.equal(defaultCfg.openRouter.reasoningCostTier, 'medium');
+    assert.equal(defaultCfg.openRouter.autoCostTier, 'medium');
+    assert.equal(defaultCfg.openRouter.reasoningTimeoutMs, 60000);
+  });
+
+  test('should load openRouter routing profile overrides directly (PRE-040B)', () => {
+    const customCfg = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'info',
+      OPENROUTER_FAST_ROUTING_MODE: 'pinned_fallback',
+      OPENROUTER_FAST_MODEL: 'custom/fast-model',
+      OPENROUTER_FAST_FALLBACK_MODELS: 'custom/fallback-1, custom/fallback-2, custom/fallback-3',
+      OPENROUTER_FAST_TIMEOUT_MS: '15000',
+      OPENROUTER_REASONING_ROUTING_MODE: 'auto',
+      OPENROUTER_REASONING_MODEL: 'openrouter/auto',
+      OPENROUTER_REASONING_COST_TIER: 'low',
+      OPENROUTER_REASONING_TIMEOUT_MS: '45000'
+    });
+    assert.equal(customCfg.openRouter.fastRoutingMode, 'pinned');
+    assert.equal(customCfg.openRouter.fastModel, 'custom/fast-model');
+    assert.deepEqual(customCfg.openRouter.fastFallbackModels, ['custom/fallback-1', 'custom/fallback-2']);
+    assert.equal(customCfg.openRouter.fastTimeoutMs, 15000);
+    assert.equal(customCfg.openRouter.reasoningRoutingMode, 'auto');
+    assert.equal(customCfg.openRouter.reasoningModel, 'openrouter/auto');
+    assert.equal(customCfg.openRouter.reasoningCostTier, 'low');
+    assert.equal(customCfg.openRouter.reasoningTimeoutMs, 45000);
   });
 
   test('should load webRead config defaults when environment is empty', () => {

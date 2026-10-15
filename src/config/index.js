@@ -36,11 +36,85 @@ export function loadConfig(overrides = {}) {
     timeoutMs: Number(overrides.CHEAPER_INFERENCE_TIMEOUT_MS ?? process.env.CHEAPER_INFERENCE_TIMEOUT_MS ?? 30000) || 30000
   });
 
+function clamp(val, min, max, defaultVal) {
+  if (val === undefined || val === null || val === '') return defaultVal;
+  const num = Number(val);
+  if (Number.isNaN(num)) return defaultVal;
+  return Math.min(Math.max(num, min), max);
+}
+
+const VALID_ROUTING_MODES = ['pinned', 'pinned_fallback', 'auto'];
+const VALID_COST_TIERS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+function validateRoutingMode(mode, varName) {
+  if (mode === undefined || mode === null || mode === '') return 'pinned';
+  const norm = String(mode).trim().toLowerCase();
+  if (norm === 'pinned_fallback') return 'pinned';
+  if (!VALID_ROUTING_MODES.includes(norm)) {
+    throw new Error(`Invalid ${varName}: "${mode}". Allowed values: ${VALID_ROUTING_MODES.join(', ')}`);
+  }
+  return norm;
+}
+
+function validateCostTier(tier, varName) {
+  if (tier === undefined || tier === null || tier === '') return 'medium';
+  const norm = String(tier).trim().toLowerCase();
+  if (!VALID_COST_TIERS.includes(norm)) {
+    throw new Error(`Invalid ${varName}: "${tier}". Allowed values: ${VALID_COST_TIERS.join(', ')}`);
+  }
+  return norm;
+}
+
+function parseFallbackModels(input, primaryModel, maxCount = 2) {
+  let list = [];
+  if (Array.isArray(input)) {
+    list = input;
+  } else if (typeof input === 'string') {
+    list = input.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  const normalized = [];
+  for (const item of list) {
+    if (typeof item === 'string') {
+      const clean = item.trim();
+      if (clean && clean !== primaryModel && !normalized.includes(clean)) {
+        normalized.push(clean);
+        if (normalized.length >= maxCount) break;
+      }
+    }
+  }
+  return Object.freeze(normalized);
+}
+
+  const fastModelRaw = overrides.OPENROUTER_FAST_MODEL ?? process.env.OPENROUTER_FAST_MODEL ?? overrides.OPENROUTER_TEXT_MODEL ?? process.env.OPENROUTER_TEXT_MODEL ?? 'deepseek/deepseek-v4-flash-0731';
+  const fastModel = typeof fastModelRaw === 'string' ? fastModelRaw.trim() : 'deepseek/deepseek-v4-flash-0731';
+
+  const reasoningModelRaw = overrides.OPENROUTER_REASONING_MODEL ?? process.env.OPENROUTER_REASONING_MODEL ?? 'openrouter/auto';
+  const reasoningModel = typeof reasoningModelRaw === 'string' ? reasoningModelRaw.trim() : 'openrouter/auto';
+
   const openRouter = Object.freeze({
     apiKey: overrides.OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY ?? '',
     textBaseUrl: (overrides.OPENROUTER_TEXT_BASE_URL ?? process.env.OPENROUTER_TEXT_BASE_URL ?? 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, ''),
-    textModel: overrides.OPENROUTER_TEXT_MODEL ?? process.env.OPENROUTER_TEXT_MODEL ?? 'deepseek/deepseek-v4-flash-0731',
+    textModel: fastModel,
     textTimeoutMs: Number(overrides.OPENROUTER_TEXT_TIMEOUT_MS ?? process.env.OPENROUTER_TEXT_TIMEOUT_MS ?? 30000) || 30000,
+    fastRoutingMode: validateRoutingMode(overrides.OPENROUTER_FAST_ROUTING_MODE ?? process.env.OPENROUTER_FAST_ROUTING_MODE ?? 'pinned', 'OPENROUTER_FAST_ROUTING_MODE'),
+    fastModel,
+    fastFallbackModels: parseFallbackModels(
+      overrides.OPENROUTER_FAST_FALLBACK_MODELS ?? process.env.OPENROUTER_FAST_FALLBACK_MODELS ?? '',
+      fastModel,
+      2
+    ),
+    fastTimeoutMs: clamp(overrides.OPENROUTER_FAST_TIMEOUT_MS ?? process.env.OPENROUTER_FAST_TIMEOUT_MS ?? overrides.OPENROUTER_TEXT_TIMEOUT_MS ?? process.env.OPENROUTER_TEXT_TIMEOUT_MS, 1000, 120000, 30000),
+    reasoningRoutingMode: validateRoutingMode(overrides.OPENROUTER_REASONING_ROUTING_MODE ?? process.env.OPENROUTER_REASONING_ROUTING_MODE ?? 'auto', 'OPENROUTER_REASONING_ROUTING_MODE'),
+    reasoningModel,
+    reasoningCostTier: validateCostTier(
+      overrides.OPENROUTER_REASONING_COST_TIER ?? process.env.OPENROUTER_REASONING_COST_TIER ?? overrides.OPENROUTER_AUTO_COST_TIER ?? process.env.OPENROUTER_AUTO_COST_TIER ?? 'medium',
+      'OPENROUTER_REASONING_COST_TIER'
+    ),
+    autoCostTier: validateCostTier(
+      overrides.OPENROUTER_AUTO_COST_TIER ?? process.env.OPENROUTER_AUTO_COST_TIER ?? overrides.OPENROUTER_REASONING_COST_TIER ?? process.env.OPENROUTER_REASONING_COST_TIER ?? 'medium',
+      'OPENROUTER_AUTO_COST_TIER'
+    ),
+    reasoningTimeoutMs: clamp(overrides.OPENROUTER_REASONING_TIMEOUT_MS ?? process.env.OPENROUTER_REASONING_TIMEOUT_MS, 1000, 120000, 60000),
     searchBaseUrl: (overrides.OPENROUTER_SEARCH_BASE_URL ?? process.env.OPENROUTER_SEARCH_BASE_URL ?? overrides.OPENROUTER_TEXT_BASE_URL ?? process.env.OPENROUTER_TEXT_BASE_URL ?? 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, ''),
     searchModel: overrides.OPENROUTER_SEARCH_MODEL ?? process.env.OPENROUTER_SEARCH_MODEL ?? 'deepseek/deepseek-v4-flash-0731',
     searchTimeoutMs: Number(overrides.OPENROUTER_SEARCH_TIMEOUT_MS ?? process.env.OPENROUTER_SEARCH_TIMEOUT_MS ?? 30000) || 30000,
@@ -64,13 +138,6 @@ export function loadConfig(overrides = {}) {
     maxQuestionChars: Math.max(1, Number(overrides.PAGE_QA_MAX_QUESTION_CHARS ?? process.env.PAGE_QA_MAX_QUESTION_CHARS ?? 4000)) || 4000,
     maxOutputTokens: Math.max(1, Number(overrides.PAGE_QA_MAX_OUTPUT_TOKENS ?? process.env.PAGE_QA_MAX_OUTPUT_TOKENS ?? 1000)) || 1000
   });
-
-function clamp(val, min, max, defaultVal) {
-  if (val === undefined || val === null || val === '') return defaultVal;
-  const num = Number(val);
-  if (Number.isNaN(num)) return defaultVal;
-  return Math.min(Math.max(num, min), max);
-}
 
   const browser = Object.freeze({
     channel: (overrides.BROWSER_CHANNEL ?? process.env.BROWSER_CHANNEL ?? 'msedge').trim(),

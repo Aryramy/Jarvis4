@@ -183,7 +183,11 @@ const REQUIRED_FILES = [
   'tests/unit/runtimeAgentSanitizer.test.js',
   'tests/unit/runtimeAgentHarness.test.js',
   'tests/contract/runtimeAgentToolContracts.test.js',
-  'tests/regression/runtimeAgentSecurity.test.js'
+  'tests/regression/runtimeAgentSecurity.test.js',
+  'src/providers/openRouterRouting.js',
+  'src/providers/openRouterRouter.js',
+  'scripts/diagnose-openrouter-routing.mjs',
+  'tests/unit/openRouterRouting.test.js'
 ];
 
 const REQUIRED_DIRS = [
@@ -811,6 +815,38 @@ check('Cross-Gateway AI Benchmark Module Sanity Check', async () => {
   }
   if (benchmark.OPENROUTER_TARGET_MODEL !== 'deepseek/deepseek-v4-flash-0731') {
     throw new Error('OpenRouter target model must be deepseek/deepseek-v4-flash-0731');
+  }
+});
+
+check('OpenRouter Routing Gate Module Sanity Check (PRE-040B)', async () => {
+  const {
+    ROUTING_PROFILES,
+    ROUTING_MODES,
+    ALLOWED_COST_TIERS,
+    buildRoutingRequest,
+    buildTelemetry,
+    normalizeFallbackModels,
+    validateSessionId,
+    classifyProviderError
+  } = await import('../src/providers/openRouterRouting.js');
+  const { OpenRouterRoutingGate } = await import('../src/providers/openRouterRouter.js');
+
+  if (typeof OpenRouterRoutingGate !== 'function') {
+    throw new Error('OpenRouterRoutingGate must be exported as a class');
+  }
+  if (!ROUTING_PROFILES.FAST || !ROUTING_PROFILES.REASONING) {
+    throw new Error('ROUTING_PROFILES must export FAST and REASONING');
+  }
+  if (!ROUTING_MODES.PINNED_FALLBACK || !ROUTING_MODES.AUTO) {
+    throw new Error('ROUTING_MODES must export PINNED_FALLBACK and AUTO');
+  }
+  const sessionCheck = validateSessionId('safe_session_123');
+  if (!sessionCheck.valid || sessionCheck.value !== 'safe_session_123') {
+    throw new Error('validateSessionId failed sanity check');
+  }
+  const fallbacks = normalizeFallbackModels('m1,m1,m2,m3', 'm1', 2);
+  if (fallbacks.length !== 2 || fallbacks[0] !== 'm2' || fallbacks[1] !== 'm3') {
+    throw new Error('normalizeFallbackModels failed sanity check');
   }
 });
 

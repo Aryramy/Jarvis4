@@ -1,11 +1,33 @@
 Project: JARVIS4
-Current Milestone: PRE-040A
-Status: PRE-040A COMPLETE (Runtime Agent Harness & Tool Contract Foundation; Governance Before Autonomy; Zero LLM Execution)
+Current Milestone: PRE-040B
+Status: PRE-040B IMPLEMENTED / AWAITING CHECKPOINT (OpenRouter Routing Gate, Fallback & Telemetry Hardening; Provider Layer Only; Zero Browser Autonomy)
 Last Verified Milestone: PRE-040A
-Current Feature: Runtime Agent Harness Foundation (Tool Contracts, Risk Engine R0-R4, Clamped Budgets, Gated Human Confirmation, Finite Run States, Sanitized Evidence Envelopes, Untrusted Web Data Wrapping, Secret-Free Audit)
-Next Feature: NOT AUTHORIZED (PRE-040B OpenRouter Routing Gate / PRE-040C Eval Harness / Brick 40 — NOT STARTED)
+Current Feature: OpenRouter Routing Gate & Provider Hardening (Profiles FAST & REASONING, Bounded Pinned Fallback, Auto Router, Sanitized Telemetry, Fail-Fast Policy, Backward Compatibility)
+Next Feature: NOT AUTHORIZED (PRE-040C Eval Harness / Brick 40 — NOT STARTED)
 
 ## Working capabilities
+
+- OpenRouter Routing Gate & Provider Hardening (PRE-040B) (`src/providers/openRouterRouting.js`, `src/providers/openRouterRouter.js`, `src/providers/openRouterText.js`):
+  - Routing Profiles:
+    - FAST profile (`PINNED_FALLBACK`): Primary model `deepseek/deepseek-v4-flash-0731` with OpenRouter native provider failover and bounded ordered fallback models list (`OPENROUTER_FAST_FALLBACK_MODELS`, max 2 fallbacks, primary deduplicated, order preserved).
+    - REASONING profile (`AUTO`): OpenRouter Auto Router (`model: "openrouter/auto"`, `plugins: [{ id: "auto-router", cost_tier }]`, default cost tier `medium`, configurable via `OPENROUTER_REASONING_COST_TIER` / `OPENROUTER_AUTO_COST_TIER`).
+  - Strict No-Duplicate Fallback Invariant:
+    - Zero client-side sequential model loops.
+    - Zero fallback wrapping around Auto Router (`openrouter/auto`).
+  - Security & Caller-Override Protection:
+    - Caller cannot override `model`, `models`, `cost_tier`, `provider`, or `allow_fallbacks`. Application configuration is authoritative.
+  - Safe Session Identification:
+    - Optional opaque `sessionId` validated for length (<=128), alphanumeric/safe characters, with strict rejection of emails, URLs, file paths, tokens, and credentials.
+  - Sanitized Telemetry Structure:
+    - Captures `routingProfile`, `routingMode`, `requestedModel`, `requestedModels`, `actualModel`, `autoSelectedModel`, `provider`, `fallbackUsed`, `latencyMs`, `promptTokens`, `completionTokens`, `totalTokens`, `cost` (or `null` if unreturned, never fabricated, never $0), `timeoutMs`, `success`, `errorCode`.
+  - Privacy Invariants:
+    - Zero logging of `OPENROUTER_API_KEY`, Bearer headers, passwords, cookies, session storage, or full user prompts/messages.
+  - Controlled Error Sanitization & Classification:
+    - Standard error codes: `OPENROUTER_TIMEOUT`, `OPENROUTER_RATE_LIMITED`, `OPENROUTER_AUTH_FAILED`, `OPENROUTER_BAD_REQUEST`, `OPENROUTER_UPSTREAM_UNAVAILABLE`, `OPENROUTER_NETWORK_ERROR`, `OPENROUTER_ROUTING_FAILED`.
+  - Backward Compatibility:
+    - Existing direct text AI, `/api/ai`, `/api/ai/stream`, CLI AI (`npm run ai`), and voice-turn AI routes cleanly default to FAST profile with 100% backward contract preservation.
+  - Runtime Agent Harness Preparation:
+    - Minimal helper methods added (`createRoutingContext`, `resolveRoutingProfile`) without executing LLM or autonomous loops.
 
 - Runtime Agent Harness Foundation (PRE-040A) deterministic governance subsystem (`src/agent/runtime/`):
   - Zero AI / Zero Model Execution:

@@ -12,3 +12,4 @@ export { RuntimeStateMachine, RUN_STATES, TERMINAL_STATES } from './runtimeState
 export { sanitizeObservation, markUntrustedWebData, sanitizeFilePath } from './observationSanitizer.js';
 export { buildEvidenceEnvelope, inferEvidenceType, SUPPORTED_EVIDENCE_TYPES } from './evidence.js';
 export { RuntimeAgentHarness, defaultRuntimeAgentHarness } from './runtimeHarness.js';
+export { ROUTING_PROFILES } from '../../providers/openRouterRouting.js';

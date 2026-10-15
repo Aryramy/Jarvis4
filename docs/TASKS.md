@@ -121,7 +121,7 @@ PRE-040A — Runtime Agent Harness & Tool Contract Foundation (Governance Before
 Status: VERIFIED
 
 PRE-040B — OpenRouter Routing Gate & Provider Hardening
-Status: NOT STARTED / NOT AUTHORIZED
+Status: IMPLEMENTED / AWAITING CHECKPOINT
 
 PRE-040C — Eval Harness & Golden-Task Benchmark Framework
 Status: NOT STARTED / NOT AUTHORIZED

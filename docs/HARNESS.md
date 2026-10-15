@@ -291,6 +291,21 @@ All other mechanics—including form mechanics, state transitions, token invalid
   - Verified audit and evidence envelopes contain zero passwords, tokens, auth cookies, or DPAPI keys.
   - Verified subcontext form submission rejection through harness (`SUBCONTEXT_OPERATION_NOT_SUPPORTED`).
   - Extended Level 1 offline test harness to 1677 tests across 260 suites (`npm run verify`).
+- **PRE-040B**:
+  - Implemented OpenRouter Routing Gate (`OpenRouterRoutingGate`) and routing helpers (`src/providers/openRouterRouting.js`, `src/providers/openRouterRouter.js`).
+  - Implemented application-governed routing profiles:
+    - `FAST`: Maps to `PINNED_FALLBACK`. Targets existing production model `deepseek/deepseek-v4-flash-0731` with OpenRouter native provider failover and bounded ordered fallback models array (`OPENROUTER_FAST_FALLBACK_MODELS`, max 2 fallbacks, deduplicated, order preserved).
+    - `REASONING`: Maps to `AUTO`. Targets `openrouter/auto` with official auto-router cost tier plugin (`low`, `medium`, `high`, `xhigh`, `max`; default `medium`).
+  - Proved strict invariant: AUTO mode is never wrapped in a client-side sequential model loop or secondary models array.
+  - Proved security invariant: Caller-supplied routing overrides (`model`, `models`, `cost_tier`, `provider`, `allow_fallbacks`) are strictly blocked/ignored.
+  - Added safe opaque session ID validation (<=128 chars, alphanumeric/safe chars only, zero credentials/paths/emails/tokens).
+  - Implemented structured sanitized telemetry capturing actual model, autoSelectedModel, provider, fallbackUsed, monotonic latency, tokens, truthful cost (null when absent, never $0), and timeout.
+  - Preserved zero secret/prompt logging: API keys, Bearer headers, passwords, cookies, and conversation messages are never logged.
+  - Added controlled error classification: `OPENROUTER_TIMEOUT`, `OPENROUTER_RATE_LIMITED`, `OPENROUTER_AUTH_FAILED`, `OPENROUTER_BAD_REQUEST`, `OPENROUTER_UPSTREAM_UNAVAILABLE`, `OPENROUTER_NETWORK_ERROR`, `OPENROUTER_ROUTING_FAILED`.
+  - Added Runtime Agent Harness preparation methods (`createRoutingContext`, `resolveRoutingProfile`) without executing LLM or autonomous loops.
+  - Added opt-in diagnostic tool (`scripts/diagnose-openrouter-routing.mjs` / `npm run diagnose:openrouter-routing`) separating office Wi-Fi firewall ECONNRESET from code errors.
+  - Extended Level 1 offline test harness to 1707 tests across 271 suites (`npm run verify`).
+  - Level 2 real Microsoft Edge browser harness intact at 148/148 tests across 32 categories (`npm run verify:browser`).
 
 ---
 

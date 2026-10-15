@@ -1229,6 +1229,50 @@
   - 1677/1677 offline tests PASS (`npm run verify`).
   - 148/148 real Microsoft Edge browser tests PASS (`npm run verify:browser`).
 
+## ADR-0056: OpenRouter Routing Gate, Profiles, Fallbacks, and Telemetry Hardening (PRE-040B)
+- **Status**: Accepted (PRE-040B IMPLEMENTED / AWAITING CHECKPOINT)
+- **Context**:
+  - Prior to introducing autonomous browser planning (Brick 40) or task evaluation (PRE-040C), the OpenRouter text provider layer required hardening with explicit routing modes, bounded fallbacks, sanitized telemetry, and fail-fast policies.
+  - Direct callers and future agent planners must not be allowed to select arbitrary expensive models, override provider failovers, or inject cost controls.
+  - OpenRouter natively handles provider failover across endpoints serving the same model, and supports ordered model fallback via the `models` request array. Custom client-side retry loops or manual sequential fallback loops add uncontrolled latency and duplicate costs.
+- **Decision**:
+  1. **Two Core Routing Profiles**:
+     - `FAST`: Maps to `PINNED_FALLBACK`. Targets existing production model `deepseek/deepseek-v4-flash-0731` with optional bounded fallback list (`OPENROUTER_FAST_FALLBACK_MODELS`). Purpose: routine decisions, low latency, low cost.
+     - `REASONING`: Maps to `AUTO`. Targets `openrouter/auto` using the official auto-router plugin (`plugins: [{ id: "auto-router", cost_tier }]`, default tier `medium`). Purpose: complex multi-step reasoning and ambiguous recovery.
+  2. **Bounded Native Fallbacks**:
+     - Fallbacks are bounded to at most 2 secondary models (max 3 total including primary).
+     - Models are normalized, deduplicated, and preserved in strict configuration order. The primary model is never duplicated into the fallback list.
+     - Pinned fallback uses OpenRouter's native `models` array (`[primary, ...fallbacks]`). JARVIS does not execute sequential client-side fallback loops.
+  3. **No Duplicate Auto Fallback**:
+     - Auto mode uses `openrouter/auto` with internal OpenRouter candidate selection.
+     - JARVIS strictly prohibits wrapping Auto Router in a client-side sequential model loop or secondary `models` array.
+  4. **OpenRouter Provider Failover Preserved**:
+     - Provider failover is not restricted (no `only`, `order`, or `ignore` filtering) ensuring maximum reliability.
+  5. **Deterministic Request Builder & Caller Override Protection**:
+     - `buildRoutingRequest` deterministically enforces application routing policy.
+     - Model outputs or callers cannot override `model`, `models`, `cost_tier`, `provider`, `allow_fallbacks`, `timeout`, or retry budgets. Any caller-supplied overrides are ignored/blocked.
+  6. **Safe Opaque Session Identifiers**:
+     - Supports optional `sessionId` for Auto Router multi-turn stickiness.
+     - Strictly validated: max 128 characters, alphanumeric/safe characters only. Explicitly rejects emails, URLs, file paths, tokens, and credentials.
+  7. **Comprehensive Sanitized Telemetry**:
+     - Structured telemetry capturing `routingProfile`, `routingMode`, `requestedModel`, `requestedModels`, `actualModel`, `autoSelectedModel`, `provider`, `fallbackUsed`, `latencyMs`, `promptTokens`, `completionTokens`, `totalTokens`, `cost`, `timeoutMs`, `success`, `errorCode`.
+     - Cost accounting is truthful: actual cost is reported when returned by OpenRouter; if absent, cost is reported as `null` (never $0 and never fabricated).
+     - Fallback detection truthfully distinguishes actual serving model from primary in `PINNED_FALLBACK`, while Auto Router choices are tracked under `autoSelectedModel`.
+  8. **Zero Secret / Prompt Logging**:
+     - Telemetry, logs, and error strings strictly redact `OPENROUTER_API_KEY`, Bearer headers, passwords, cookies, session storage, and full conversation prompts/messages.
+  9. **Controlled Error Sanitization**:
+     - Standardized error codes: `OPENROUTER_TIMEOUT`, `OPENROUTER_RATE_LIMITED`, `OPENROUTER_AUTH_FAILED`, `OPENROUTER_BAD_REQUEST`, `OPENROUTER_UPSTREAM_UNAVAILABLE`, `OPENROUTER_NETWORK_ERROR`, `OPENROUTER_ROUTING_FAILED`.
+  10. **Fail-Fast Client Retry Policy**:
+      - Client-level retry count defaults to 0. No uncontrolled retry storms.
+  11. **Full Backward Compatibility**:
+      - Existing text AI calls (`OpenRouterTextProvider.generate`, `generateMessages`, `stream`, `streamMessages`), `/api/ai`, `/api/ai/stream`, CLI AI (`npm run ai`), and voice-turn AI continue working seamlessly, defaulting to `FAST` profile.
+  12. **Runtime Agent Harness Preparation**:
+      - Added `createRoutingContext` and `resolveRoutingProfile` to `RuntimeAgentHarness` without connecting to LLM or autonomous loops.
+- **Consequences**:
+  - Successfully hardened OpenRouter routing layer with zero regressions to existing production text AI.
+  - Offline test baseline expanded from 1677 to 1707 tests across 271 suites (100% PASS, 0 network calls during verify).
+  - Real browser baseline intact at 148/148 PASS on Microsoft Edge.
+
 
 
 

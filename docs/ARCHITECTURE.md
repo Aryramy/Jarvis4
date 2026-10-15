@@ -112,3 +112,46 @@ Key Architectural Invariants:
 4. **Human Confirmation Boundary & Token Privacy**: The model NEVER receives or presents confirmation tokens. Consequential proposals pause in `WAITING_USER_CONFIRMATION`. Operator approves through trusted UI. Harness delegates into GREEN-034 single-use prepared submission.
 5. **Untrusted Web Data Wrapping**: Webpage content wrapped with `{ trust: 'untrusted_web_data', source: 'page' }` preventing prompt-injection privilege escalation.
 6. **Finite State Machine**: Legal state transitions strictly enforced across all run states.
+
+---
+
+## 6. OpenRouter Routing Gate & Telemetry Architecture (PRE-040B)
+
+In PRE-040B, the OpenRouter text provider layer is hardened before introducing autonomous browser planning (Brick 40) or task evaluation (PRE-040C).
+
+```text
+CALLER / FUTURE AGENT
+         │
+         │  (profile: 'FAST' | 'REASONING', messages, sessionId)
+         ▼
+OpenRouterRoutingGate
+  ├─ buildRoutingRequest()
+  │    ├─ Resolves application-controlled profile policy
+  │    ├─ Blocks / ignores caller model overrides & cost tampering
+  │    ├─ Validates safe opaque sessionId (rejects PII, paths, secrets)
+  │    └─ FAST: PINNED_FALLBACK (primary model + native models array)
+  │       REASONING: AUTO (openrouter/auto + cost_tier plugin)
+  │
+  ├─ Network Dispatch
+  │    ├─ OpenRouter native provider failover preserved (no restrictive candidate filters)
+  │    ├─ Native OpenRouter models fallback (zero client sequential loops)
+  │    ├─ Client retry count = 0 (fail-fast policy)
+  │    └─ Bounded timeout per profile
+  │
+  ├─ Telemetry & Cost Accounting
+  │    ├─ Actual serving model extracted
+  │    ├─ autoSelectedModel tracked separately from fallbackUsed
+  │    ├─ Truthful cost: actual returned cost or null (never $0)
+  │    └─ Zero secret / full-prompt logging
+  │
+  └─ Controlled Error Classification
+       └─ Standardized error codes (TIMEOUT, RATE_LIMITED, AUTH_FAILED, etc.)
+```
+
+Architectural Principles:
+1. **Application-Controlled Routing Policy**: Future planner or callers can only request a bounded profile (`FAST` or `REASONING`). Callers cannot supply arbitrary model IDs, cost tiers, or bypass failover.
+2. **Native OpenRouter Fallbacks**: Pinned fallback mode uses the native OpenRouter `models` array rather than client-side catch-and-retry sequential loops.
+3. **No Duplicate Auto Fallback**: Auto mode uses `openrouter/auto` directly with its internal selection, never wrapped in another fallback chain.
+4. **Telemetry Privacy**: API keys, Bearer headers, passwords, cookies, and conversation contents are never logged.
+5. **Truthful Cost**: Returned cost is reported directly. Unknown cost is reported as `null`, never fabricated or assumed $0.
+

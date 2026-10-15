@@ -267,7 +267,7 @@ export function createRequestListener(options = {}) {
           const messages = session.getMessages();
 
           const streamSource = typeof provider.streamMessages === 'function'
-            ? provider.streamMessages(messages)
+            ? provider.streamMessages(messages, { profile: parsedBody.profile, sessionId: parsedBody.sessionId })
             : provider.stream(trimmedInput);
 
           for await (const delta of streamSource) {
@@ -347,7 +347,7 @@ export function createRequestListener(options = {}) {
      * Executes internal AI request logic.
      * Reused by /api/ai and /api/auto.
      */
-    async function executeAiRequest({ input, provider, session, store, requestStartTime }) {
+    async function executeAiRequest({ input, provider, session, store, requestStartTime, profile, sessionId }) {
       const getServerAiDurationMs = () => {
         const now = (typeof performance !== 'undefined' && typeof performance.now === 'function')
           ? performance.now()
@@ -376,7 +376,7 @@ export function createRequestListener(options = {}) {
 
         const messages = session.getMessages();
         const result = typeof provider.generateMessages === 'function'
-          ? await provider.generateMessages(messages)
+          ? await provider.generateMessages(messages, { profile, sessionId })
           : await provider.generate(input);
 
         const serverAiDurationMs = getServerAiDurationMs();
@@ -405,6 +405,7 @@ export function createRequestListener(options = {}) {
               provider: result.provider || (provider instanceof OpenRouterTextProvider ? 'openrouter' : (provider.name || 'custom')),
               model: result.model || provider.model,
               timing,
+              telemetry: result.telemetry || null,
               providerDurationMs,
               serverAiDurationMs
             }
@@ -429,6 +430,8 @@ export function createRequestListener(options = {}) {
             body: {
               success: false,
               error: safeError,
+              errorCode: result.errorCode,
+              telemetry: result.telemetry || null,
               timing,
               providerDurationMs: timing.providerDurationMs,
               serverAiDurationMs
@@ -658,7 +661,9 @@ export function createRequestListener(options = {}) {
           provider,
           session,
           store,
-          requestStartTime
+          requestStartTime,
+          profile: parsedBody.profile,
+          sessionId: parsedBody.sessionId
         });
 
         res.writeHead(result.statusCode, { 'Content-Type': 'application/json' });

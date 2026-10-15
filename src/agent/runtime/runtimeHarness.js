@@ -620,6 +620,58 @@ export class RuntimeAgentHarness {
       message: reason
     });
   }
+
+  /**
+   * Prepares a safe routing context for future LLM integration (PRE-040B).
+   * Maps governed runId to safe sessionId and resolves profile without allowing caller overrides.
+   * NOTE: PRE-040B foundation only — zero model/LLM execution is triggered.
+   *
+   * @param {string} runId - Active run identifier
+   * @param {Object} [options={}]
+   * @param {'FAST'|'REASONING'} [options.profile='FAST'] - Application-selected profile
+   * @returns {{ runId: string, sessionId: string, profile: 'FAST'|'REASONING' }}
+   */
+  createRoutingContext(runId, options = {}) {
+    const run = this.runs.get(runId);
+    if (!run) {
+      throw new RuntimeHarnessError(`Run "${runId}" not found.`, ERROR_CODES.RUN_NOT_FOUND);
+    }
+
+    const requestedProfile = options.profile || 'FAST';
+    const profile = String(requestedProfile).trim().toUpperCase();
+    if (profile !== 'FAST' && profile !== 'REASONING') {
+      throw new RuntimeHarnessError(`[${ERROR_CODES.SECURITY_OVERRIDE_REJECTED}] Invalid profile "${requestedProfile}". Only FAST and REASONING are permitted.`, ERROR_CODES.SECURITY_OVERRIDE_REJECTED);
+    }
+
+    // Model and caller cannot override security/routing controls (model, models, cost_tier, etc.)
+    if (options.model || options.models || options.cost_tier || options.costTier || options.provider) {
+      this.recordAudit(runId, {
+        type: 'SECURITY_OVERRIDE_BLOCKED',
+        message: 'Caller attempted to override routing controls; ignored'
+      });
+    }
+
+    return {
+      runId,
+      sessionId: runId,
+      profile
+    };
+  }
+
+  /**
+   * Resolves routing profile based on governance risk or task complexity.
+   * Bounded policy mapping without automatic runtime escalation loops.
+   *
+   * @param {string} purpose - 'routine' | 'recovery' | 'reasoning'
+   * @returns {'FAST'|'REASONING'}
+   */
+  resolveRoutingProfile(purpose) {
+    if (purpose === 'recovery' || purpose === 'reasoning') {
+      return 'REASONING';
+    }
+    return 'FAST';
+  }
 }
 
 export const defaultRuntimeAgentHarness = new RuntimeAgentHarness();
+

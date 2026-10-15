@@ -11,6 +11,7 @@
     "ai": "node src/cli/ai.js",
     "benchmark:ai": "node scripts/benchmark-ai-latency.mjs",
     "benchmark:gateways": "node scripts/benchmark-ai-gateways.mjs",
+    "diagnose:openrouter-routing": "node scripts/diagnose-openrouter-routing.mjs",
     "verify": "node scripts/verify.mjs",
     "verify:browser": "node scripts/verify-browser.mjs"
   },

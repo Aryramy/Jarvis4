@@ -471,16 +471,12 @@ Currently tracked issues in JARVIS4:
     - **No Automatic Mutation Retries**: Uncertain failures on mutating actions (click, fill, submit, upload, download) are never retried automatically. One proposal executes at most one mutating attempt.
     - **Machine-Readable Untrusted Data**: All webpage-derived content is wrapped as `{ trust: 'untrusted_web_data', source: 'page' }` neutralizing prompt-injection instructions from compromising governance policies or security levels.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+34. **OpenRouter Routing Gate & Provider Hardening (PRE-040B Verified)**:
+    - **Provider Layer Only / Zero Browser Autonomy**: PRE-040B hardens the provider layer before autonomous browser reasoning. It introduces zero browser autonomy, zero planning loops, zero tool-selection loops, and zero evaluation benchmarks.
+    - **Pinned Fallback Invariants**: PINNED_FALLBACK uses OpenRouter's native `models` array rather than client-side catch-and-retry sequential loops. Fallbacks are capped at 2 secondary models (3 total), deduplicated, and preserved in configuration order. The primary model is never duplicated into the fallback list.
+    - **Auto Router Invariants**: AUTO mode uses `openrouter/auto` with official auto-router cost tier plugin (`plugins: [{ id: "auto-router", cost_tier }]`, default `medium`). JARVIS strictly prohibits wrapping Auto Router in a client-side sequential model loop or secondary `models` array.
+    - **Caller-Override Security**: Application configuration alone determines routing policy. Model outputs or callers cannot override `model`, `models`, `cost_tier`, `provider`, `allow_fallbacks`, `timeout`, or retry budgets.
+    - **Truthful Telemetry Accounting**: Telemetry reports actual serving model, autoSelectedModel, provider (when returned), monotonic latency, tokens, and truthful cost. If cost is not returned by OpenRouter, it is reported as `null` (never $0 and never fabricated).
+    - **Zero Secret / Prompt Logging**: Telemetry, logs, and error strings strictly redact API keys, Bearer headers, passwords, cookies, session storage, and conversation messages.
+    - **Deterministic Offline Verification**: `npm run verify` runs 100% offline with zero live OpenRouter API calls or network requests (1707 tests passing).
+    - **Office Network Reality & Opt-in Diagnostic**: On restricted corporate/office Wi-Fi networks where OpenRouter TLS connections may be reset with `ECONNRESET`, the opt-in diagnostic tool `npm run diagnose:openrouter-routing` distinguishes network connectivity failures from code regressions. This diagnostic is never run during `npm run verify` or `npm run verify:browser`.
