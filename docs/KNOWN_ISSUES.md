@@ -424,7 +424,7 @@ Currently tracked issues in JARVIS4:
     - **Explicit Session Save Rule**: Successful handoff verification never automatically triggers Save Session. Preserves GREEN-035 rule: session profiles may only be saved via explicit user request.
     - **Zero AI / Zero Search**: Exactly 0 LLM calls, 0 OpenRouter calls, 0 search calls. Local loopback fixtures only.
 
-30. **Safe File Upload & Download v1 Observations & Limitations (Brick 37 In Progress)**:
+30. **Safe File Upload & Download v1 Observations & Limitations (Brick 37 Verified)**:
     - **Explicit File Upload Authorization**: Uploading a file requires explicit caller specification of the local path via `POST /api/browser/upload-file`. JARVIS never autonomously searches the filesystem, enumerates user directories, selects "latest file", or infers files based on prompt/content.
     - **Generic File Action Block Preserved**: The generic `fill` browser action targeting file inputs remains strictly blocked with `FILE_INPUT_NOT_ALLOWED`. Only the dedicated `upload-file` endpoint with explicit authorization can set file input elements.
     - **Snapshot & Target Binding**: Uploads require `expectedSnapshotToken` bound to `pageId`, `documentVersion`, and `semanticRevision`. Stale tokens immediately block transfer with `TARGET_STALE`.
@@ -440,7 +440,7 @@ Currently tracked issues in JARVIS4:
     - **Mutual Exclusion with Human Handoff**: File upload and download operations are strictly blocked with `HUMAN_HANDOFF_ACTIVE` whenever a Human Handoff session is active on the bound page.
     - **Zero AI / Zero Search**: Exactly 0 LLM calls, 0 OpenRouter calls, 0 search calls. All verification runs against deterministic local loopback fixtures.
 
-31. **Structured Extraction & Scraping v1 Observations & Limitations (Brick 38 In Progress)**:
+31. **Structured Extraction & Scraping v1 Observations & Limitations (Brick 38 Verified)**:
     - **Main Document Confined**: Brick 38 structured extraction operates strictly on the main document DOM. Cross-origin iframes, nested frame hierarchies, and shadow roots are not traversed or extracted (deferred to Brick 39).
     - **Zero Arbitrary Script / XPath Execution**: Extraction operates exclusively through safe, fixed semantic categories (`metadata`, `headings`, `links`, `tables`, `lists`, `definitions`, `records`). The API does not expose arbitrary CSS selector execution, arbitrary XPath querying, or caller-provided JavaScript execution.
     - **Zero Autonomous Crawling or Pagination**: Extraction extracts data from the current active page state only. It does not automatically scroll, click "Load More", traverse pagination links, or perform website crawling. Autonomous multi-page agent behavior belongs to Brick 40+.
@@ -451,6 +451,16 @@ Currently tracked issues in JARVIS4:
     - **Conservative Data Limits & Clamped Truncation**: Configured limits (`maxRecords: 500`, `maxTextChars: 200000`, `maxFieldChars: 4000`, `maxNestingDepth: 5`, `timeoutMs: 10000`) bound memory and payload size. Truncated extractions explicitly report `truncated: true` and `truncationReason`.
     - **Mutual Exclusion with Human Handoff**: When a sensitive Human Handoff session is active on the page, structured extraction is blocked with `HUMAN_HANDOFF_ACTIVE` to prevent scraping credential or MFA challenge pages.
     - **Zero AI / Zero Search**: Exactly 0 OpenRouter, 0 LLM, 0 Exa, and 0 search calls. All verification runs deterministically against local loopback fixtures.
+
+32. **Complex UI Contexts v1 (Iframes & Open Shadow DOM) Observations & Limitations (Brick 39 Verified)**:
+    - **Closed Shadow Roots Strictly Unsupported**: Elements encapsulated inside closed shadow roots (`{ mode: 'closed' }`) cannot be traversed or penetrated via standard DOM APIs without browser extensions, monkey-patching `attachShadow`, or raw CDP hacks. In accordance with Section 80/81 rules, JARVIS truthfully reports `closedShadowRootDetected: true` and rejects target interactions with `CLOSED_SHADOW_ROOT_UNSUPPORTED`.
+    - **Subcontext Form Submission Safeguard**: Multi-step form submission (`prepareFormSubmission`, `submitForm`) is strictly confined to the main document context (`SUBCONTEXT_OPERATION_NOT_SUPPORTED`). While forms within subcontexts can be inspected and filled, two-step submission confirmation across nested frame boundaries is blocked to prevent cross-frame submission ambiguities.
+    - **Subcontext File Transfer Safeguard**: File upload and download operations are bound strictly to the main page context (`SUBCONTEXT_OPERATION_NOT_SUPPORTED`). Attempting file upload or download within an iframe or shadow root context fails safely.
+    - **Dynamic Shadow Host Removal**: When a shadow host element is removed from the DOM, all child shadow contexts are immediately marked unattached. Subsequent requests referencing removed context IDs reject with `CONTEXT_DETACHED`.
+    - **Snapshot Token Isolation**: Snapshot tokens are isolated per context (`contextId`). Passing a main page snapshot token to an operation targeting a subcontext (or vice versa) immediately rejects with `TARGET_STALE`.
+    - **Context Hierarchy Limits**: Context tree discovery enforces conservative depth limits (`BROWSER_MAX_CONTEXT_DEPTH=6`, clamped [1, 16]) and context volume limits (`BROWSER_MAX_DOM_CONTEXTS=64`, clamped [1, 256]) to prevent denial-of-service from maliciously deep or infinite frame nesting.
+    - **Zero AI / Zero Search**: Exactly 0 OpenRouter, 0 LLM, 0 Exa, and 0 search calls. All verification runs deterministically against local loopback fixtures.
+
 
 
 

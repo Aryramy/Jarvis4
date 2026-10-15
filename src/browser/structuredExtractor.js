@@ -92,6 +92,14 @@ export function extractStructuredDataSnapshot(options = {}) {
   const doc = typeof document !== 'undefined' ? document : options._doc;
   const win = typeof window !== 'undefined' ? window : options._win;
 
+  let rootContainer = doc;
+  if (options && options.shadowHandleId) {
+    const reg = (win && win.__JARVIS_SHADOW_REGISTRY__) ? win.__JARVIS_SHADOW_REGISTRY__.get(options.shadowHandleId) : null;
+    if (reg && reg.shadowRoot && reg.host && reg.host.isConnected) {
+      rootContainer = reg.shadowRoot;
+    }
+  }
+
   const limits = options.limits || {};
   const maxRecords = Math.max(1, Number(limits.maxRecords || 500));
   const maxTextChars = Math.max(1, Number(limits.maxTextChars || 200000));
@@ -258,7 +266,7 @@ export function extractStructuredDataSnapshot(options = {}) {
 
   // 2. Headings
   if (requestedTypes.includes('headings') && checkLimit()) {
-    const headingEls = doc.querySelectorAll('h1, h2, h3, h4, h5, h6');
+    const headingEls = rootContainer.querySelectorAll('h1, h2, h3, h4, h5, h6');
     for (let i = 0; i < headingEls.length; i++) {
       if (!checkLimit()) break;
       const el = headingEls[i];
@@ -277,7 +285,7 @@ export function extractStructuredDataSnapshot(options = {}) {
 
   // 3. Links
   if (requestedTypes.includes('links') && checkLimit()) {
-    const linkEls = doc.querySelectorAll('a[href]');
+    const linkEls = rootContainer.querySelectorAll('a[href]');
     for (let i = 0; i < linkEls.length; i++) {
       if (!checkLimit()) break;
       const el = linkEls[i];
@@ -321,7 +329,7 @@ export function extractStructuredDataSnapshot(options = {}) {
 
   // 4. Tables
   if (requestedTypes.includes('tables') && checkLimit()) {
-    const tableEls = doc.querySelectorAll('table');
+    const tableEls = rootContainer.querySelectorAll('table');
     for (let i = 0; i < tableEls.length; i++) {
       if (!checkLimit()) break;
       const table = tableEls[i];
@@ -505,7 +513,7 @@ export function extractStructuredDataSnapshot(options = {}) {
       };
     }
 
-    const allListEls = doc.querySelectorAll('ul, ol, [role="list"]');
+    const allListEls = rootContainer.querySelectorAll('ul, ol, [role="list"]');
     for (let i = 0; i < allListEls.length; i++) {
       if (!checkLimit()) break;
       const listEl = allListEls[i];
@@ -535,7 +543,7 @@ export function extractStructuredDataSnapshot(options = {}) {
 
   // 6. Definitions
   if (requestedTypes.includes('definitions') && checkLimit()) {
-    const dlEls = doc.querySelectorAll('dl');
+    const dlEls = rootContainer.querySelectorAll('dl');
     for (let i = 0; i < dlEls.length; i++) {
       if (!checkLimit()) break;
       const dl = dlEls[i];
@@ -572,7 +580,7 @@ export function extractStructuredDataSnapshot(options = {}) {
   // 7. Repeated Semantic Records
   if (requestedTypes.includes('records') && checkLimit()) {
     // Select semantic article elements or explicit record containers
-    const articleEls = doc.querySelectorAll('article, [role="article"]');
+    const articleEls = rootContainer.querySelectorAll('article, [role="article"]');
     for (let i = 0; i < articleEls.length; i++) {
       if (!checkLimit()) break;
       const art = articleEls[i];
@@ -1172,6 +1180,7 @@ export async function extractStructuredData(page, options = {}) {
   const evaluateOptions = {
     types: options.types,
     limits,
+    shadowHandleId: options.shadowHandleId,
     _doc: options._doc,
     _win: options._win
   };

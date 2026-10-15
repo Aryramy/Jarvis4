@@ -1,11 +1,47 @@
 Project: JARVIS4
-Current Brick: 38
-Status: BRICK-038 IN PROGRESS (Structured Extraction & Scraping v1; Deterministic Page Data Extraction; Harness-First / Zero AI)
-Last Verified Brick: BRICK-037
-Current Feature: Structured Extraction & Scraping v1
-Next Feature: NOT AUTHORIZED (Brick 39 — NOT STARTED)
+Current Brick: 39
+Status: BRICK-039 COMPLETE (Complex UI Contexts v1: Iframes + Open Shadow DOM; Harness-First / Zero AI)
+Last Verified Brick: BRICK-039
+Current Feature: Complex UI Contexts v1 (Iframes + Open Shadow DOM: Context Discovery + Scoped Semantic Operations)
+Next Feature: NOT AUTHORIZED (Brick 40 — NOT STARTED)
 
 ## Working capabilities
+
+- Complex UI Contexts v1: Iframes + Open Shadow DOM (Brick 39) deterministic context discovery and scoped semantic operation subsystem (`src/browser/domContextManager.js`, `pageInspection.js`, `actionExecutor.js`, `structuredExtractor.js`, `browserManager.js`, `server.js`, `index.html`):
+  - Zero AI / Deterministic DOM Context Discovery Engine:
+    - Exactly 0 OpenRouter, 0 LLM, 0 Exa, 0 search calls.
+    - Pure browser DOM traversal, Playwright frame tree tracking, and recursive in-page open shadow root discovery.
+    - Exactly 0 arbitrary CSS selector execution API, 0 arbitrary XPath API, and 0 arbitrary JavaScript execution API.
+  - Hierarchical Context Tree & Bounded Exploration:
+    - Automatically discovers and tracks main frame (`context_main`), child and nested frames (`context_frame_*`), and open shadow roots (`context_shadow_*`).
+    - Maintains exact parent-child hierarchy, frame names, frame URLs, shadow host elements, and nesting depth.
+    - Configurable bounded limits: `BROWSER_MAX_CONTEXT_DEPTH` (default 6, clamped [1, 16]) and `BROWSER_MAX_DOM_CONTEXTS` (default 64, clamped [1, 256]).
+  - Closed Shadow DOM Rejection & Truthful Reporting:
+    - Closed shadow roots (`mode: 'closed'`) are explicitly detected without monkey-patching `Element.prototype.attachShadow`, without browser extensions, and without CDP protocol hacks.
+    - Context discovery truthfully marks `closedShadowRootDetected: true`.
+    - Direct interaction or traversal requests targeting closed shadow roots fail safely with `CLOSED_SHADOW_ROOT_UNSUPPORTED`.
+  - Opaque Context IDs & Lifecycle Attachment Tracking:
+    - Generated context IDs follow the opaque format `context_<type>_<index>_<salt>`.
+    - Frame detachment or shadow host removal dynamically marks the context `attached: false`.
+    - Requests referencing detached contexts fail safely with `CONTEXT_DETACHED`.
+    - Requests referencing unknown context IDs fail safely with `CONTEXT_NOT_FOUND`.
+  - Scoped Inspection, Element Targeting & Semantic Execution:
+    - Scoped endpoints: `GET /api/browser/contexts` (or `POST /api/browser/contexts`), `POST /api/browser/inspect-contexts`, and context-scoped `POST /api/browser/inspect`.
+    - Context-scoped target resolution (`resolveTarget`) and semantic actions (`click`, `fill`, `waitForStable`, `waitForTarget`, `extractStructuredData`).
+    - Target resolution uses element identifiers unique within the target context; shadow root element handles are registered without leaking selectors or raw DOM references.
+  - Per-Context Snapshot Token Isolation:
+    - Snapshot tokens are isolated per context (`contextId`).
+    - Stale tokens or tokens mismatched between contexts fail closed with `TARGET_STALE`.
+    - Frame navigation preserves the main page snapshot token while invalidating the subframe context snapshot.
+  - Subcontext Security Safeguards:
+    - Consequential two-step form submission (`prepareFormSubmission`, `submitForm`) is strictly restricted to the main document (`SUBCONTEXT_OPERATION_NOT_SUPPORTED`).
+    - File upload and download transfers (`uploadFile`, `downloadFile`) are strictly restricted to the main document (`SUBCONTEXT_OPERATION_NOT_SUPPORTED`).
+  - Developer Control Center UI:
+    - Dedicated "DOM Contexts (Iframes & Shadow Roots)" panel in `src/web/index.html` with "Refresh Contexts" button, Active Target Context dropdown selector, attached status indicator, and dynamic textContent table (zero innerHTML injection).
+    - Context selector integrates seamlessly with element inspection, action execution, and structured extraction.
+  - Verification Evidence:
+    - 1599/1599 offline unit, contract, and regression tests PASS (`npm run verify`).
+    - 135/135 real-browser acceptance tests across 31 categories PASS on Microsoft Edge (`npm run verify:browser`).
 
 - Structured Extraction & Scraping v1 (Brick 38) deterministic page data extraction subsystem (`src/browser/structuredExtractor.js`, `browserManager.js`, `server.js`, `index.html`):
   - Zero AI / Deterministic Extraction Engine:

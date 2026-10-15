@@ -99,7 +99,9 @@ function clamp(val, min, max, defaultVal) {
     extractMaxTextChars: clamp(overrides.BROWSER_EXTRACT_MAX_TEXT_CHARS ?? process.env.BROWSER_EXTRACT_MAX_TEXT_CHARS, 1000, 2000000, 200000),
     extractMaxFieldChars: clamp(overrides.BROWSER_EXTRACT_MAX_FIELD_CHARS ?? process.env.BROWSER_EXTRACT_MAX_FIELD_CHARS, 100, 50000, 4000),
     extractMaxNestingDepth: clamp(overrides.BROWSER_EXTRACT_MAX_NESTING_DEPTH ?? process.env.BROWSER_EXTRACT_MAX_NESTING_DEPTH, 1, 20, 5),
-    extractTimeoutMs: clamp(overrides.BROWSER_EXTRACT_TIMEOUT_MS ?? process.env.BROWSER_EXTRACT_TIMEOUT_MS, 500, 60000, 10000)
+    extractTimeoutMs: clamp(overrides.BROWSER_EXTRACT_TIMEOUT_MS ?? process.env.BROWSER_EXTRACT_TIMEOUT_MS, 500, 60000, 10000),
+    maxDomContexts: clamp(overrides.BROWSER_MAX_DOM_CONTEXTS ?? process.env.BROWSER_MAX_DOM_CONTEXTS, 1, 256, 64),
+    maxContextDepth: clamp(overrides.BROWSER_MAX_CONTEXT_DEPTH ?? process.env.BROWSER_MAX_CONTEXT_DEPTH, 1, 16, 6)
   });
 
   return Object.freeze({

@@ -1180,6 +1180,38 @@
   - 1575/1575 offline tests PASS (`npm run verify`).
   - 123/123 real Microsoft Edge browser tests PASS (`npm run verify:browser`).
 
+## ADR-0054: Complex UI Contexts Architecture (Iframes and Open Shadow DOM)
+- **Status**: Accepted
+- **Context**:
+  - Modern web applications encapsulate UI components inside same-origin and cross-origin iframes, nested iframes, and open Shadow DOM boundaries.
+  - Previous bricks (26-38) operated strictly over the top-level main document. Attempting to interact with or inspect elements inside iframes or shadow roots required either piercing boundaries with arbitrary selectors or was completely invisible.
+  - Closed shadow roots must not be circumvented: closed shadow roots are an explicit encapsulation contract by authors, and piercing them via CDP hacks, monkey-patching `attachShadow`, or browser extensions violates security and stability principles.
+  - Brick 39 introduces deterministic, zero-AI, context-safe semantic operations across Iframes and Open Shadow DOM:
+    1. Zero AI: Exactly 0 OpenRouter, 0 LLM, 0 Exa, 0 search calls. Pure deterministic context management and Playwright execution.
+    2. Opaque Context Identity: Opaque, stable identifiers (`ctx_main_<pageId>`, `ctx_frame_<ts>_<rnd>_<seq>`, `ctx_shadow_<ts>_<rnd>_<seq>`) bound to page and frame lifecycles. Zero exposure of raw CSS selectors, XPaths, or JS execution handles.
+    3. Hierarchical Context Tree: `main` root with bounded child `frame` and `shadow-root` nodes, maintaining `depth`, `parentContextId`, `sameOrigin`, `url`, and `title`.
+    4. Bounded Context Depth & Count: Strict limits enforced via `BROWSER_MAX_DOM_CONTEXTS` (default 64, clamped [1, 256]) and `BROWSER_MAX_CONTEXT_DEPTH` (default 6, clamped [1, 16]) to prevent denial of service from pathological nesting.
+    5. Truthful Closed Shadow Root Reporting: Closed shadow roots are detected and truthfully reported (`closedShadowRootDetected: true`), returning `CLOSED_SHADOW_ROOT_UNSUPPORTED` upon any attempt to pierce them. Zero monkey-patching or CDP hacks.
+    6. Context-Scoped Snapshots & Isolation: Snapshot tokens and semantic revisions are isolated per context. A snapshot token from a frame context is rejected if used against the main context or sibling frames (`TARGET_STALE` / `CONTEXT_MISMATCH`).
+    7. Frame Navigation & Detach Lifecycle: Frame detach invalidates the context and child subtrees. Frame navigation increments `documentVersion`, resets `semanticRevision`, invalidates snapshots, and reports `frameNavigationOccurred: true` while preserving `topLevelNavigationOccurred: false`.
+    8. Subcontext Safe Operations: `inspectPage`, `resolveTarget`, `executeAction`, `waitForStable`, `waitForTarget`, and `extractStructuredData` accept `contextId`.
+    9. Subcontext Safeguards: Form submission inside subcontexts is rejected (`SUBCONTEXT_SUBMISSION_NOT_SUPPORTED`). File upload and download inside subcontexts are rejected (`SUBCONTEXT_FILE_TRANSFER_NOT_SUPPORTED`). Human handoff strictly pauses subcontext automation.
+    10. Control Center UI: Dynamic context discovery panel in `src/web/index.html` with active context selector dropdown, refresh button, and safe `.textContent` rendering (zero innerHTML injection).
+- **Decision**:
+  1. Implemented `src/browser/domContextManager.js` with `DomContextError`, `CONTEXT_TYPES`, `generateContextId`, `inPageDiscoverShadowRoots`, and `DomContextManager`.
+  2. Integrated `domContextManager` into `BrowserManager` with context lifecycle management on page open, switch, navigation, and close.
+  3. Extended `inspectPage`, `resolveTarget`, `executeAction`, `waitForStable`, `waitForTarget`, and `extractStructuredData` with `contextId` support.
+  4. Added endpoints `GET /api/browser/contexts`, `POST /api/browser/contexts`, `POST /api/browser/inspect-contexts`, and updated `/api/browser/inspect` in `src/web/server.js`.
+  5. Added DOM Contexts panel with active context selector in `src/web/index.html`.
+  6. Added 15 comprehensive browser fixtures in `tests/browser-fixtures/` covering basic/nested/dynamic/navigation iframes, basic/nested/dynamic/closed shadow roots, and mixed hierarchies.
+  7. Added 9 unit tests and 10 contract tests.
+  8. Added 12 real Microsoft Edge tests (123-134) in `scripts/verify-browser.mjs`.
+- **Consequences**:
+  - Full scoped semantic interaction inside iframes and open shadow roots without leaking selectors.
+  - Complete truthfulness: closed shadow roots rejected with `CLOSED_SHADOW_ROOT_UNSUPPORTED`.
+  - 1599/1599 offline tests PASS (`npm run verify`).
+  - 135/135 real Microsoft Edge browser tests PASS (`npm run verify:browser`).
+
 
 
 

@@ -593,6 +593,46 @@
       <div id="extract-summary" style="display: none; font-size: 0.85rem; color: #94a3b8; margin-top: 6px; text-align: left;"></div>
       <div id="extract-result" class="response-area" style="display: none; max-height: 240px; overflow-y: auto; margin-top: 6px; white-space: pre-wrap;"></div>
     </div>
+
+    <!-- DOM Contexts Section (Brick 39) -->
+    <div id="dom-contexts-section" style="margin-top: 16px; border: 1px solid #334155; border-radius: 8px; padding: 12px; background: #0f172a;">
+      <h3 style="margin: 0 0 8px 0; font-size: 1rem; color: #38bdf8;">DOM Contexts (Iframes &amp; Shadow Roots)</h3>
+      <p style="font-size: 0.82rem; color: #94a3b8; margin: 0 0 10px 0;">
+        Inspect and select execution contexts beyond the main document (nested iframes and open shadow roots).
+      </p>
+
+      <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: center;">
+        <button type="button" id="refresh-contexts-btn">Refresh Contexts</button>
+        <label style="font-size: 0.85rem; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
+          Active Target Context:
+          <select id="active-context-select" style="padding: 5px 8px; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; font-size: 0.85rem;">
+            <option value="">Main Document (Default)</option>
+          </select>
+        </label>
+        <span id="context-attached-indicator" style="font-size: 0.82rem; color: #10b981; font-weight: 600;">Attached</span>
+      </div>
+
+      <div id="contexts-status" class="mic-status">Contexts: Idle</div>
+      <div id="contexts-summary" style="display: none; font-size: 0.85rem; color: #94a3b8; margin-top: 6px; text-align: left;"></div>
+
+      <div id="contexts-table-container" style="margin-top: 8px; max-height: 200px; overflow-y: auto; border: 1px solid #334155; border-radius: 6px;">
+        <table id="contexts-table" style="width: 100%; border-collapse: collapse; font-size: 0.82rem; text-align: left; color: #cbd5e1;">
+          <thead>
+            <tr style="background: #1e293b; color: #94a3b8; border-bottom: 1px solid #334155;">
+              <th style="padding: 6px 8px;">Context ID</th>
+              <th style="padding: 6px 8px;">Type</th>
+              <th style="padding: 6px 8px;">Parent</th>
+              <th style="padding: 6px 8px;">Depth</th>
+              <th style="padding: 6px 8px;">URL / Host Metadata</th>
+              <th style="padding: 6px 8px;">Status</th>
+            </tr>
+          </thead>
+          <tbody id="contexts-table-body">
+            <tr><td colspan="6" style="padding: 8px; text-align: center; color: #64748b;">No contexts discovered.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <script type="module">
@@ -2262,6 +2302,12 @@
       });
     }
 
+    // Brick 39 DOM Contexts State & Helpers
+    const activeContextSelect = document.getElementById('active-context-select');
+    function getSelectedContextId() {
+      return (activeContextSelect && activeContextSelect.value) ? activeContextSelect.value.trim() : null;
+    }
+
     // Brick 28 Page Understanding
     const browserInspectBtn = document.getElementById('browser-inspect-btn');
     const browserInspectStatus = document.getElementById('browser-inspect-status');
@@ -2282,7 +2328,9 @@
         if (browserInspectElements) browserInspectElements.style.display = 'none';
 
         try {
-          const res = await fetch('/api/browser/inspect-page');
+          const ctxId = getSelectedContextId();
+          const inspectUrl = ctxId ? ('/api/browser/inspect-page?contextId=' + encodeURIComponent(ctxId)) : '/api/browser/inspect-page';
+          const res = await fetch(inspectUrl);
           const data = await res.json();
           if (res.ok && data.success) {
             if (browserInspectStatus) browserInspectStatus.textContent = `Inspection: Complete (${data.inspectionDurationMs} ms)`;
@@ -2381,6 +2429,8 @@
         if (browserTargetResult) browserTargetResult.style.display = 'none';
 
         const payload = { target: {} };
+        const ctxId = getSelectedContextId();
+        if (ctxId) payload.contextId = ctxId;
         if (kind) payload.target.kind = kind;
         if (queryText) payload.target.name = queryText;
 
@@ -2510,6 +2560,8 @@
           expectedSnapshotToken: token,
           popupPolicy
         };
+        const ctxId = getSelectedContextId();
+        if (ctxId) payload.contextId = ctxId;
         if (kind) payload.target.kind = kind;
         if (name) payload.target.name = name;
         if (action === 'fill') payload.value = value;
@@ -2842,6 +2894,8 @@
         if (dynamicPageState) dynamicPageState.textContent = 'waiting';
 
         const payload = {};
+        const ctxId = getSelectedContextId();
+        if (ctxId) payload.contextId = ctxId;
         const timeoutVal = dynamicTimeoutOverride ? Number(dynamicTimeoutOverride.value) : NaN;
         const quietVal = dynamicQuietOverride ? Number(dynamicQuietOverride.value) : NaN;
         if (!isNaN(timeoutVal) && timeoutVal > 0) payload.timeoutMs = timeoutVal;
@@ -2862,6 +2916,7 @@
               dynamicMeta.style.display = 'block';
               dynamicMeta.textContent = [
                 `Settled: ${data.settled ? 'Yes' : 'No'}`,
+                `Context ID: ${data.contextId || 'main'}`,
                 `Semantic Revision: ${data.semanticRevision}`,
                 `Quiet For: ${data.quietForMs}ms`,
                 `Wait Duration: ${data.waitDurationMs}ms`,
@@ -2913,6 +2968,8 @@
         if (name) target.name = name;
 
         const payload = { target };
+        const ctxId = getSelectedContextId();
+        if (ctxId) payload.contextId = ctxId;
         const timeoutVal = dynamicTimeoutOverride ? Number(dynamicTimeoutOverride.value) : NaN;
         if (!isNaN(timeoutVal) && timeoutVal > 0) payload.timeoutMs = timeoutVal;
 
@@ -3043,11 +3100,12 @@
         if (formsResult) formsResult.style.display = 'none';
         if (formsResultLabel) formsResultLabel.style.display = 'none';
 
+        const ctxId = getSelectedContextId();
         try {
           const res = await fetch('/api/browser/inspect-form', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
+            body: JSON.stringify(ctxId ? { contextId: ctxId } : {})
           });
           const data = await res.json();
           if (res.ok && data.success) {
@@ -3905,12 +3963,14 @@
         extractDataBtn.disabled = true;
 
         try {
+          const ctxId = getSelectedContextId();
           const res = await fetch('/api/browser/extract', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               expectedSnapshotToken: token,
-              types: selectedTypes
+              types: selectedTypes,
+              contextId: ctxId || undefined
             })
           });
           const data = await res.json();
@@ -3921,7 +3981,7 @@
             }
             if (extractSummary) {
               const counts = data.counts || {};
-              extractSummary.textContent = `Page: ${data.pageId} | URL: ${data.currentUrl || 'N/A'} | Revision: ${data.semanticRevision} | Headings: ${counts.headings || 0}, Links: ${counts.links || 0}, Tables: ${counts.tables || 0}, Lists: ${counts.lists || 0}, Defs: ${counts.definitions || 0}, Records: ${counts.records || 0}`;
+              extractSummary.textContent = `Page: ${data.pageId} | Context: ${data.contextId || 'main'} | URL: ${data.currentUrl || 'N/A'} | Revision: ${data.semanticRevision} | Headings: ${counts.headings || 0}, Links: ${counts.links || 0}, Tables: ${counts.tables || 0}, Lists: ${counts.lists || 0}, Defs: ${counts.definitions || 0}, Records: ${counts.records || 0}`;
               extractSummary.style.display = 'block';
             }
             if (extractResult) {
@@ -3947,6 +4007,163 @@
           extractDataBtn.disabled = false;
         }
       });
+    }
+
+    // Brick 39 DOM Contexts UI Controls
+    const refreshContextsBtn = document.getElementById('refresh-contexts-btn');
+    const contextAttachedIndicator = document.getElementById('context-attached-indicator');
+    const contextsStatus = document.getElementById('contexts-status');
+    const contextsSummary = document.getElementById('contexts-summary');
+    const contextsTableBody = document.getElementById('contexts-table-body');
+
+    let currentContextsList = [];
+
+    function updateContextAttachedIndicator() {
+      if (!contextAttachedIndicator) return;
+      const selectedId = getSelectedContextId();
+      if (!selectedId) {
+        contextAttachedIndicator.textContent = 'Attached (Main Document)';
+        contextAttachedIndicator.style.color = '#10b981';
+        return;
+      }
+      const found = currentContextsList.find(c => c.contextId === selectedId);
+      if (found && found.attached) {
+        contextAttachedIndicator.textContent = `Attached (${found.type})`;
+        contextAttachedIndicator.style.color = '#10b981';
+      } else {
+        contextAttachedIndicator.textContent = 'Detached / Unavailable';
+        contextAttachedIndicator.style.color = '#ef4444';
+      }
+    }
+
+    if (activeContextSelect) {
+      activeContextSelect.addEventListener('change', updateContextAttachedIndicator);
+    }
+
+    async function refreshContextsList() {
+      if (contextsStatus) {
+        contextsStatus.textContent = 'Contexts: Discovering...';
+        contextsStatus.className = 'mic-status running';
+      }
+      if (refreshContextsBtn) refreshContextsBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/browser/contexts');
+        const data = await res.json();
+
+        if (res.ok && data.success && Array.isArray(data.contexts)) {
+          currentContextsList = data.contexts;
+          if (contextsStatus) {
+            contextsStatus.textContent = `Contexts: ${data.contextCount} active context(s) found`;
+            contextsStatus.className = 'mic-status captured';
+          }
+          if (contextsSummary) {
+            contextsSummary.textContent = `Page: ${data.pageId} | Limit Reached: ${data.contextLimitReached ? 'Yes' : 'No'} | Max Depth Reached: ${data.maxDepthReached ? 'Yes' : 'No'} | Closed Shadow Roots: ${data.closedShadowRootDetected ? 'Detected' : 'None'}`;
+            contextsSummary.style.display = 'block';
+          }
+
+          if (contextsTableBody) {
+            contextsTableBody.textContent = '';
+            if (data.contexts.length === 0) {
+              const tr = document.createElement('tr');
+              const td = document.createElement('td');
+              td.colSpan = 6;
+              td.style.padding = '8px';
+              td.style.textAlign = 'center';
+              td.style.color = '#64748b';
+              td.textContent = 'No contexts discovered.';
+              tr.appendChild(td);
+              contextsTableBody.appendChild(tr);
+            } else {
+              for (const ctx of data.contexts) {
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid #1e293b';
+
+                const tdId = document.createElement('td');
+                tdId.style.padding = '6px 8px';
+                tdId.style.fontFamily = 'monospace';
+                tdId.textContent = ctx.contextId;
+
+                const tdType = document.createElement('td');
+                tdType.style.padding = '6px 8px';
+                tdType.textContent = ctx.type;
+
+                const tdParent = document.createElement('td');
+                tdParent.style.padding = '6px 8px';
+                tdParent.style.fontFamily = 'monospace';
+                tdParent.textContent = ctx.parentContextId || '—';
+
+                const tdDepth = document.createElement('td');
+                tdDepth.style.padding = '6px 8px';
+                tdDepth.textContent = String(ctx.depth ?? 0);
+
+                const tdMeta = document.createElement('td');
+                tdMeta.style.padding = '6px 8px';
+                if (ctx.type === 'frame') {
+                  tdMeta.textContent = ctx.url || '(empty URL)';
+                } else if (ctx.type === 'shadow-root') {
+                  tdMeta.textContent = `<${ctx.host?.tag || 'custom-element'}>${ctx.host?.accessibleName ? ' "' + ctx.host.accessibleName + '"' : ''}`;
+                } else {
+                  tdMeta.textContent = ctx.url || '(top-level document)';
+                }
+
+                const tdStatus = document.createElement('td');
+                tdStatus.style.padding = '6px 8px';
+                tdStatus.style.color = ctx.attached ? '#10b981' : '#ef4444';
+                tdStatus.textContent = ctx.attached ? 'Attached' : 'Detached';
+
+                tr.appendChild(tdId);
+                tr.appendChild(tdType);
+                tr.appendChild(tdParent);
+                tr.appendChild(tdDepth);
+                tr.appendChild(tdMeta);
+                tr.appendChild(tdStatus);
+                contextsTableBody.appendChild(tr);
+              }
+            }
+          }
+
+          if (activeContextSelect) {
+            const currentVal = activeContextSelect.value;
+            activeContextSelect.textContent = '';
+            const defaultOpt = document.createElement('option');
+            defaultOpt.value = '';
+            defaultOpt.textContent = 'Main Document (Default)';
+            activeContextSelect.appendChild(defaultOpt);
+
+            for (const ctx of data.contexts) {
+              if (ctx.type === 'main') continue;
+              const opt = document.createElement('option');
+              opt.value = ctx.contextId;
+              opt.textContent = `[${ctx.type}] ${ctx.contextId} (depth=${ctx.depth})`;
+              activeContextSelect.appendChild(opt);
+            }
+
+            if (currentVal && data.contexts.some(c => c.contextId === currentVal)) {
+              activeContextSelect.value = currentVal;
+            } else {
+              activeContextSelect.value = '';
+            }
+            updateContextAttachedIndicator();
+          }
+        } else {
+          if (contextsStatus) {
+            contextsStatus.textContent = `Contexts Error: ${data.message || data.error || 'Failed'}`;
+            contextsStatus.className = 'mic-status error';
+          }
+        }
+      } catch (err) {
+        if (contextsStatus) {
+          contextsStatus.textContent = `Contexts Request Error: ${err.message}`;
+          contextsStatus.className = 'mic-status error';
+        }
+      } finally {
+        if (refreshContextsBtn) refreshContextsBtn.disabled = false;
+      }
+    }
+
+    if (refreshContextsBtn) {
+      refreshContextsBtn.addEventListener('click', refreshContextsList);
     }
   </script>
 </body>

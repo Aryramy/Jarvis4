@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Shadow Form Host</title>
+</head>
+<body>
+  <h1>Shadow Form Document</h1>
+  <button type="button" id="main-doc-btn">Main Document Button</button>
+  <shadow-form-card aria-label="Shadow Form Region"></shadow-form-card>
+
+  <script>
+    class ShadowFormCard extends HTMLElement {
+      connectedCallback() {
+        if (!this.shadowRoot) {
+          const shadow = this.attachShadow({ mode: 'open' });
+          shadow.innerHTML = `
+            <div style="border: 1px solid #6366f1; padding: 12px; margin: 8px 0;">
+              <h2>Shadow Form Title</h2>
+              <form id="shadow-internal-form">
+                <div>
+                  <label for="shadow-user">Shadow Username</label>
+                  <input type="text" id="shadow-user" name="shadowUser" value="" />
+                </div>
+                <div style="margin-top: 8px;">
+                  <button type="button" id="shadow-submit-btn">Shadow Submit Button</button>
+                </div>
+              </form>
+            </div>
+          `;
+        }
+      }
+    }
+    customElements.define('shadow-form-card', ShadowFormCard);
+  </script>
+</body>
+</html>

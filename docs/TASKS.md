@@ -112,8 +112,11 @@ BRICK-037 — Safe File Upload & Download v1
 Status: VERIFIED
 
 BRICK-038 — Structured Extraction & Scraping v1 (Deterministic Page Data Extraction / Zero AI)
-Status: IN PROGRESS (Awaiting Checkpoint)
+Status: VERIFIED
 
-BRICK-039 — Iframes & Shadow DOM Extraction / Browser Evolution
+BRICK-039 — Complex UI Contexts v1: Iframes + Open Shadow DOM (Context Discovery + Scoped Semantic Operations / Zero AI)
+Status: VERIFIED
+
+BRICK-040 — Next Feature / Browser Evolution
 Status: NOT STARTED / NOT AUTHORIZED
 

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Dynamic Shadow Host</title>
+</head>
+<body>
+  <h1>Dynamic Shadow Host</h1>
+  <button type="button" id="attach-shadow-btn">Attach Shadow Button</button>
+  <button type="button" id="detach-shadow-btn">Detach Shadow Button</button>
+  <div id="shadow-slot"></div>
+
+  <script>
+    class DynamicShadowCard extends HTMLElement {
+      connectedCallback() {
+        if (!this.shadowRoot) {
+          const shadow = this.attachShadow({ mode: 'open' });
+          shadow.innerHTML = `
+            <div style="border: 1px solid #f59e0b; padding: 10px;">
+              <h2>Dynamic Shadow Heading</h2>
+              <button type="button" id="dynamic-shadow-action">Dynamic Shadow Action</button>
+              <p id="dyn-shadow-status">Dynamic shadow ready</p>
+            </div>
+          `;
+          shadow.getElementById('dynamic-shadow-action').addEventListener('click', () => {
+            shadow.getElementById('dyn-shadow-status').textContent = 'Dynamic action triggered';
+          });
+        }
+      }
+    }
+    customElements.define('dynamic-shadow-card', DynamicShadowCard);
+
+    document.getElementById('attach-shadow-btn').addEventListener('click', () => {
+      const slot = document.getElementById('shadow-slot');
+      if (!slot.querySelector('dynamic-shadow-card')) {
+        const el = document.createElement('dynamic-shadow-card');
+        el.setAttribute('aria-label', 'Dynamic Card');
+        slot.appendChild(el);
+      }
+    });
+
+    document.getElementById('detach-shadow-btn').addEventListener('click', () => {
+      const slot = document.getElementById('shadow-slot');
+      const el = slot.querySelector('dynamic-shadow-card');
+      if (el) el.remove();
+    });
+  </script>
+</body>
+</html>

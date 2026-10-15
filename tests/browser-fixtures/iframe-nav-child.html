@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Navigated Child Frame</title>
+</head>
+<body>
+  <h2>Navigated Child Frame</h2>
+  <button type="button" id="navigated-btn">Navigated Action</button>
+  <p id="nav-status">New frame content loaded successfully</p>
+  <script>
+    document.getElementById('navigated-btn').addEventListener('click', function() {
+      document.getElementById('nav-status').textContent = 'Navigated action triggered';
+    });
+  </script>
+</body>
+</html>

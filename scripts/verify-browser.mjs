@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { BrowserManager, FormInspectionError, FormPopulationError, FormSubmissionError, FileTransferError, StructuredExtractionError } from '../src/browser/browserManager.js';
+import { BrowserManager, FormInspectionError, FormPopulationError, FormSubmissionError, FileTransferError, StructuredExtractionError, DomContextError } from '../src/browser/browserManager.js';
 import { startFixtureServer } from '../tests/browser-fixtures/server.js';
 import { TargetResolutionError } from '../src/browser/targetResolver.js';
 import { ActionExecutionError } from '../src/browser/actionExecutor.js';
@@ -2448,8 +2448,299 @@ async function main() {
       assert.equal(blocked, true, 'Extraction must be blocked with HUMAN_HANDOFF_ACTIVE');
     });
 
-    // 123. Real browser cleanup succeeds
-    await runTest(123, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
+    // 123. Frame Discovery (Basic & Nested Iframes) (Brick 39)
+    await runTest(123, 'Frame Discovery (Basic & Nested Iframes)', 'Complex UI Contexts (Brick 39)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/iframe-nested.html`, { allowLoopbackTest: true });
+      await bm.waitForStable();
+      const contextsRes = await bm.inspectContexts();
+      assert.equal(contextsRes.success, true);
+      assert.ok(contextsRes.contextCount >= 3, `Expected at least 3 contexts, got ${contextsRes.contextCount}`);
+      const mainCtx = contextsRes.contexts.find(c => c.type === 'main');
+      assert.ok(mainCtx, 'Main context must be present');
+      assert.equal(mainCtx.depth, 0);
+      const frameCtxs = contextsRes.contexts.filter(c => c.type === 'frame');
+      assert.ok(frameCtxs.length >= 2, 'Must have at least 2 frame contexts');
+      for (const fc of frameCtxs) {
+        assert.ok(fc.contextId.startsWith('ctx_frame_'));
+        assert.equal(fc.attached, true);
+        assert.ok(fc.depth >= 1);
+      }
+    });
+
+    // 124. Open Shadow Root Discovery (Basic & Nested Shadow Roots) (Brick 39)
+    await runTest(124, 'Open Shadow Root Discovery (Basic & Nested Shadow Roots)', 'Complex UI Contexts (Brick 39)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/shadow-nested.html`, { allowLoopbackTest: true });
+      await bm.waitForStable();
+      const contextsRes = await bm.inspectContexts();
+      assert.equal(contextsRes.success, true);
+      const shadowCtxs = contextsRes.contexts.filter(c => c.type === 'shadow-root');
+      assert.ok(shadowCtxs.length >= 2, `Expected at least 2 shadow roots, got ${shadowCtxs.length}`);
+      for (const sc of shadowCtxs) {
+        assert.ok(sc.contextId.startsWith('ctx_shadow_'));
+        assert.equal(sc.attached, true);
+        assert.ok(sc.depth >= 1);
+      }
+    });
+
+    // 125. Dynamic Iframe Insertion and Removal (Brick 39)
+    await runTest(125, 'Dynamic Iframe Insertion and Removal', 'Complex UI Contexts (Brick 39)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/iframe-dynamic.html`, { allowLoopbackTest: true });
+      const snap1 = await bm.waitForStable();
+      const initialCtxs = await bm.inspectContexts();
+      const initialFrameCount = initialCtxs.contexts.filter(c => c.type === 'frame').length;
+
+      // Click "Insert Frame Button"
+      await bm.executeAction({
+        action: 'click',
+        target: { kind: 'button', name: 'Insert Frame Button' },
+        expectedSnapshotToken: snap1.snapshotToken
+      });
+      const snap2 = await bm.waitForStable();
+      const afterInsertCtxs = await bm.inspectContexts();
+      const insertedFrameCount = afterInsertCtxs.contexts.filter(c => c.type === 'frame').length;
+      assert.equal(insertedFrameCount, initialFrameCount + 1, 'Frame count must increase by 1 after insertion');
+
+      // Click "Remove Frame Button"
+      await bm.executeAction({
+        action: 'click',
+        target: { kind: 'button', name: 'Remove Frame Button' },
+        expectedSnapshotToken: snap2.snapshotToken
+      });
+      await bm.waitForStable();
+      const afterRemoveCtxs = await bm.inspectContexts();
+      const finalFrameCount = afterRemoveCtxs.contexts.filter(c => c.type === 'frame').length;
+      assert.equal(finalFrameCount, initialFrameCount, 'Frame count must return to initial after removal');
+    });
+
+    // 126. Dynamic Shadow Root Attachment and Detachment (Brick 39)
+    await runTest(126, 'Dynamic Shadow Root Attachment and Detachment', 'Complex UI Contexts (Brick 39)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/shadow-dynamic.html`, { allowLoopbackTest: true });
+      const snap1 = await bm.waitForStable();
+      const initialCtxs = await bm.inspectContexts();
+      const initialShadowCount = initialCtxs.contexts.filter(c => c.type === 'shadow-root').length;
+
+      // Click "Attach Shadow Button"
+      await bm.executeAction({
+        action: 'click',
+        target: { kind: 'button', name: 'Attach Shadow Button' },
+        expectedSnapshotToken: snap1.snapshotToken
+      });
+      const snap2 = await bm.waitForStable();
+      const afterAttachCtxs = await bm.inspectContexts();
+      const attachedShadowCount = afterAttachCtxs.contexts.filter(c => c.type === 'shadow-root').length;
+      assert.equal(attachedShadowCount, initialShadowCount + 1, 'Shadow count must increase by 1 after attach');
+
+      // Click "Detach Shadow Button"
+      await bm.executeAction({
+        action: 'click',
+        target: { kind: 'button', name: 'Detach Shadow Button' },
+        expectedSnapshotToken: snap2.snapshotToken
+      });
+      await bm.waitForStable();
+      const afterRemoveCtxs = await bm.inspectContexts();
+      const finalShadowCount = afterRemoveCtxs.contexts.filter(c => c.type === 'shadow-root').length;
+      assert.equal(finalShadowCount, initialShadowCount, 'Shadow count must return to initial after detach');
+    });
+
+    // 127. Scoped Action Execution Inside an Iframe (Brick 39)
+    await runTest(127, 'Scoped Action Execution Inside an Iframe', 'Complex UI Contexts (Brick 39)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/iframe-basic.html`, { allowLoopbackTest: true });
+      await bm.waitForStable();
+      const contextsRes = await bm.inspectContexts();
+      const frameCtx = contextsRes.contexts.find(c => c.type === 'frame');
+      assert.ok(frameCtx, 'Frame context must be found');
+
+      const frameInspection = await bm.inspectPage({ contextId: frameCtx.contextId });
+      assert.equal(frameInspection.success, true);
+      assert.equal(frameInspection.contextId, frameCtx.contextId);
+      const childBtn = frameInspection.elements.find(el => el.kind === 'button' && (el.text || el.accessibleName || '').includes('Child Frame Action'));
+      assert.ok(childBtn, 'Child frame button must be discovered inside frame context');
+
+      const actionRes = await bm.executeAction({
+        action: 'click',
+        target: { kind: 'button', name: 'Child Frame Action' },
+        expectedSnapshotToken: frameInspection.snapshotToken,
+        contextId: frameCtx.contextId
+      });
+      assert.equal(actionRes.success, true);
+      assert.equal(actionRes.contextId, frameCtx.contextId);
+      assert.equal(actionRes.topLevelNavigationOccurred, false);
+      assert.equal(actionRes.frameNavigationOccurred, false);
+    });
+
+    // 128. Scoped Action Execution Inside an Open Shadow Root (Brick 39)
+    await runTest(128, 'Scoped Action Execution Inside an Open Shadow Root', 'Complex UI Contexts (Brick 39)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/shadow-basic.html`, { allowLoopbackTest: true });
+      await bm.waitForStable();
+      const contextsRes = await bm.inspectContexts();
+      const shadowCtx = contextsRes.contexts.find(c => c.type === 'shadow-root');
+      assert.ok(shadowCtx, 'Shadow root context must be found');
+
+      const shadowInspection = await bm.inspectPage({ contextId: shadowCtx.contextId });
+      assert.equal(shadowInspection.success, true);
+      assert.equal(shadowInspection.contextId, shadowCtx.contextId);
+      const shadowBtn = shadowInspection.elements.find(el => el.kind === 'button' && (el.text || el.accessibleName || '').includes('Shadow Card Action'));
+      assert.ok(shadowBtn, 'Shadow card button must be discovered inside shadow context');
+
+      const actionRes = await bm.executeAction({
+        action: 'click',
+        target: { kind: 'button', name: 'Shadow Card Action' },
+        expectedSnapshotToken: shadowInspection.snapshotToken,
+        contextId: shadowCtx.contextId
+      });
+      assert.equal(actionRes.success, true);
+      assert.equal(actionRes.contextId, shadowCtx.contextId);
+    });
+
+    // 129. Frame Navigation Distinction (frameNavigationOccurred: true, topLevelNavigationOccurred: false) (Brick 39)
+    await runTest(129, 'Frame Navigation Distinction', 'Complex UI Contexts (Brick 39)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/iframe-navigation.html`, { allowLoopbackTest: true });
+      const snap = await bm.waitForStable();
+      const initialPageUrl = bm.page.url();
+
+      const actionRes = await bm.executeAction({
+        action: 'click',
+        target: { kind: 'button', name: 'Navigate Frame' },
+        expectedSnapshotToken: snap.snapshotToken
+      });
+      assert.equal(actionRes.success, true);
+      await bm.waitForStable();
+
+      // Top level page did not navigate
+      assert.equal(bm.page.url(), initialPageUrl);
+      const contextsRes = await bm.inspectContexts();
+      const frameCtx = contextsRes.contexts.find(c => c.type === 'frame');
+      assert.ok(frameCtx, 'Navigated frame context must exist');
+      assert.ok(frameCtx.url.includes('iframe-nav-child.html'), `Expected frame url to include iframe-nav-child.html, got ${frameCtx.url}`);
+    });
+
+    // 130. Closed Shadow Root Detection and Truthfulness (Brick 39)
+    await runTest(130, 'Closed Shadow Root Detection and Truthfulness', 'Complex UI Contexts (Brick 39)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/shadow-closed.html`, { allowLoopbackTest: true });
+      await bm.waitForStable();
+      const contextsRes = await bm.inspectContexts();
+      assert.equal(contextsRes.success, true);
+      assert.equal(contextsRes.closedShadowRootDetected, true, 'Closed shadow root must be truthfully detected');
+      const shadowRoots = contextsRes.contexts.filter(c => c.type === 'shadow-root');
+      assert.equal(shadowRoots.length, 0, 'Closed shadow root must NOT be pierced or returned');
+    });
+
+    // 131. Mixed Context Tree (main -> iframe -> shadow-root) (Brick 39)
+    await runTest(131, 'Mixed Context Tree (main -> iframe -> shadow-root)', 'Complex UI Contexts (Brick 39)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/context-mixed.html`, { allowLoopbackTest: true });
+      await bm.waitForStable();
+      const contextsRes = await bm.inspectContexts();
+      assert.equal(contextsRes.success, true);
+
+      const mainCtx = contextsRes.contexts.find(c => c.type === 'main');
+      const frameCtx = contextsRes.contexts.find(c => c.type === 'frame');
+      const shadowCtx = contextsRes.contexts.find(c => c.type === 'shadow-root');
+      assert.ok(mainCtx && frameCtx && shadowCtx, 'All three context types must exist in mixed fixture');
+      assert.equal(frameCtx.parentContextId, mainCtx.contextId, 'Frame parent must be main context');
+      assert.equal(shadowCtx.parentContextId, frameCtx.contextId, 'Shadow root parent must be frame context');
+
+      const shadowInspection = await bm.inspectPage({ contextId: shadowCtx.contextId });
+      assert.equal(shadowInspection.success, true);
+      const actionRes = await bm.executeAction({
+        action: 'click',
+        target: { kind: 'button', name: 'Mixed Shadow Action' },
+        expectedSnapshotToken: shadowInspection.snapshotToken,
+        contextId: shadowCtx.contextId
+      });
+      assert.equal(actionRes.success, true);
+      assert.equal(actionRes.contextId, shadowCtx.contextId);
+    });
+
+    // 132. Cross-Context Snapshot Token Isolation (Brick 39)
+    await runTest(132, 'Cross-Context Snapshot Token Isolation', 'Complex UI Contexts (Brick 39)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/iframe-basic.html`, { allowLoopbackTest: true });
+      await bm.waitForStable();
+      const contextsRes = await bm.inspectContexts();
+      const mainCtx = contextsRes.contexts.find(c => c.type === 'main');
+      const frameCtx = contextsRes.contexts.find(c => c.type === 'frame');
+
+      const mainInspect = await bm.inspectPage({ contextId: mainCtx.contextId });
+      const frameInspect = await bm.inspectPage({ contextId: frameCtx.contextId });
+
+      let mainUsingFrameTokenFailed = false;
+      try {
+        await bm.executeAction({
+          action: 'click',
+          target: { kind: 'button', name: 'Main Document Action' },
+          expectedSnapshotToken: frameInspect.snapshotToken,
+          contextId: mainCtx.contextId
+        });
+      } catch (err) {
+        if (err.code === 'TARGET_STALE' || err.code === 'CONTEXT_MISMATCH') {
+          mainUsingFrameTokenFailed = true;
+        }
+      }
+      assert.equal(mainUsingFrameTokenFailed, true, 'Main context action must reject frame snapshot token');
+
+      let frameUsingMainTokenFailed = false;
+      try {
+        await bm.executeAction({
+          action: 'click',
+          target: { kind: 'button', name: 'Child Frame Action' },
+          expectedSnapshotToken: mainInspect.snapshotToken,
+          contextId: frameCtx.contextId
+        });
+      } catch (err) {
+        if (err.code === 'TARGET_STALE' || err.code === 'CONTEXT_MISMATCH') {
+          frameUsingMainTokenFailed = true;
+        }
+      }
+      assert.equal(frameUsingMainTokenFailed, true, 'Frame context action must reject main snapshot token');
+    });
+
+    // 133. Subcontext Form Submission Rejection (Brick 39)
+    await runTest(133, 'Subcontext Form Submission Rejection', 'Complex UI Contexts (Brick 39)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/shadow-form.html`, { allowLoopbackTest: true });
+      await bm.waitForStable();
+      const contextsRes = await bm.inspectContexts();
+      const shadowCtx = contextsRes.contexts.find(c => c.type === 'shadow-root');
+      assert.ok(shadowCtx, 'Shadow context must be found');
+
+      let rejected = false;
+      try {
+        await bm.prepareFormSubmission({
+          formIndex: 0,
+          expectedSnapshotToken: shadowCtx.snapshotToken,
+          contextId: shadowCtx.contextId
+        });
+      } catch (err) {
+        if (err.code === 'SUBCONTEXT_SUBMISSION_NOT_SUPPORTED' || (err instanceof DomContextError)) {
+          rejected = true;
+        }
+      }
+      assert.equal(rejected, true, 'Form submission in subcontext must reject with SUBCONTEXT_SUBMISSION_NOT_SUPPORTED');
+    });
+
+    // 134. Context Lifecycle Cleanup on Page Close (Brick 39)
+    await runTest(134, 'Context Lifecycle Cleanup on Page Close', 'Complex UI Contexts (Brick 39)', async () => {
+      const page2 = await bm.openPage();
+      await bm.switchPage(page2.pageId);
+      await bm.navigate(`${fixtureServer.baseUrl}/iframe-nested.html`, { allowLoopbackTest: true });
+      await bm.waitForStable();
+
+      const page2Ctxs = await bm.inspectContexts({ pageId: page2.pageId });
+      assert.ok(page2Ctxs.contextCount >= 3, 'Page 2 must have multiple contexts');
+
+      await bm.closePage(page2.pageId);
+
+      let inspectClosedFailed = false;
+      try {
+        await bm.inspectContexts({ pageId: page2.pageId });
+      } catch (err) {
+        if (err.code === 'PAGE_NOT_FOUND' || err.code === 'PAGE_CLOSED') {
+          inspectClosedFailed = true;
+        }
+      }
+      assert.equal(inspectClosedFailed, true, 'Inspecting contexts of closed page must fail with PAGE_NOT_FOUND');
+    });
+
+    // 135. Real browser cleanup succeeds
+    await runTest(135, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
       await bm.close();
       assert.equal(bm.isBrowserConnected(), false);
       assert.equal(bm.pageCount, 0);
@@ -2519,6 +2810,7 @@ async function main() {
     'Safe Download (Brick 37)',
     'Transfer Cleanup (Brick 37)',
     'Structured Extraction (Brick 38)',
+    'Complex UI Contexts (Brick 39)',
     'Cleanup'
   ];
 
@@ -2536,10 +2828,10 @@ async function main() {
 
   console.log('--------------------------------------------------');
   console.log(`Tests:\n${passed}/${total} PASS\n`);
-  console.log(`Exit Code:\n${passed === total && total >= 123 ? 0 : 1}`);
+  console.log(`Exit Code:\n${passed === total && total >= 135 ? 0 : 1}`);
   console.log('==================================================');
 
-  if (passed !== total || total < 123) {
+  if (passed !== total || total < 135) {
     process.exit(1);
   }
 }

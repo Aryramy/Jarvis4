@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Iframe Child Document</title>
+</head>
+<body>
+  <h2>Child Frame Heading</h2>
+  <button type="button" id="child-action-btn">Child Frame Action</button>
+  <div>
+    <label for="child-input">Child Input Field</label>
+    <input type="text" id="child-input" name="childInput" value="" />
+  </div>
+  <p id="child-status">Child frame initial status</p>
+  <script>
+    document.getElementById('child-action-btn').addEventListener('click', function() {
+      document.getElementById('child-status').textContent = 'Child frame clicked';
+    });
+  </script>
+</body>
+</html>

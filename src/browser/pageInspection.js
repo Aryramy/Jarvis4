@@ -69,6 +69,24 @@ export function extractDomSnapshot(limits = {}) {
   const doc = typeof document !== 'undefined' ? document : (limits && limits._doc);
   const win = typeof window !== 'undefined' ? window : (limits && limits._win);
 
+  let rootContainer = doc;
+  if (limits && limits.shadowHandleId) {
+    const reg = (win && win.__JARVIS_SHADOW_REGISTRY__) ? win.__JARVIS_SHADOW_REGISTRY__.get(limits.shadowHandleId) : null;
+    if (!reg || !reg.shadowRoot) {
+      return {
+        error: 'CONTEXT_NOT_FOUND',
+        message: `Shadow root "${limits.shadowHandleId}" not found in registry.`
+      };
+    }
+    if (reg.host && !reg.host.isConnected) {
+      return {
+        error: 'SHADOW_CONTEXT_DETACHED',
+        message: 'Shadow root host element is detached from DOM.'
+      };
+    }
+    rootContainer = reg.shadowRoot;
+  }
+
   if (!doc) {
     return {
       visibleText: '',
@@ -256,10 +274,14 @@ export function extractDomSnapshot(limits = {}) {
 
   // 1. Visible Text Extraction
   let rawText = '';
-  if (doc.body && typeof doc.body.innerText === 'string' && doc.body.innerText.length > 0) {
-    rawText = doc.body.innerText;
+  if (rootContainer === doc) {
+    if (doc.body && typeof doc.body.innerText === 'string' && doc.body.innerText.length > 0) {
+      rawText = doc.body.innerText;
+    } else {
+      rawText = getVisibleTextFromDom(doc.body || doc.documentElement);
+    }
   } else {
-    rawText = getVisibleTextFromDom(doc.body || doc.documentElement);
+    rawText = getVisibleTextFromDom(rootContainer);
   }
 
   const cleanedVisibleText = innerCleanText(rawText);
@@ -276,8 +298,8 @@ export function extractDomSnapshot(limits = {}) {
   let totalEligibleElementCount = 0;
 
   let candidates = [];
-  if (typeof doc.querySelectorAll === 'function') {
-    candidates = Array.from(doc.querySelectorAll(
+  if (typeof rootContainer.querySelectorAll === 'function') {
+    candidates = Array.from(rootContainer.querySelectorAll(
       'h1, h2, h3, h4, h5, h6, a, button, input, textarea, select, form, [role="heading"], [role="link"], [role="button"]'
     ));
   }

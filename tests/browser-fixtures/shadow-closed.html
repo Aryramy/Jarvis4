@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Closed Shadow Host</title>
+</head>
+<body>
+  <h1>Closed Widget Host</h1>
+  <button type="button" id="main-closed-btn">Main Button</button>
+  <closed-widget aria-label="Closed Widget"></closed-widget>
+
+  <script>
+    class ClosedWidget extends HTMLElement {
+      constructor() {
+        super();
+        this._shadow = this.attachShadow({ mode: 'closed' });
+        this._shadow.innerHTML = `
+          <div style="border: 1px solid #ef4444; padding: 10px;">
+            <h3>Closed Shadow Hidden Heading</h3>
+            <button type="button" id="hidden-btn">Closed Shadow Button</button>
+          </div>
+        `;
+      }
+    }
+    customElements.define('closed-widget', ClosedWidget);
+  </script>
+</body>
+</html>

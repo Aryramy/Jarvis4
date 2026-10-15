@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Shadow Basic Host</title>
+</head>
+<body>
+  <h1>Shadow Root Host Document</h1>
+  <button type="button" id="main-doc-btn">Main Document Action</button>
+  <open-card aria-label="Open Card Component" role="region"></open-card>
+
+  <script>
+    class OpenCard extends HTMLElement {
+      connectedCallback() {
+        if (!this.shadowRoot) {
+          const shadow = this.attachShadow({ mode: 'open' });
+          shadow.innerHTML = `
+            <div style="border: 1px solid #475569; padding: 12px; margin: 8px 0;">
+              <h2>Shadow Card Heading</h2>
+              <button type="button" id="shadow-card-action">Shadow Card Action</button>
+              <div style="margin-top: 8px;">
+                <label for="shadow-input">Shadow Input</label>
+                <input type="text" id="shadow-input" name="shadowName" value="" />
+              </div>
+              <p id="shadow-status">Shadow card idle</p>
+            </div>
+          `;
+          shadow.getElementById('shadow-card-action').addEventListener('click', () => {
+            shadow.getElementById('shadow-status').textContent = 'Shadow card action clicked';
+          });
+        }
+      }
+    }
+    customElements.define('open-card', OpenCard);
+  </script>
+</body>
+</html>

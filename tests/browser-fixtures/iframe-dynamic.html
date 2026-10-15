@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Dynamic Frame Host</title>
+</head>
+<body>
+  <h1>Dynamic Frame Host</h1>
+  <button type="button" id="insert-frame-btn">Insert Frame Button</button>
+  <button type="button" id="remove-frame-btn">Remove Frame Button</button>
+  <div id="frame-slot"></div>
+  <script>
+    document.getElementById('insert-frame-btn').addEventListener('click', function() {
+      const slot = document.getElementById('frame-slot');
+      if (!slot.querySelector('iframe')) {
+        const frame = document.createElement('iframe');
+        frame.id = 'dynamically-added-frame';
+        frame.name = 'dynamic-frame';
+        frame.src = 'iframe-child.html';
+        slot.appendChild(frame);
+      }
+    });
+    document.getElementById('remove-frame-btn').addEventListener('click', function() {
+      const slot = document.getElementById('frame-slot');
+      const frame = slot.querySelector('iframe');
+      if (frame) {
+        frame.remove();
+      }
+    });
+  </script>
+</body>
+</html>

@@ -78,6 +78,7 @@ JARVIS4 distinguishes five distinct harness layers across development, verificat
     - Safe file download: explicit authorization, real Edge download events as proof, approved download directory confinement, filename sanitization and path traversal defense, Windows reserved device name escaping, collision-safe naming, bounded download timeout, blocked executable/script types, zero auto-retry, and opaque download IDs.
     - Transfer cleanup: guaranteed synthetic upload and download test artifact removal.
     - Structured extraction & scraping v1 (Brick 38): deterministic page data extraction bound atomically to managed page and snapshot token across 7 categories (metadata, headings preserving DOM order, links with same-origin detection, regular/irregular HTML tables, lists and bounded recursive sublists, dl/dt/dd key-value definitions, repeated semantic records). Strict privacy exclusion of passwords, text inputs, textareas, file paths, hidden inputs, cookies, and tokens. Full fidelity Unicode and Arabic RTL preservation. Main document only (0 iframe, 0 shadow DOM). Conservative limits (`maxRecords`, `maxTextChars`, `maxFieldChars`, `maxNestingDepth`) with explicit truncation metadata. Dynamic mutation and SPA route staleness protection (`PAGE_CHANGED` / `TARGET_STALE`). Mutual exclusion with active Human Handoff (`HUMAN_HANDOFF_ACTIVE`).
+    - Complex UI contexts v1 (Brick 39): deterministic context discovery and scoped semantic operations across main frame, iframes, nested frames, and open shadow roots. Preserves parent-child hierarchy, frame names, frame URLs, shadow host elements, and nesting depth bounded by `BROWSER_MAX_CONTEXT_DEPTH` and `BROWSER_MAX_DOM_CONTEXTS`. Explicit closed shadow root detection (`closedShadowRootDetected: true`) with direct interaction safely rejected (`CLOSED_SHADOW_ROOT_UNSUPPORTED`). Opaque context IDs, dynamic attachment/detachment tracking (`CONTEXT_DETACHED`, `CONTEXT_NOT_FOUND`), context-scoped inspection (`/api/browser/inspect`, `/api/browser/inspect-contexts`), scoped target resolution, action execution, stability waits, and structured extraction. Per-context snapshot token isolation and stale token rejection. Subcontext form submission and file transfer blocking (`SUBCONTEXT_OPERATION_NOT_SUPPORTED`). Guaranteed page-close context cleanup.
 
 ### Layer C: Development Agent Harness (Coding Agent Governance)
 - **Status**: `PARTIAL / PLANNED`
@@ -239,6 +240,27 @@ All other mechanics—including form mechanics, state transitions, token invalid
   - Extended Level 2 real-browser harness from 70 to 82 tests across 26 categories.
   - Added deterministic human handoff scenarios: login handoff, MFA approval, CAPTCHA solving simulation, explicit human resume, fresh DOM state re-inspection, deterministic evidence verification, repeated explicit resume policy, action blocking (`HUMAN_HANDOFF_ACTIVE`), sensitive screenshot suppression (`SCREENSHOT_SUPPRESSED_DURING_AUTH`), bound page close invalidation, cross-page isolation, and pre-auth form confirmation token invalidation.
   - Extended Level 1 offline test harness from 1452 to 1490 tests across 188 suites.
+- **GREEN-037**:
+  - Extended Level 2 real-browser harness to 108 tests across 29 categories.
+  - Added deterministic file upload and download testing with real Edge browser events as proof of transfer.
+  - Validated target resolution on file inputs, path normalization, existence validation, directory blocking, size limits, sensitive file denylist, accept constraint enforcement, Playwright native setInputFiles, verified DOM state, zero auto-submit, and full path privacy.
+  - Validated download authorization, approved download directory confinement, filename sanitization, Windows reserved device name escaping, collision-safe naming, bounded download timeout, blocked executable/script types, zero auto-retry, and opaque download IDs.
+  - Extended Level 1 offline test harness to 1540 tests.
+- **GREEN-038**:
+  - Extended Level 2 real-browser harness to 123 tests across 30 categories.
+  - Added deterministic structured extraction & scraping v1 covering 7 categories (metadata, headings, links, regular/irregular tables, lists, definitions, records) bound to page and snapshot tokens.
+  - Validated privacy exclusions (passwords, text inputs, textareas, file paths, hidden inputs, cookies, tokens), full fidelity Unicode/Arabic preservation, main document boundary, and dynamic mutation staleness.
+  - Extended Level 1 offline test harness to 1575 tests.
+- **BRICK-039**:
+  - Extended Level 2 real-browser harness to 135 tests across 31 categories (`scripts/verify-browser.mjs`).
+  - Added Category 31 (Complex UI Contexts v1: Iframes & Open Shadow DOM) covering 12 new automated test scenarios (tests 123-134 plus renumbered cleanup test 135).
+  - Verified context tree discovery (main frame, child frame, nested frame, open shadow root, nested shadow root, mixed frame-in-shadow and shadow-in-frame).
+  - Verified dynamic frame attachment and detachment lifecycle with invalidation of detached context IDs.
+  - Verified scoped inspection, element inventory, and semantic action execution inside open shadow roots and child iframes.
+  - Verified frame navigation isolation (frame navigation preserves main page snapshot while invalidating frame context).
+  - Verified truthful closed shadow root detection and rejection (`CLOSED_SHADOW_ROOT_UNSUPPORTED`).
+  - Verified snapshot token isolation per context and subcontext form submission rejection (`SUBCONTEXT_OPERATION_NOT_SUPPORTED`).
+  - Extended Level 1 offline test harness to 1599 tests across 197 suites (`npm run verify`).
 
 ---
 

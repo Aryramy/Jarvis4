@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Mixed Context Child Frame</title>
+</head>
+<body>
+  <h2>Mixed Child Frame Document</h2>
+  <button type="button" id="frame-mixed-btn">Frame Mixed Button</button>
+  <mixed-shadow-widget aria-label="Mixed Shadow Widget Component"></mixed-shadow-widget>
+
+  <script>
+    class MixedShadowWidget extends HTMLElement {
+      connectedCallback() {
+        if (!this.shadowRoot) {
+          const shadow = this.attachShadow({ mode: 'open' });
+          shadow.innerHTML = `
+            <div style="border: 1px dashed #06b6d4; padding: 10px; margin-top: 8px;">
+              <h3>Mixed Shadow Heading</h3>
+              <button type="button" id="mixed-shadow-action-btn">Mixed Shadow Action</button>
+              <p id="mixed-shadow-status">Mixed shadow ready</p>
+            </div>
+          `;
+          shadow.getElementById('mixed-shadow-action-btn').addEventListener('click', () => {
+            shadow.getElementById('mixed-shadow-status').textContent = 'Mixed shadow clicked';
+          });
+        }
+      }
+    }
+    customElements.define('mixed-shadow-widget', MixedShadowWidget);
+  </script>
+</body>
+</html>

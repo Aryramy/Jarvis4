@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Nested Shadow Host</title>
+</head>
+<body>
+  <h1>Nested Shadow DOM Host</h1>
+  <button type="button" id="main-btn">Main Document Action</button>
+  <nested-outer aria-label="Outer Shadow Container"></nested-outer>
+
+  <script>
+    class NestedInner extends HTMLElement {
+      connectedCallback() {
+        if (!this.shadowRoot) {
+          const shadow = this.attachShadow({ mode: 'open' });
+          shadow.innerHTML = `
+            <div style="border: 1px solid #10b981; padding: 8px;">
+              <h3>Inner Shadow Heading</h3>
+              <button type="button" id="nested-inner-btn">Inner Shadow Action</button>
+              <p id="inner-status">Inner idle</p>
+            </div>
+          `;
+          shadow.getElementById('nested-inner-btn').addEventListener('click', () => {
+            shadow.getElementById('inner-status').textContent = 'Inner clicked';
+          });
+        }
+      }
+    }
+    customElements.define('nested-inner', NestedInner);
+
+    class NestedOuter extends HTMLElement {
+      connectedCallback() {
+        if (!this.shadowRoot) {
+          const shadow = this.attachShadow({ mode: 'open' });
+          shadow.innerHTML = `
+            <div style="border: 1px solid #3b82f6; padding: 12px;">
+              <h2>Outer Shadow Heading</h2>
+              <button type="button" id="outer-shadow-btn">Outer Shadow Action</button>
+              <nested-inner aria-label="Inner Shadow Child"></nested-inner>
+            </div>
+          `;
+        }
+      }
+    }
+    customElements.define('nested-outer', NestedOuter);
+  </script>
+</body>
+</html>

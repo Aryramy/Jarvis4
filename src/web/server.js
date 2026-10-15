@@ -22,7 +22,7 @@ import { PageReaderError } from '../webpage/urlSafety.js';
 import { executePageQa, PageQaError } from '../webpage/pageQa.js';
 import { executeResearchOne, ResearchOneError } from '../research/researchOne.js';
 import { decideBrowserEscalation, BrowserEscalationError } from '../routing/browserEscalation.js';
-import { defaultBrowserManager, BrowserManager, BrowserManagerError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError, HumanHandoffError, FileTransferError, StructuredExtractionError } from '../browser/browserManager.js';
+import { defaultBrowserManager, BrowserManager, BrowserManagerError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError, HumanHandoffError, FileTransferError, StructuredExtractionError, DomContextError } from '../browser/browserManager.js';
 import { TargetResolutionError, SUPPORTED_KINDS } from '../browser/targetResolver.js';
 import { ActionExecutionError } from '../browser/actionExecutor.js';
 
@@ -1619,25 +1619,39 @@ export function createRequestListener(options = {}) {
       return;
     }
 
-    // Route: GET /api/browser/inspect-page (Brick 28 Page Understanding v1)
-    if (url.pathname === '/api/browser/inspect-page') {
-      if (req.method !== 'GET') {
+    // Route: GET /api/browser/inspect-page or POST /api/browser/inspect (Brick 28 & Brick 39)
+    if (url.pathname === '/api/browser/inspect-page' || url.pathname === '/api/browser/inspect') {
+      if (url.pathname === '/api/browser/inspect-page' && req.method !== 'GET') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+      if (req.method !== 'GET' && req.method !== 'POST') {
         res.writeHead(405, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
         return;
       }
 
-      (async () => {
+      const executeInspection = async (params = {}) => {
         try {
-          const result = await browserManager.inspectPage();
+          const result = await browserManager.inspectPage(params);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(result));
         } catch (err) {
           const errorCode = err.code || 'BROWSER_INSPECTION_FAILED';
-          const statusCode = (errorCode === 'BROWSER_NOT_RUNNING' || errorCode === 'BROWSER_PAGE_NOT_AVAILABLE')
-            ? 400
-            : (errorCode === 'BROWSER_PAGE_BUSY' ? 503 : 500);
-          const safeMessage = (err instanceof BrowserManagerError && typeof err.message === 'string')
+          let statusCode = 500;
+          if (errorCode === 'BROWSER_NOT_RUNNING' || errorCode === 'BROWSER_PAGE_NOT_AVAILABLE') {
+            statusCode = 400;
+          } else if (errorCode === 'CLOSED_SHADOW_ROOT_UNSUPPORTED') {
+            statusCode = 400;
+          } else if (errorCode === 'PAGE_CLOSED' || errorCode === 'PAGE_NOT_FOUND' || errorCode === 'CONTEXT_NOT_FOUND') {
+            statusCode = 404;
+          } else if (errorCode === 'FRAME_DETACHED' || errorCode === 'SHADOW_CONTEXT_DETACHED' || errorCode === 'CONTEXT_STALE' || errorCode === 'HUMAN_HANDOFF_ACTIVE') {
+            statusCode = 409;
+          } else if (errorCode === 'BROWSER_PAGE_BUSY') {
+            statusCode = 503;
+          }
+          const safeMessage = (err instanceof BrowserManagerError || err instanceof DomContextError) && typeof err.message === 'string'
             ? err.message
             : (errorCode === 'BROWSER_PAGE_BUSY'
               ? 'The page is still changing or loading. Try inspection again shortly.'
@@ -1650,8 +1664,98 @@ export function createRequestListener(options = {}) {
             message: safeMessage
           }));
         }
-      })();
+      };
 
+      if (req.method === 'GET') {
+        const pageId = url.searchParams.get('pageId') || undefined;
+        const contextId = url.searchParams.get('contextId') || undefined;
+        executeInspection({ pageId, contextId });
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+
+      req.on('end', async () => {
+        let parsedBody = {};
+        if (body.trim().length > 0) {
+          try {
+            parsedBody = JSON.parse(body);
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+            return;
+          }
+        }
+        await executeInspection(parsedBody);
+      });
+      return;
+    }
+
+    // Route: GET /api/browser/contexts or POST /api/browser/contexts or POST /api/browser/inspect-contexts (Brick 39 DOM Contexts)
+    if (url.pathname === '/api/browser/contexts' || url.pathname === '/api/browser/inspect-contexts') {
+      if (req.method !== 'GET' && req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      const executeContextDiscovery = async (pageId) => {
+        try {
+          const result = await browserManager.inspectContexts(pageId);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const errorCode = err.code || 'CONTEXT_DISCOVERY_FAILED';
+          let statusCode = 500;
+          if (errorCode === 'BROWSER_NOT_RUNNING' || errorCode === 'INVALID_PAGE_ID') {
+            statusCode = 400;
+          } else if (errorCode === 'PAGE_CLOSED' || errorCode === 'PAGE_NOT_FOUND') {
+            statusCode = 404;
+          } else if (errorCode === 'HUMAN_HANDOFF_ACTIVE') {
+            statusCode = 409;
+          }
+          const safeMessage = (err instanceof BrowserManagerError || err instanceof DomContextError) && typeof err.message === 'string'
+            ? err.message
+            : 'DOM context discovery failed.';
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: false,
+            error: errorCode,
+            code: errorCode,
+            message: safeMessage
+          }));
+        }
+      };
+
+      if (req.method === 'GET') {
+        const pageId = url.searchParams.get('pageId') || undefined;
+        executeContextDiscovery(pageId);
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 1e6) req.destroy();
+      });
+
+      req.on('end', async () => {
+        let parsedBody = {};
+        if (body.trim().length > 0) {
+          try {
+            parsedBody = JSON.parse(body);
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'INVALID_REQUEST', code: 'INVALID_REQUEST', message: 'Invalid JSON request body' }));
+            return;
+          }
+        }
+        await executeContextDiscovery(parsedBody.pageId);
+      });
       return;
     }
 
@@ -1750,7 +1854,7 @@ export function createRequestListener(options = {}) {
         }
 
         try {
-          const result = await browserManager.resolveTarget(targetQuery);
+          const result = await browserManager.resolveTarget(targetQuery, { pageId: parsedBody.pageId, contextId: parsedBody.contextId });
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(result));
         } catch (err) {
@@ -1758,8 +1862,12 @@ export function createRequestListener(options = {}) {
           let statusCode = 500;
           if (errorCode === 'BROWSER_NOT_RUNNING' || errorCode === 'BROWSER_PAGE_NOT_AVAILABLE') {
             statusCode = 400;
-          } else if (errorCode === 'INVALID_TARGET_QUERY' || errorCode === 'UNSUPPORTED_TARGET_KIND') {
+          } else if (errorCode === 'INVALID_TARGET_QUERY' || errorCode === 'UNSUPPORTED_TARGET_KIND' || errorCode === 'CLOSED_SHADOW_ROOT_UNSUPPORTED') {
             statusCode = 400;
+          } else if (errorCode === 'PAGE_CLOSED' || errorCode === 'PAGE_NOT_FOUND' || errorCode === 'CONTEXT_NOT_FOUND') {
+            statusCode = 404;
+          } else if (errorCode === 'FRAME_DETACHED' || errorCode === 'SHADOW_CONTEXT_DETACHED' || errorCode === 'CONTEXT_STALE' || errorCode === 'CONTEXT_MISMATCH' || errorCode === 'TARGET_STALE' || errorCode === 'HUMAN_HANDOFF_ACTIVE') {
+            statusCode = 409;
           } else if (errorCode === 'BROWSER_PAGE_BUSY') {
             statusCode = 503;
           }
@@ -1769,7 +1877,7 @@ export function createRequestListener(options = {}) {
             safeMessage = 'Browser is not running. Please launch the browser first.';
           } else if (errorCode === 'BROWSER_PAGE_BUSY') {
             safeMessage = 'The page is still changing or loading. Try inspection again shortly.';
-          } else if (err instanceof TargetResolutionError || err instanceof BrowserManagerError) {
+          } else if (err instanceof TargetResolutionError || err instanceof BrowserManagerError || err instanceof DomContextError) {
             safeMessage = (typeof err.message === 'string')
               ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
               : safeMessage;
@@ -2167,6 +2275,10 @@ export function createRequestListener(options = {}) {
           let statusCode = 400;
           if (errorCode === 'BROWSER_PAGE_BUSY') {
             statusCode = 503;
+          } else if (errorCode === 'PAGE_CLOSED' || errorCode === 'PAGE_NOT_FOUND' || errorCode === 'CONTEXT_NOT_FOUND') {
+            statusCode = 404;
+          } else if (errorCode === 'FRAME_DETACHED' || errorCode === 'SHADOW_CONTEXT_DETACHED' || errorCode === 'CONTEXT_STALE' || errorCode === 'CONTEXT_MISMATCH' || errorCode === 'HUMAN_HANDOFF_ACTIVE') {
+            statusCode = 409;
           } else if (errorCode === 'BROWSER_ERROR' || errorCode === 'ACTION_EXECUTION_FAILED') {
             statusCode = 500;
           }
@@ -2202,7 +2314,7 @@ export function createRequestListener(options = {}) {
             safeMessage = 'Multiple popups are not supported.';
           } else if (errorCode === 'INVALID_POPUP_POLICY') {
             safeMessage = 'Invalid popup policy. Allowed values: "block", "allow-single".';
-          } else if (err instanceof ActionExecutionError || err instanceof BrowserManagerError) {
+          } else if (err instanceof ActionExecutionError || err instanceof BrowserManagerError || err instanceof DomContextError) {
             safeMessage = typeof err.message === 'string'
               ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
               : safeMessage;
@@ -2270,7 +2382,8 @@ export function createRequestListener(options = {}) {
             timeoutMs: parsedBody.timeoutMs !== undefined ? Number(parsedBody.timeoutMs) : undefined,
             quietMs: parsedBody.quietMs !== undefined ? Number(parsedBody.quietMs) : undefined,
             pollMs: parsedBody.pollMs !== undefined ? Number(parsedBody.pollMs) : undefined,
-            pageId: typeof parsedBody.pageId === 'string' ? parsedBody.pageId : undefined
+            pageId: typeof parsedBody.pageId === 'string' ? parsedBody.pageId : undefined,
+            contextId: typeof parsedBody.contextId === 'string' ? parsedBody.contextId : undefined
           });
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(result));
@@ -2279,6 +2392,10 @@ export function createRequestListener(options = {}) {
           let statusCode = 400;
           if (errorCode === 'PAGE_NOT_STABLE') {
             statusCode = 408;
+          } else if (errorCode === 'PAGE_CLOSED' || errorCode === 'PAGE_NOT_FOUND' || errorCode === 'CONTEXT_NOT_FOUND') {
+            statusCode = 404;
+          } else if (errorCode === 'FRAME_DETACHED' || errorCode === 'SHADOW_CONTEXT_DETACHED' || errorCode === 'CONTEXT_STALE') {
+            statusCode = 409;
           } else if (errorCode === 'DYNAMIC_WAIT_LIMIT_REACHED') {
             statusCode = 429;
           } else if (errorCode === 'BROWSER_ERROR') {
@@ -2296,7 +2413,7 @@ export function createRequestListener(options = {}) {
             safeMessage = 'Active page changed while waiting.';
           } else if (errorCode === 'DYNAMIC_WAIT_LIMIT_REACHED') {
             safeMessage = err.message || 'Dynamic wait concurrency limit reached.';
-          } else if (err instanceof BrowserManagerError) {
+          } else if (err instanceof BrowserManagerError || err instanceof DomContextError) {
             safeMessage = typeof err.message === 'string'
               ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
               : safeMessage;
@@ -2374,7 +2491,8 @@ export function createRequestListener(options = {}) {
             target: parsedBody.target,
             timeoutMs: parsedBody.timeoutMs !== undefined ? Number(parsedBody.timeoutMs) : undefined,
             pollMs: parsedBody.pollMs !== undefined ? Number(parsedBody.pollMs) : undefined,
-            pageId: typeof parsedBody.pageId === 'string' ? parsedBody.pageId : undefined
+            pageId: typeof parsedBody.pageId === 'string' ? parsedBody.pageId : undefined,
+            contextId: typeof parsedBody.contextId === 'string' ? parsedBody.contextId : undefined
           });
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(result));
@@ -2439,8 +2557,9 @@ export function createRequestListener(options = {}) {
       const handleInspect = async (parsedBody = {}) => {
         try {
           const result = await browserManager.inspectForms({
-            pageId: typeof parsedBody.pageId === 'string' ? parsedBody.pageId : undefined,
-            formId: typeof parsedBody.formId === 'string' ? parsedBody.formId : undefined
+            pageId: typeof parsedBody.pageId === 'string' ? parsedBody.pageId : (url.searchParams.get('pageId') || undefined),
+            formId: typeof parsedBody.formId === 'string' ? parsedBody.formId : (url.searchParams.get('formId') || undefined),
+            contextId: typeof parsedBody.contextId === 'string' ? parsedBody.contextId : (url.searchParams.get('contextId') || undefined)
           });
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(result));
@@ -2449,8 +2568,10 @@ export function createRequestListener(options = {}) {
           let statusCode = 400;
           if (errorCode === 'BROWSER_NOT_RUNNING') {
             statusCode = 400;
-          } else if (errorCode === 'PAGE_CLOSED' || errorCode === 'PAGE_NOT_FOUND') {
+          } else if (errorCode === 'PAGE_CLOSED' || errorCode === 'PAGE_NOT_FOUND' || errorCode === 'CONTEXT_NOT_FOUND') {
             statusCode = 404;
+          } else if (errorCode === 'FRAME_DETACHED' || errorCode === 'SHADOW_CONTEXT_DETACHED' || errorCode === 'CONTEXT_STALE') {
+            statusCode = 409;
           } else if (errorCode === 'BROWSER_PAGE_BUSY') {
             statusCode = 503;
           } else if (errorCode === 'BROWSER_ERROR' || errorCode === 'FORM_INSPECTION_FAILED') {
@@ -2460,7 +2581,7 @@ export function createRequestListener(options = {}) {
           let safeMessage = 'Form inspection failed.';
           if (errorCode === 'BROWSER_NOT_RUNNING') {
             safeMessage = 'Browser is not running. Please launch the browser first.';
-          } else if (err instanceof BrowserManagerError || err instanceof FormInspectionError) {
+          } else if (err instanceof BrowserManagerError || err instanceof FormInspectionError || err instanceof DomContextError) {
             safeMessage = typeof err.message === 'string'
               ? err.message.replace(/([A-Za-z]:\\[^:\s]+|\/[^\s:]+)/g, '[path]').split('\n')[0].trim()
               : safeMessage;

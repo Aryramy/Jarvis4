@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Frame Navigation Host</title>
+</head>
+<body>
+  <h1>Frame Navigation Host</h1>
+  <button type="button" id="nav-frame-btn">Navigate Frame</button>
+  <iframe id="nav-target-iframe" name="nav-target-frame" src="iframe-child.html" style="width: 500px; height: 300px;"></iframe>
+  <script>
+    document.getElementById('nav-frame-btn').addEventListener('click', function() {
+      const f = document.getElementById('nav-target-iframe');
+      if (f) {
+        f.src = 'iframe-nav-child.html';
+      }
+    });
+  </script>
+</body>
+</html>

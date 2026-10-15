@@ -27,8 +27,9 @@ import { SessionVault, SessionVaultError, generateSessionId, isValidSessionId } 
 import { HumanHandoffManager, HumanHandoffError, HANDOFF_REASONS, HANDOFF_STATES, clampHandoffTtl, toSafeHandoffMetadata } from './humanHandoff.js';
 import { FileTransferManager, FileTransferError, validateAndNormalizeUploadPath, isSensitiveFilePath, sanitizeDownloadFilename } from './fileTransfer.js';
 import { extractStructuredData, StructuredExtractionError, EXTRACTION_TYPES, ALL_EXTRACTION_TYPES } from './structuredExtractor.js';
+import { DomContextManager, DomContextError, CONTEXT_TYPES, generateContextId } from './domContextManager.js';
 
-export { ActionExecutionError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError, HumanHandoffError, FileTransferError, StructuredExtractionError, EXTRACTION_TYPES, ALL_EXTRACTION_TYPES, HANDOFF_REASONS, HANDOFF_STATES };
+export { ActionExecutionError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError, HumanHandoffError, FileTransferError, StructuredExtractionError, EXTRACTION_TYPES, ALL_EXTRACTION_TYPES, HANDOFF_REASONS, HANDOFF_STATES, DomContextError, CONTEXT_TYPES };
 
 export class BrowserManagerError extends Error {
   /**
@@ -106,6 +107,8 @@ export class BrowserManager {
 
     this._submitVerifyTimeoutMs = Math.min(Math.max(Number(options.submitVerifyTimeoutMs ?? config.browser?.submitVerifyTimeoutMs ?? 10000) || 10000, 100), 30000);
     this._submitConfirmationTtlMs = Math.min(Math.max(Number(options.submitConfirmationTtlMs ?? config.browser?.submitConfirmationTtlMs ?? 60000) || 60000, 1000), 300000);
+    this._maxDomContexts = Math.min(Math.max(Number(options.maxDomContexts ?? config.browser?.maxDomContexts ?? 64) || 64, 1), 256);
+    this._maxContextDepth = Math.min(Math.max(Number(options.maxContextDepth ?? config.browser?.maxContextDepth ?? 6) || 6, 1), 16);
 
     this._state = BROWSER_STATES.STOPPED;
     this._browser = null;
@@ -184,6 +187,14 @@ export class BrowserManager {
 
   get submitConfirmationTtlMs() {
     return this._submitConfirmationTtlMs;
+  }
+
+  get maxDomContexts() {
+    return this._maxDomContexts;
+  }
+
+  get maxContextDepth() {
+    return this._maxContextDepth;
   }
 
   get state() {
@@ -425,13 +436,17 @@ export class BrowserManager {
     return this._snapshotToken;
   }
 
-  isSnapshotTokenValid(token, pageId = this._activePageId) {
+  isSnapshotTokenValid(token, pageId = this._activePageId, contextId = null) {
     if (!token || typeof token !== 'string' || token.trim().length === 0) return false;
     const pId = pageId || this._activePageId;
     if (pId) {
       if (!this._pages.has(pId)) return false;
       const entry = this._pages.get(pId);
-      if (!entry || !entry.snapshotToken) return false;
+      if (!entry) return false;
+      if (contextId && entry.contextManager) {
+        return entry.contextManager.isSnapshotValid(token, contextId);
+      }
+      if (!entry.snapshotToken) return false;
       if (entry.snapshotToken !== token) return false;
       if (entry.semanticRevision !== entry.snapshotSemanticRevision) {
         return false;
@@ -456,6 +471,15 @@ export class BrowserManager {
         this._snapshotVersion = entry.snapshotVersion;
         this._snapshotToken = entry.snapshotToken;
       }
+      if (entry.contextManager) {
+        const mainRec = entry.contextManager._contexts?.get(entry.contextManager.mainContextId);
+        if (mainRec) {
+          mainRec.semanticRevision = entry.semanticRevision;
+          mainRec.snapshotVersion = entry.snapshotVersion;
+          mainRec.snapshotSemanticRevision = entry.snapshotSemanticRevision;
+          mainRec.snapshotToken = entry.snapshotToken;
+        }
+      }
       return entry.snapshotToken;
     }
     this._snapshotVersion++;
@@ -469,6 +493,13 @@ export class BrowserManager {
     for (const entry of this._pages.values()) {
       entry.snapshotVersion = 0;
       entry.snapshotToken = null;
+      if (entry.contextManager) {
+        const mainRec = entry.contextManager._contexts?.get(entry.contextManager.mainContextId);
+        if (mainRec) {
+          mainRec.snapshotVersion = 0;
+          mainRec.snapshotToken = null;
+        }
+      }
     }
   }
 
@@ -1723,6 +1754,21 @@ export class BrowserManager {
       throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND');
     }
 
+    if (!entry.contextManager) {
+      entry.contextManager = new DomContextManager({
+        pageId: targetPageId,
+        pageEntry: entry,
+        maxDomContexts: this._maxDomContexts,
+        maxContextDepth: this._maxContextDepth
+      });
+    }
+
+    const requestedContextId = (options.contextId || '').trim();
+    const contextRecord = entry.contextManager.resolveContext(requestedContextId);
+    const isSubcontext = contextRecord.type !== CONTEXT_TYPES.MAIN;
+    const targetScope = isSubcontext ? (contextRecord.frame || entry.page) : entry.page;
+    const shadowHandleId = contextRecord.shadowHandleId || null;
+
     const maxTextChars = Math.max(1, Number(options.maxTextChars ?? config.browser?.inspectionMaxTextChars ?? 12000)) || 12000;
     const maxElements = Math.max(1, Number(options.maxElements ?? config.browser?.inspectionMaxElements ?? 100)) || 100;
     const maxElementTextChars = Math.max(1, Number(options.maxElementTextChars ?? config.browser?.inspectionMaxElementTextChars ?? 300)) || 300;
@@ -1738,20 +1784,26 @@ export class BrowserManager {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         if (typeof options.evaluator === 'function') {
-          snapshot = await options.evaluator(entry.page, {
+          snapshot = await options.evaluator(targetScope, {
             maxTextChars,
             maxElements,
             maxElementTextChars,
+            shadowHandleId,
             attempt
           });
-        } else if (entry.page && typeof entry.page.evaluate === 'function') {
-          snapshot = await entry.page.evaluate(extractDomSnapshot, {
+        } else if (targetScope && typeof targetScope.evaluate === 'function') {
+          snapshot = await targetScope.evaluate(extractDomSnapshot, {
             maxTextChars,
             maxElements,
-            maxElementTextChars
+            maxElementTextChars,
+            shadowHandleId
           });
         } else {
-          throw new Error('Page evaluate method not available');
+          throw new Error('Target evaluate method not available');
+        }
+
+        if (snapshot && snapshot.error) {
+          throw new DomContextError(snapshot.message || 'Context unavailable', snapshot.error, { contextId: contextRecord.contextId });
         }
 
         // Inspection succeeded on this attempt!
@@ -1769,7 +1821,7 @@ export class BrowserManager {
           );
         }
 
-        if (err instanceof BrowserManagerError) {
+        if (err instanceof BrowserManagerError || err instanceof DomContextError) {
           throw err;
         }
 
@@ -1805,7 +1857,7 @@ export class BrowserManager {
           'BROWSER_NOT_RUNNING'
         );
       }
-      if (lastError instanceof BrowserManagerError) {
+      if (lastError instanceof BrowserManagerError || lastError instanceof DomContextError) {
         throw lastError;
       }
       if (this._isTransientInspectionError(lastError)) {
@@ -1837,6 +1889,13 @@ export class BrowserManager {
           currentTitle = (await entry.page.title()) || '';
         }
       }
+      if (currentUrl === 'about:blank' && entry.currentUrl) {
+        currentUrl = entry.currentUrl;
+      }
+      if (!isSubcontext) {
+        contextRecord.url = currentUrl;
+        contextRecord.title = currentTitle;
+      }
     } catch {
       this._reconcileLifecycle();
       if (!this.isSessionActive()) {
@@ -1847,19 +1906,26 @@ export class BrowserManager {
       }
     }
 
-    if (!entry.snapshotToken) {
-      this._invalidateSnapshot(entry.pageId);
+    let snapshotToken;
+    if (isSubcontext) {
+      snapshotToken = entry.contextManager.invalidateSnapshot(contextRecord.contextId);
+    } else {
+      if (!entry.snapshotToken) {
+        this._invalidateSnapshot(entry.pageId);
+      }
+      snapshotToken = entry.snapshotToken;
     }
 
     return {
       success: true,
       state: this._state,
       pageId: entry.pageId,
-      documentVersion: entry.documentVersion ?? 1,
-      semanticRevision: entry.semanticRevision ?? 0,
-      url: currentUrl,
-      title: currentTitle,
-      snapshotToken: entry.snapshotToken,
+      contextId: contextRecord.contextId,
+      documentVersion: contextRecord.documentVersion ?? (entry.documentVersion ?? 1),
+      semanticRevision: contextRecord.semanticRevision ?? (entry.semanticRevision ?? 0),
+      url: isSubcontext ? (contextRecord.url || currentUrl) : currentUrl,
+      title: contextRecord.title || currentTitle,
+      snapshotToken,
       visibleText: snapshot?.visibleText ?? '',
       textTruncated: Boolean(snapshot?.textTruncated),
       elements: Array.isArray(snapshot?.elements) ? snapshot.elements : [],
@@ -1898,8 +1964,23 @@ export class BrowserManager {
       throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND');
     }
 
-    if (!entry.snapshotToken) {
-      this._invalidateSnapshot(entry.pageId);
+    if (!entry.contextManager) {
+      entry.contextManager = new DomContextManager({
+        pageId: targetPageId,
+        pageEntry: entry,
+        maxDomContexts: this._maxDomContexts,
+        maxContextDepth: this._maxContextDepth
+      });
+    }
+
+    const requestedContextId = (options.contextId || targetQuery?.contextId || '').trim();
+    const contextRecord = entry.contextManager.resolveContext(requestedContextId);
+
+    const expectedSnapshot = options.expectedSnapshotToken || targetQuery?.expectedSnapshotToken;
+    if (expectedSnapshot) {
+      if (!entry.contextManager.isSnapshotValid(expectedSnapshot, contextRecord.contextId)) {
+        throw new TargetResolutionError('Snapshot token is stale or invalid for target context.', 'TARGET_STALE');
+      }
     }
 
     let elements = options.elements;
@@ -1907,7 +1988,7 @@ export class BrowserManager {
     let pageTitle = options.pageTitle;
 
     if (!elements) {
-      const inspection = await this.inspectPage({ ...options, pageId: entry.pageId });
+      const inspection = await this.inspectPage({ ...options, pageId: entry.pageId, contextId: contextRecord.contextId });
       elements = inspection.elements;
       pageUrl = inspection.url;
       pageTitle = inspection.title;
@@ -1915,7 +1996,7 @@ export class BrowserManager {
 
     try {
       const result = resolveTargetFromElements(elements, targetQuery, {
-        snapshotToken: entry.snapshotToken,
+        snapshotToken: contextRecord.snapshotToken,
         pageUrl: pageUrl ?? (typeof entry.page?.url === 'function' ? entry.page.url() : ''),
         pageTitle: pageTitle ?? '',
         ...options
@@ -1926,9 +2007,10 @@ export class BrowserManager {
         : Date.now();
       result.resolutionDurationMs = Math.max(0.001, Number((endTime - startTime).toFixed(3)));
       result.pageId = entry.pageId;
-      result.documentVersion = entry.documentVersion ?? 1;
-      result.semanticRevision = entry.semanticRevision ?? 0;
-      result.snapshotToken = entry.snapshotToken;
+      result.contextId = contextRecord.contextId;
+      result.documentVersion = contextRecord.documentVersion ?? (entry.documentVersion ?? 1);
+      result.semanticRevision = contextRecord.semanticRevision ?? (entry.semanticRevision ?? 0);
+      result.snapshotToken = contextRecord.snapshotToken;
 
       return result;
     } catch (err) {
@@ -1972,10 +2054,66 @@ export class BrowserManager {
       );
     }
 
+    if (!entry.contextManager) {
+      entry.contextManager = new DomContextManager({
+        pageId: targetPageId,
+        pageEntry: entry,
+        maxDomContexts: this._maxDomContexts,
+        maxContextDepth: this._maxContextDepth
+      });
+    }
+
+    const requestedContextId = (options.contextId || actionRequest?.contextId || '').trim();
+    const contextRecord = entry.contextManager.resolveContext(requestedContextId);
+
+    const expectedSnapshot = actionRequest?.expectedSnapshotToken || options.expectedSnapshotToken;
+    if (expectedSnapshot) {
+      if (!entry.contextManager.isSnapshotValid(expectedSnapshot, contextRecord.contextId)) {
+        throw new ActionExecutionError('Snapshot token is stale or invalid for target context.', 'TARGET_STALE');
+      }
+    }
+
+    const isSubcontext = contextRecord.type !== CONTEXT_TYPES.MAIN;
+    const initialFrameUrl = contextRecord.frame ? (typeof contextRecord.frame.url === 'function' ? contextRecord.frame.url() : contextRecord.url) : null;
+    const initialPageUrl = typeof entry.page?.url === 'function' ? entry.page.url() : entry.currentUrl;
+
     try {
-      return await executeSemanticAction(entry.page, this, actionRequest, { ...options, pageId: entry.pageId });
+      const actionRes = await executeSemanticAction(entry.page, this, actionRequest, {
+        ...options,
+        pageId: entry.pageId,
+        contextId: contextRecord.contextId,
+        contextFrame: contextRecord.frame || entry.page,
+        shadowHandleId: contextRecord.shadowHandleId || null,
+        isSubcontext
+      });
+
+      const finalFrameUrl = contextRecord.frame ? (typeof contextRecord.frame.url === 'function' ? contextRecord.frame.url() : contextRecord.url) : null;
+      const finalPageUrl = typeof entry.page?.url === 'function' ? entry.page.url() : entry.currentUrl;
+
+      const topLevelNavigationOccurred = Boolean(actionRes.navigationOccurred);
+      const frameNavigationOccurred = Boolean(!topLevelNavigationOccurred && isSubcontext && initialFrameUrl && finalFrameUrl && finalFrameUrl !== initialFrameUrl);
+
+      actionRes.pageId = entry.pageId;
+      actionRes.contextId = contextRecord.contextId;
+      actionRes.topLevelNavigationOccurred = topLevelNavigationOccurred;
+      actionRes.frameNavigationOccurred = frameNavigationOccurred;
+      actionRes.navigationOccurred = topLevelNavigationOccurred || frameNavigationOccurred;
+
+      if (isSubcontext) {
+        contextRecord.semanticRevision++;
+        contextRecord.lastMutationTimestamp = Date.now();
+        if (frameNavigationOccurred) {
+          contextRecord.documentVersion = (contextRecord.documentVersion || 1) + 1;
+        }
+        entry.contextManager.invalidateSnapshot(contextRecord.contextId);
+        actionRes.postSnapshotToken = contextRecord.snapshotToken;
+        actionRes.documentVersion = contextRecord.documentVersion;
+        actionRes.semanticRevision = contextRecord.semanticRevision;
+      }
+
+      return actionRes;
     } catch (err) {
-      if (err instanceof BrowserManagerError || err instanceof ActionExecutionError) {
+      if (err instanceof BrowserManagerError || err instanceof ActionExecutionError || err instanceof DomContextError) {
         throw err;
       }
       let safeMsg = 'Browser action failed.';
@@ -2013,7 +2151,26 @@ export class BrowserManager {
       throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND');
     }
 
+    const targetContextId = options.contextId;
+    let contextRecord = null;
+    if (entry.contextManager && targetContextId) {
+      contextRecord = entry.contextManager.resolveContext(targetContextId);
+    }
+
     await this.syncDynamicState(targetPageId).catch(() => {});
+
+    if (contextRecord && contextRecord.type !== CONTEXT_TYPES.MAIN) {
+      const targetScope = contextRecord.frame || entry.page;
+      const result = await inspectForms(targetScope, { ...options, pageId: entry.pageId });
+      result.success = true;
+      result.pageId = entry.pageId;
+      result.contextId = contextRecord.contextId;
+      result.documentVersion = contextRecord.documentVersion ?? 1;
+      result.semanticRevision = contextRecord.semanticRevision ?? 0;
+      result.snapshotToken = contextRecord.snapshotToken;
+      result.url = contextRecord.url || (typeof entry.page.url === 'function' ? entry.page.url() : entry.currentUrl);
+      return result;
+    }
 
     if (!this.isSnapshotTokenValid(entry.snapshotToken, targetPageId)) {
       this._invalidateSnapshot(entry.pageId);
@@ -2023,6 +2180,7 @@ export class BrowserManager {
       const result = await inspectForms(entry.page, { ...options, pageId: entry.pageId });
       result.success = true;
       result.pageId = entry.pageId;
+      result.contextId = entry.contextManager ? entry.contextManager.mainContextId : null;
       result.documentVersion = entry.documentVersion ?? 1;
       result.semanticRevision = entry.semanticRevision ?? 0;
       result.snapshotToken = entry.snapshotToken;
@@ -2069,8 +2227,17 @@ export class BrowserManager {
       );
     }
 
+    const targetContextId = options.contextId || populateRequest?.contextId;
+    let targetScope = entry.page;
+    if (targetContextId && entry.contextManager) {
+      const ctx = entry.contextManager.resolveContext(targetContextId);
+      if (ctx.type === CONTEXT_TYPES.FRAME && ctx.frame) {
+        targetScope = ctx.frame;
+      }
+    }
+
     try {
-      return await populateForm(entry.page, this, populateRequest, { ...options, pageId: entry.pageId });
+      return await populateForm(targetScope, this, populateRequest, { ...options, pageId: entry.pageId });
     } catch (err) {
       if (err instanceof BrowserManagerError || err instanceof FormPopulationError) {
         throw err;
@@ -2117,6 +2284,18 @@ export class BrowserManager {
         'A human authentication handoff is currently active on this page. Form submission preparation is paused.',
         'HUMAN_HANDOFF_ACTIVE'
       );
+    }
+
+    const targetContextId = options.contextId || prepareRequest?.contextId;
+    if (targetContextId && entry.contextManager) {
+      const ctx = entry.contextManager.resolveContext(targetContextId);
+      if (ctx.type !== CONTEXT_TYPES.MAIN) {
+        throw new BrowserManagerError(
+          'Confirmed submission inside subcontexts is not supported in Brick 39.',
+          'SUBCONTEXT_SUBMISSION_NOT_SUPPORTED',
+          { contextId: ctx.contextId }
+        );
+      }
     }
 
     try {
@@ -2176,6 +2355,18 @@ export class BrowserManager {
         'A human authentication handoff is currently active on this page. Form submission is paused.',
         'HUMAN_HANDOFF_ACTIVE'
       );
+    }
+
+    const targetContextId = options.contextId || submitRequest?.contextId;
+    if (targetContextId && entry.contextManager) {
+      const ctx = entry.contextManager.resolveContext(targetContextId);
+      if (ctx.type !== CONTEXT_TYPES.MAIN) {
+        throw new BrowserManagerError(
+          'Confirmed submission inside subcontexts is not supported in Brick 39.',
+          'SUBCONTEXT_SUBMISSION_NOT_SUPPORTED',
+          { contextId: ctx.contextId }
+        );
+      }
     }
 
     try {
@@ -2261,6 +2452,13 @@ export class BrowserManager {
       spaRouteChanged: false
     };
 
+    entry.contextManager = new DomContextManager({
+      pageId,
+      pageEntry: entry,
+      maxDomContexts: this._maxDomContexts,
+      maxContextDepth: this._maxContextDepth
+    });
+
     this._pages.set(pageId, entry);
     this._initDynamicTracker(pageInstance, pageId);
 
@@ -2301,6 +2499,9 @@ export class BrowserManager {
     // Invalidate snapshots for the closed page (Brick 31 Live Fix A)
     entry.snapshotToken = null;
     entry.snapshotVersion = 0;
+
+    // Destroy context manager for closed page (Brick 39)
+    entry.contextManager?.destroy();
 
     this._pages.delete(pageId);
 
@@ -2390,6 +2591,60 @@ export class BrowserManager {
       activePageId: this._activePageId,
       pages: pagesList
     };
+  }
+
+  /**
+   * Inspects and returns safe bounded metadata for DOM contexts (main document, iframes, open shadow roots) (Brick 39).
+   *
+   * @param {Object} [options={}]
+   * @param {string} [options.pageId]
+   * @returns {Promise<{
+   *   success: boolean,
+   *   pageId: string,
+   *   contextCount: number,
+   *   contexts: Array<Object>,
+   *   contextLimitReached: boolean,
+   *   maxDepthReached: boolean,
+   *   closedShadowRootDetected: boolean
+   * }>}
+   */
+  async inspectContexts(options = {}) {
+    this._reconcileLifecycle();
+
+    if (this._state !== BROWSER_STATES.RUNNING || !this.isSessionActive()) {
+      throw new BrowserManagerError(
+        'Browser is not running. Please launch the browser first.',
+        'BROWSER_NOT_RUNNING'
+      );
+    }
+
+    const targetPageId = (options.pageId || this._activePageId || '').trim();
+    const entry = this._pages.get(targetPageId);
+    if (!entry || !entry.page || (typeof entry.page.isClosed === 'function' && entry.page.isClosed())) {
+      throw new BrowserManagerError(`Page "${targetPageId}" not found or closed.`, 'PAGE_NOT_FOUND', { pageId: targetPageId });
+    }
+
+    if (!entry.contextManager) {
+      entry.contextManager = new DomContextManager({
+        pageId: targetPageId,
+        pageEntry: entry,
+        maxDomContexts: this._maxDomContexts,
+        maxContextDepth: this._maxContextDepth
+      });
+    }
+
+    const res = await entry.contextManager.discoverContexts(options);
+    return {
+      success: true,
+      ...res
+    };
+  }
+
+  /**
+   * Alias for inspectContexts (Brick 39).
+   */
+  async getContexts(options = {}) {
+    return this.inspectContexts(options);
   }
 
   /**
@@ -2778,6 +3033,9 @@ export class BrowserManager {
     this._cancelDynamicWaiters(null, new BrowserManagerError('Browser was closed while waiting.', 'BROWSER_NOT_RUNNING'));
     this._dynamicWaiters.clear();
     this._activeDynamicWaits = 0;
+    for (const entry of this._pages.values()) {
+      entry.contextManager?.destroy();
+    }
     this._pages.clear();
     this._activePageId = null;
     this._pendingAuthorizedCreation = null;
@@ -3023,6 +3281,58 @@ export class BrowserManager {
           throw new BrowserManagerError('Active page changed while waiting.', 'ACTIVE_PAGE_CHANGED');
         }
 
+        const targetContextId = options.contextId ? String(options.contextId).trim() : null;
+        let contextRecord = null;
+        if (targetContextId && entry.contextManager) {
+          contextRecord = entry.contextManager.resolveContext(targetContextId);
+        }
+
+        if (contextRecord && contextRecord.type !== CONTEXT_TYPES.MAIN && entry.contextManager) {
+          await entry.contextManager.syncContext(contextRecord.contextId);
+          const now = Date.now();
+          const quietForMs = Math.max(0, now - (contextRecord.lastMutationTimestamp || now));
+          const currentElapsed = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now() - startTime
+            : Date.now() - startTime;
+          const elapsedMs = Math.max(0, currentElapsed);
+
+          if (quietForMs >= quietMs) {
+            entry.contextManager.invalidateSnapshot(contextRecord.contextId);
+            return {
+              success: true,
+              settled: true,
+              pageId: targetPageId,
+              contextId: contextRecord.contextId,
+              currentUrl: contextRecord.url || entry.currentUrl,
+              semanticRevision: contextRecord.semanticRevision,
+              quietForMs,
+              waitDurationMs: Number(elapsedMs.toFixed(3)),
+              snapshotToken: contextRecord.snapshotToken
+            };
+          }
+
+          if (elapsedMs >= timeoutMs) {
+            throw new BrowserManagerError(
+              `Context did not become quiet within ${timeoutMs}ms.`,
+              'PAGE_NOT_STABLE',
+              {
+                pageId: targetPageId,
+                contextId: contextRecord.contextId,
+                semanticRevision: contextRecord.semanticRevision,
+                quietForMs,
+                waitDurationMs: Number(elapsedMs.toFixed(3)),
+                settled: false
+              }
+            );
+          }
+
+          const remainingMs = timeoutMs - elapsedMs;
+          const sleepTime = Math.min(pollMs, Math.max(20, quietMs - quietForMs), remainingMs);
+          const sleepPromise = sleeper ? sleeper(sleepTime) : new Promise((res) => setTimeout(res, sleepTime));
+          await Promise.race([sleepPromise, cancelPromise]);
+          continue;
+        }
+
         await this.syncDynamicState(targetPageId);
 
         const now = Date.now();
@@ -3047,6 +3357,7 @@ export class BrowserManager {
             success: true,
             settled: true,
             pageId: targetPageId,
+            contextId: entry.contextManager ? entry.contextManager.mainContextId : null,
             currentUrl,
             title,
             semanticRevision: entry.semanticRevision,
@@ -3064,6 +3375,7 @@ export class BrowserManager {
             'PAGE_NOT_STABLE',
             {
               pageId: targetPageId,
+              contextId: entry.contextManager ? entry.contextManager.mainContextId : null,
               semanticRevision: entry.semanticRevision,
               quietForMs,
               waitDurationMs: Number(elapsedMs.toFixed(3)),
@@ -3234,6 +3546,7 @@ export class BrowserManager {
             resolution: 'unique',
             confidence: 'high',
             pageId: targetPageId,
+            contextId: lastResolution.contextId || null,
             snapshotToken: lastResolution.snapshotToken || entry.snapshotToken,
             target: createSafeElementSummary(lastResolution.match),
             waitDurationMs: Number(elapsedMs.toFixed(3))
@@ -3732,6 +4045,18 @@ export class BrowserManager {
       throw new BrowserManagerError('Target page not found or closed.', 'PAGE_NOT_FOUND', { pageId });
     }
 
+    const targetContextId = options.contextId || request?.contextId;
+    if (targetContextId && pageEntry.contextManager) {
+      const ctx = pageEntry.contextManager.resolveContext(targetContextId);
+      if (ctx.type !== CONTEXT_TYPES.MAIN) {
+        throw new BrowserManagerError(
+          'File upload inside subcontexts is not supported in Brick 39.',
+          'SUBCONTEXT_FILE_TRANSFER_NOT_SUPPORTED',
+          { contextId: ctx.contextId }
+        );
+      }
+    }
+
     const mergedOptions = { ...request.options, ...options };
     return await this._fileTransferManager.uploadFile({
       pageEntry,
@@ -3762,6 +4087,18 @@ export class BrowserManager {
     const pageEntry = this._pages.get(pageId);
     if (!pageEntry || !pageEntry.page || (typeof pageEntry.page.isClosed === 'function' && pageEntry.page.isClosed())) {
       throw new BrowserManagerError('Target page not found or closed.', 'PAGE_NOT_FOUND', { pageId });
+    }
+
+    const targetContextId = options.contextId || request?.contextId;
+    if (targetContextId && pageEntry.contextManager) {
+      const ctx = pageEntry.contextManager.resolveContext(targetContextId);
+      if (ctx.type !== CONTEXT_TYPES.MAIN) {
+        throw new BrowserManagerError(
+          'File download inside subcontexts is not supported in Brick 39.',
+          'SUBCONTEXT_FILE_TRANSFER_NOT_SUPPORTED',
+          { contextId: ctx.contextId }
+        );
+      }
     }
 
     const mergedOptions = { ...request.options, ...options };
@@ -3821,35 +4158,54 @@ export class BrowserManager {
       );
     }
 
-    // Require expectedSnapshotToken (Section 6)
+    // Resolve context (Brick 39)
+    const targetContextId = options.contextId || request.contextId;
+    let contextRecord = null;
+    if (entry.contextManager) {
+      contextRecord = entry.contextManager.resolveContext(targetContextId);
+    }
+
+    // Require expectedSnapshotToken (Section 6, 22, 23)
     const expectedSnapshotToken = request.expectedSnapshotToken || options.expectedSnapshotToken;
     if (!expectedSnapshotToken || typeof expectedSnapshotToken !== 'string') {
       throw new StructuredExtractionError(
         'expectedSnapshotToken is required for structured extraction.',
         'TARGET_STALE',
-        { pageId: targetPageId }
+        { pageId: targetPageId, contextId: contextRecord?.contextId }
       );
     }
 
-    if (!this.isSnapshotTokenValid(expectedSnapshotToken, targetPageId)) {
+    if (!this.isSnapshotTokenValid(expectedSnapshotToken, targetPageId, contextRecord?.contextId)) {
       throw new StructuredExtractionError(
-        'Snapshot token is stale or invalid for target page.',
+        'Snapshot token is stale or invalid for target context.',
         'TARGET_STALE',
-        { pageId: targetPageId, expectedSnapshotToken }
+        { pageId: targetPageId, contextId: contextRecord?.contextId, expectedSnapshotToken }
       );
     }
 
     // Capture atomic context before extraction (Hotfix C & Sections 6, 7, 19, 43)
     const initialPage = entry.page;
     const initialPageId = entry.pageId;
-    const initialDocVersion = entry.documentVersion ?? 1;
-    const initialSemanticRev = entry.semanticRevision ?? 0;
-    const initialSnapshotToken = entry.snapshotToken;
+    const initialDocVersion = contextRecord?.documentVersion ?? (entry.documentVersion ?? 1);
+    const initialSemanticRev = contextRecord?.semanticRevision ?? (entry.semanticRevision ?? 0);
+    const initialSnapshotToken = contextRecord?.snapshotToken || entry.snapshotToken;
+
+    let targetScope = initialPage;
+    let shadowHandleId = null;
+    if (contextRecord) {
+      if (contextRecord.type === CONTEXT_TYPES.FRAME) {
+        targetScope = contextRecord.frame || initialPage;
+      } else if (contextRecord.type === CONTEXT_TYPES.SHADOW_ROOT) {
+        targetScope = contextRecord.frame || initialPage;
+        shadowHandleId = contextRecord.shadowHandleId;
+      }
+    }
 
     // Execute extraction
-    const extractRes = await extractStructuredData(initialPage, {
+    const extractRes = await extractStructuredData(targetScope, {
       types: request.types,
-      limits: { ...request.limits, ...options.limits },
+      limits: { ...request.limits, ...options.limits, shadowHandleId },
+      shadowHandleId,
       ...options
     });
 
@@ -3863,14 +4219,22 @@ export class BrowserManager {
       throw new StructuredExtractionError('Page context changed during structured extraction.', 'PAGE_CLOSED', { pageId: initialPageId });
     }
 
-    if (currentEntry.documentVersion !== initialDocVersion || currentEntry.semanticRevision !== initialSemanticRev) {
+    if (contextRecord && !contextRecord.attached) {
+      throw new StructuredExtractionError('Target context detached during extraction.', 'CONTEXT_STALE', { pageId: initialPageId, contextId: contextRecord.contextId });
+    }
+
+    const currentDocVersion = contextRecord?.documentVersion ?? (currentEntry.documentVersion ?? 1);
+    const currentSemanticRev = contextRecord?.semanticRevision ?? (currentEntry.semanticRevision ?? 0);
+
+    if (currentDocVersion !== initialDocVersion || currentSemanticRev !== initialSemanticRev) {
       throw new StructuredExtractionError(
-        'Page state changed during structured extraction.',
+        'Context state changed during structured extraction.',
         'PAGE_CHANGED',
         {
           pageId: initialPageId,
+          contextId: contextRecord?.contextId,
           expectedRevision: initialSemanticRev,
-          currentRevision: currentEntry.semanticRevision
+          currentRevision: currentSemanticRev
         }
       );
     }
@@ -3888,7 +4252,8 @@ export class BrowserManager {
     return {
       success: true,
       pageId: initialPageId,
-      currentUrl,
+      contextId: contextRecord ? contextRecord.contextId : null,
+      currentUrl: (contextRecord?.type === CONTEXT_TYPES.FRAME && contextRecord.url) ? contextRecord.url : currentUrl,
       title: currentTitle,
       documentVersion: initialDocVersion,
       semanticRevision: initialSemanticRev,

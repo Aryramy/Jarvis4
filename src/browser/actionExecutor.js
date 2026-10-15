@@ -197,6 +197,13 @@ export function findTargetDomElement(args) {
   const doc = typeof document !== 'undefined' ? document : null;
   if (!doc || targetIndex < 0) return null;
 
+  let rootContainer = doc;
+  if (args && args.shadowHandleId) {
+    const reg = (typeof window !== 'undefined' && window.__JARVIS_SHADOW_REGISTRY__) ? window.__JARVIS_SHADOW_REGISTRY__.get(args.shadowHandleId) : null;
+    if (!reg || !reg.shadowRoot || (reg.host && !reg.host.isConnected)) return null;
+    rootContainer = reg.shadowRoot;
+  }
+
   function isVisible(el) {
     if (!el || !el.getBoundingClientRect) return false;
     const style = (typeof window !== 'undefined' && window.getComputedStyle) ? window.getComputedStyle(el) : null;
@@ -212,8 +219,8 @@ export function findTargetDomElement(args) {
   }
 
   let candidates = [];
-  if (typeof doc.querySelectorAll === 'function') {
-    candidates = Array.from(doc.querySelectorAll(
+  if (typeof rootContainer.querySelectorAll === 'function') {
+    candidates = Array.from(rootContainer.querySelectorAll(
       'h1, h2, h3, h4, h5, h6, a, button, input, textarea, select, form, [role="heading"], [role="link"], [role="button"]'
     ));
   }
@@ -307,8 +314,8 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
   const pageEntry = browserManager._pages ? browserManager._pages.get(activePageId) : null;
   const preSemanticRevision = pageEntry ? pageEntry.semanticRevision : 1;
 
-  const currentSnapshotToken = browserManager.getSnapshotToken ? browserManager.getSnapshotToken(activePageId) : browserManager.snapshotToken;
-  if (!currentSnapshotToken || !browserManager.isSnapshotTokenValid(expectedSnapshotToken, activePageId)) {
+  const contextId = options.contextId || actionRequest.contextId || null;
+  if (!browserManager.isSnapshotTokenValid(expectedSnapshotToken, activePageId, contextId)) {
     throw new ActionExecutionError('Snapshot token is stale or invalid.', 'TARGET_STALE');
   }
 
@@ -546,19 +553,23 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
   let rawHandle = null;
   let elementHandle = null;
 
+  const targetExecutionScope = options.contextFrame || page;
+
   try {
     if (typeof options.evaluateHandle === 'function') {
       rawHandle = await options.evaluateHandle(findTargetDomElement, {
         targetIndex,
         expectedKind: matched.kind,
-        expectedTag: matched.tag
+        expectedTag: matched.tag,
+        shadowHandleId: options.shadowHandleId
       });
       elementHandle = rawHandle && typeof rawHandle.asElement === 'function' ? rawHandle.asElement() : rawHandle;
-    } else if (typeof page.evaluateHandle === 'function') {
-      rawHandle = await page.evaluateHandle(findTargetDomElement, {
+    } else if (typeof targetExecutionScope.evaluateHandle === 'function') {
+      rawHandle = await targetExecutionScope.evaluateHandle(findTargetDomElement, {
         targetIndex,
         expectedKind: matched.kind,
-        expectedTag: matched.tag
+        expectedTag: matched.tag,
+        shadowHandleId: options.shadowHandleId
       });
       elementHandle = rawHandle && typeof rawHandle.asElement === 'function' ? rawHandle.asElement() : rawHandle;
     } else if (options.mockElementHandle) {
@@ -649,8 +660,8 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
       let isChecked = null;
       if (typeof elementHandle.isChecked === 'function') {
         isChecked = await elementHandle.isChecked();
-      } else if (typeof page.evaluate === 'function') {
-        isChecked = await page.evaluate((el) => (el && typeof el.checked !== 'undefined' ? Boolean(el.checked) : null), elementHandle);
+      } else if (typeof (targetExecutionScope.evaluate || page.evaluate) === 'function') {
+        isChecked = await (targetExecutionScope.evaluate || page.evaluate)((el) => (el && typeof el.checked !== 'undefined' ? Boolean(el.checked) : null), elementHandle);
       }
       if (isChecked === null && typeof page._lastCheckedState !== 'undefined') {
         isChecked = page._lastCheckedState;
@@ -670,8 +681,8 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
       let isChecked = null;
       if (typeof elementHandle.isChecked === 'function') {
         isChecked = await elementHandle.isChecked();
-      } else if (typeof page.evaluate === 'function') {
-        isChecked = await page.evaluate((el) => (el && typeof el.checked !== 'undefined' ? Boolean(el.checked) : null), elementHandle);
+      } else if (typeof (targetExecutionScope.evaluate || page.evaluate) === 'function') {
+        isChecked = await (targetExecutionScope.evaluate || page.evaluate)((el) => (el && typeof el.checked !== 'undefined' ? Boolean(el.checked) : null), elementHandle);
       }
       if (isChecked === null && typeof page._lastCheckedState !== 'undefined') {
         isChecked = page._lastCheckedState;
@@ -687,8 +698,9 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
     } else if (action === 'select') {
       // Check option exists in select before selecting
       let optionFound = true;
-      if (typeof page.evaluate === 'function') {
-        optionFound = await page.evaluate(({ el, label }) => {
+      const evalFn = targetExecutionScope.evaluate || page.evaluate;
+      if (typeof evalFn === 'function') {
+        optionFound = await evalFn(({ el, label }) => {
           if (!el || !el.options) return true;
           for (let i = 0; i < el.options.length; i++) {
             if (el.options[i].text.trim() === label.trim()) return true;
@@ -708,8 +720,8 @@ export async function executeSemanticAction(page, browserManager, actionRequest,
       if (typeof elementHandle.getSelectedText === 'function') {
         selectedText = await elementHandle.getSelectedText();
       }
-      if (selectedText === null && typeof page.evaluate === 'function') {
-        selectedText = await page.evaluate((el) => {
+      if (selectedText === null && typeof (targetExecutionScope.evaluate || page.evaluate) === 'function') {
+        selectedText = await (targetExecutionScope.evaluate || page.evaluate)((el) => {
           if (!el || !el.options || el.selectedIndex < 0) return null;
           return el.options[el.selectedIndex]?.text?.trim() ?? null;
         }, elementHandle).catch(() => null);
