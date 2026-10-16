@@ -187,7 +187,35 @@ const REQUIRED_FILES = [
   'src/providers/openRouterRouting.js',
   'src/providers/openRouterRouter.js',
   'scripts/diagnose-openrouter-routing.mjs',
-  'tests/unit/openRouterRouting.test.js'
+  'tests/unit/openRouterRouting.test.js',
+  'src/agent/eval/taskSchema.js',
+  'src/agent/eval/taskLoader.js',
+  'src/agent/eval/evidenceGrader.js',
+  'src/agent/eval/safetyGrader.js',
+  'src/agent/eval/budgetGrader.js',
+  'src/agent/eval/toolAllowlistGrader.js',
+  'src/agent/eval/confirmationGrader.js',
+  'src/agent/eval/secretLeakGrader.js',
+  'src/agent/eval/trajectoryGrader.js',
+  'src/agent/eval/reportWriter.js',
+  'src/agent/eval/evalRunner.js',
+  'src/agent/eval/index.js',
+  'src/agent/eval/adapters/agentAdapterInterface.js',
+  'src/agent/eval/adapters/scriptedReferenceAdapter.js',
+  'scripts/verify-eval-harness.mjs',
+  'tests/unit/evalHarness.test.js',
+  'tests/eval/tasks/G01.json',
+  'tests/eval/tasks/G02.json',
+  'tests/eval/tasks/G03.json',
+  'tests/eval/tasks/G04.json',
+  'tests/eval/tasks/G05.json',
+  'tests/eval/tasks/G06.json',
+  'tests/eval/tasks/G07.json',
+  'tests/eval/tasks/G08.json',
+  'tests/eval/tasks/G09.json',
+  'tests/eval/tasks/G10.json',
+  'tests/eval/tasks/G11.json',
+  'tests/eval/tasks/G12.json'
 ];
 
 const REQUIRED_DIRS = [
@@ -199,6 +227,8 @@ const REQUIRED_DIRS = [
   'src/routing',
   'src/browser',
   'src/agent/runtime',
+  'src/agent/eval',
+  'src/agent/eval/adapters',
   'src/webpage',
   'src/research',
   'src/config',
@@ -208,6 +238,8 @@ const REQUIRED_DIRS = [
   'tests/contract',
   'tests/regression',
   'tests/smoke',
+  'tests/eval',
+  'tests/eval/tasks',
   'tests/fixtures/html',
   'scripts'
 ];
@@ -847,6 +879,42 @@ check('OpenRouter Routing Gate Module Sanity Check (PRE-040B)', async () => {
   const fallbacks = normalizeFallbackModels('m1,m1,m2,m3', 'm1', 2);
   if (fallbacks.length !== 2 || fallbacks[0] !== 'm2' || fallbacks[1] !== 'm3') {
     throw new Error('normalizeFallbackModels failed sanity check');
+  }
+});
+
+check('Eval Harness Module Sanity Check (PRE-040C)', async () => {
+  const {
+    validateEvalTask,
+    extractPublicTask,
+    loadAllTasks,
+    gradeEvidence,
+    gradeSafety,
+    gradeBudget,
+    gradeToolAllowlist,
+    gradeConfirmation,
+    gradeSecretLeaks,
+    gradeTrajectory,
+    aggregateSuiteResults,
+    EvalRunner,
+    AgentAdapterInterface,
+    ScriptedReferenceAdapter
+  } = await import('../src/agent/eval/index.js');
+
+  if (typeof validateEvalTask !== 'function' || typeof extractPublicTask !== 'function') {
+    throw new Error('validateEvalTask or extractPublicTask not exported');
+  }
+  if (typeof loadAllTasks !== 'function') {
+    throw new Error('loadAllTasks not exported');
+  }
+  if (typeof gradeTrajectory !== 'function' || typeof aggregateSuiteResults !== 'function') {
+    throw new Error('gradeTrajectory or aggregateSuiteResults not exported');
+  }
+  if (typeof EvalRunner !== 'function' || typeof ScriptedReferenceAdapter !== 'function') {
+    throw new Error('EvalRunner or ScriptedReferenceAdapter not exported');
+  }
+  const tasks = loadAllTasks();
+  if (tasks.length !== 12) {
+    throw new Error(`Expected 12 golden tasks, loaded ${tasks.length}`);
   }
 });
 

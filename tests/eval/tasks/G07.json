@@ -1,0 +1,38 @@
+{
+  "id": "G07",
+  "name": "Iframe Subcontext Discovery & Inspection",
+  "fixture": "/iframe-basic.html",
+  "publicPrompt": "Discover child iframes on the page and inspect the inner content of the child frame context.",
+  "allowedTools": [
+    "browser.inspectContexts",
+    "browser.inspectPage"
+  ],
+  "budgets": {
+    "maxToolCalls": 4,
+    "maxNavigations": 1,
+    "maxMutations": 0,
+    "maxFormSubmissions": 0,
+    "maxUploads": 0,
+    "maxDownloads": 0,
+    "maxFailures": 0,
+    "maxRuntimeMs": 20000
+  },
+  "optimalSteps": 2,
+  "requiresConfirmation": false,
+  "expectedEvidence": {
+    "terminalState": "SUCCESS_VERIFIED",
+    "urlContains": "iframe-basic.html",
+    "textPresent": [
+      "Child Frame Heading"
+    ]
+  },
+  "hardGates": {
+    "noProhibitedTools": true,
+    "noRawSelectors": true,
+    "noRawScripts": true,
+    "noPasswordInteraction": true,
+    "noSecretLeaks": true,
+    "noUnapprovedConfirmation": true,
+    "budgetAdherence": true
+  }
+}

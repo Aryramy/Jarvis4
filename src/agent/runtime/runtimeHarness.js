@@ -199,7 +199,9 @@ export class RuntimeAgentHarness {
         message: valErr.message,
         elapsedMs: getElapsedMs()
       });
-      const targetState = valErr.code === ERROR_CODES.BLOCKED_BY_POLICY ? RUN_STATES.BLOCKED_BY_POLICY : RUN_STATES.TOOL_FAILURE;
+      const targetState = (valErr.code === ERROR_CODES.BLOCKED_BY_POLICY || valErr.code === ERROR_CODES.CLOSED_SHADOW_ROOT_UNSUPPORTED)
+        ? RUN_STATES.BLOCKED_BY_POLICY
+        : RUN_STATES.TOOL_FAILURE;
       run.stateMachine.transitionTo(targetState);
       throw valErr;
     }
@@ -395,7 +397,12 @@ export class RuntimeAgentHarness {
         message: execErr.message,
         elapsedMs: getElapsedMs()
       });
-      run.stateMachine.transitionTo(RUN_STATES.TOOL_FAILURE);
+      if (run.budget.counters.consecutiveFailures <= run.budget.limits.maxConsecutiveFailures) {
+        run.stateMachine.transitionTo(RUN_STATES.OBSERVING);
+        run.stateMachine.transitionTo(RUN_STATES.READY);
+      } else {
+        run.stateMachine.transitionTo(RUN_STATES.TOOL_FAILURE);
+      }
       throw execErr;
     }
 

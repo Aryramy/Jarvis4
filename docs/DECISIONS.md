@@ -1273,6 +1273,58 @@
   - Offline test baseline expanded from 1677 to 1707 tests across 271 suites (100% PASS, 0 network calls during verify).
   - Real browser baseline intact at 148/148 PASS on Microsoft Edge.
 
+## ADR-0057: Independent Agent Eval Harness & Golden Task Foundation (PRE-040C)
+- **Status**: Accepted (PRE-040C IMPLEMENTED / AWAITING CHECKPOINT)
+- **Context**:
+  - Building an autonomous browser agent (Brick 40) requires an independent evaluation harness to grade agent behavior deterministically before the autonomous agent itself is implemented ("Grader Before Agent").
+  - The evaluator must grade real DOM interactions, terminal states, budgets, and safety compliance without relying on LLM graders or trusting model self-reports ("I completed the task").
+  - Evaluation must strictly follow the Zero LLM / loopback only / harness-first principle: exactly 0 LLM calls, 0 OpenRouter calls, 0 external network requests, and $0 API cost during harness validation.
+  - The evaluation harness must be verified against deterministic scripted reference trajectories (`ScriptedReferenceAdapter`), clearly distinguished from autonomous agent evaluation.
+- **Decision**:
+  1. **Declarative Task Schema & Immutability (`taskSchema.js`, `taskLoader.js`)**:
+     - Tasks are strictly declarative JSON definitions rejecting executable code (`eval`, `new Function`, embedded scripts).
+     - Schema validates required fields (`id`, `name`, `fixture`, `userTask`, `allowedTools`, `budgets`, `expectedEvidence`, `hardGates`, `optimalSteps`).
+     - Tasks are deep-frozen and fingerprinted with SHA-256 upon loading (`EVAL_TASK_INVALID` on malformed definitions).
+  2. **Strict Public vs. Hidden Task Separation (`extractPublicTask`)**:
+     - The agent adapter receives only public fields: `id`, `name`, `userTask`, `fixture`, and `allowedTools`.
+     - Expected evidence, optimal step metadata, safety gate definitions, and grader rules are strictly hidden from the agent under test.
+  3. **Independent Deterministic Graders (`src/agent/eval/`)**:
+     - `evidenceGrader.js`: Evaluates terminal state, URL equals/contains, text present/absent, targets, downloads, structured data equality (unwrapping untrusted web data wrappers), and safe refusal codes.
+     - `safetyGrader.js`: Hard gate detecting prohibited behaviors (CSS selectors, XPath, raw scripts, password interaction, confirmation self-approval, exposed tokens).
+     - `confirmationGrader.js`: Hard gate verifying consequential R3 actions pause in `WAITING_USER_CONFIRMATION` without agent self-approval or exposed confirmation tokens.
+     - `secretLeakGrader.js`: Scans trajectories, audit logs, and reports for credentials, tokens, cookies, DPAPI material, and sensitive Windows paths.
+     - `budgetGrader.js`: Enforces tool call, navigation, mutation, failure, and time budgets, asserting model turns = 0 for reference adapter.
+     - `toolAllowlistGrader.js`: Hard gate ensuring only task-permitted tools are executed.
+     - `trajectoryGrader.js`: Aggregates hard safety gates and calculates informational trajectory efficiency (`stepRatio = actualSteps / optimalSteps`).
+  4. **Task-Level Terminal States**:
+     - Supports expected safe refusal and handoff terminal states (`WAITING_USER_CONFIRMATION`, `NEEDS_HUMAN_AUTH`, `BLOCKED_BY_POLICY`, `SUCCESS_VERIFIED`). Graders distinguish intentional refusal from failure.
+  5. **Suite of 12 Golden Tasks (G01–G12) + Security Case**:
+     - G01: Static page read
+     - G02: Dynamic element wait & safe click
+     - G03: Safe form fill without submitting
+     - G04: Consequential form submission stopping in `WAITING_USER_CONFIRMATION`
+     - G05: Structured table/data extraction
+     - G06: Multi-tab workflow
+     - G07: Iframe interaction
+     - G08: Open shadow-root interaction
+     - G09: Closed-shadow truthful safe refusal (`CLOSED_SHADOW_ROOT_UNSUPPORTED`)
+     - G10: Safe synthetic download
+     - G11: Stale snapshot recovery (`TARGET_STALE` -> re-inspect -> fresh action)
+     - G12: Authentication barrier -> `NEEDS_HUMAN_AUTH`
+     - Security: Webpage prompt injection (`tests/browser-fixtures/prompt-injection.html`) treated as untrusted data without policy bypass.
+  6. **Scripted Reference Adapter (`ScriptedReferenceAdapter`)**:
+     - Implements deterministic reference trajectories executing strictly through `RuntimeAgentHarness`.
+     - Identified truthfully as `adapter = 'SCRIPTED_REFERENCE'` with `autonomousAgent = false`.
+     - Never labeled as an autonomous agent. Evaluator verifies the grader itself ("Eval Harness Self-Test").
+  7. **Eval Runner & Process Lifecycle (`evalRunner.js`, `verify-eval-harness.mjs`)**:
+     - Real Microsoft Edge browser on ephemeral loopback fixture servers with guaranteed `try/finally` cleanup preventing orphan processes.
+     - Sanitized report generation to `test-results/eval-harness-latest.json`.
+- **Consequences**:
+  - Independent grading foundation established and fully verified before Brick 40 autonomous agent.
+  - Offline test baseline expanded from 1707 to 1735 tests across 272 suites (100% PASS, 0 network calls during verify).
+  - Eval harness self-test validates 12/12 reference golden tasks and 7/7 security/adversarial cases PASS.
+  - Real browser baseline remains intact at 148/148 PASS on Microsoft Edge.
+
 
 
 

@@ -27,9 +27,12 @@ JARVIS4 distinguishes five distinct harness layers across development, verificat
   |     Scope: Context construction, rule loading, skill selection, tool
   |            permissions, bounded repair loops, task contracts, and worktrees.
   |
-  +-- [D] EVAL HARNESS (Model & Autonomous Behavior Evaluation) [PLANNED]
-  |     Scope: Golden tasks, trajectory evaluation, success scoring, safety
-  |            scoring, tool correctness, latency, and cost benchmarking (Brick 40+).
+  +-- [D] EVAL HARNESS (Model & Autonomous Behavior Evaluation) [FOUNDATION ACTIVE / SCRIPTED REFERENCE VERIFIED]
+  |     Command: npm run eval:harness
+  |     Scope: Golden tasks (G01-G12), trajectory grading, evidence verification,
+  |            hard safety gates, budget grading, tool allowlist compliance, sanitized
+  |            reporting. Evaluator self-tested via ScriptedReferenceAdapter (autonomousAgent = false).
+  |            Brick 40 will wire autonomous agent evaluation.
   |
   +-- [E] RUNTIME AGENT HARNESS (Autonomous Execution Governance) [FOUNDATION ACTIVE / NOT YET CONNECTED TO LLM]
   |     Scope: Tool proposal → schema validation → risk classification →
@@ -94,16 +97,38 @@ JARVIS4 distinguishes five distinct harness layers across development, verificat
   - Task contracts separating acceptance criteria from implementation code.
   - Worktree isolation for parallel development/debugging sessions.
 
-### Layer D: Eval Harness (Autonomous Model Evaluation)
-- **Status**: `PLANNED` (Targeted around Brick 40+)
-- **Purpose**: Evaluates autonomous model-driven decisions and interactive agent trajectories.
-- **Expected Responsibilities**:
-  - Curated "golden task" test suites across diverse web and tool workflows.
-  - Trajectory evaluation (assessing reasoning quality, step efficiency, and safety).
-  - Deterministic task success verification vs heuristic evaluation.
-  - Safety scoring: Detecting attempted password interactions, prompt injection vulnerability, or policy bypass.
-  - Latency, token economy, and API cost profiling per task.
-  - Release gating: Minimum threshold scores required before greenlighting autonomous features.
+### Layer D: Eval Harness (Model & Autonomous Behavior Evaluation)
+- **Status**: `FOUNDATION ACTIVE / SCRIPTED REFERENCE VERIFIED` (PRE-040C)
+- **Runner**: `scripts/verify-eval-harness.mjs` (`npm run eval:harness`)
+- **Key Characteristics**:
+  - Independent evaluation system built before the autonomous agent to grade Brick-040 agent trajectories.
+  - Zero LLM / 0 OpenRouter calls / 100% loopback only.
+  - Exactly 12 declarative Golden Task definitions (`tests/eval/tasks/G01.json` - `G12.json`) matching real loopback fixtures:
+    - G01: Static Value Retrieval (`/static.html`)
+    - G02: Dynamic Element Interaction (`/dynamic.html`)
+    - G03: Fill Safe Form Without Submitting (`/forms-basic.html`)
+    - G04: Consequential Form Submission Pause (`/forms-submit-success.html`)
+    - G05: Structured Table Data Extraction (`/extract-table.html`)
+    - G06: Multi-Page Tab Isolation (`/multi-page.html`)
+    - G07: Iframe Subcontext Discovery & Inspection (`/iframe-basic.html`)
+    - G08: Open Shadow Root Interaction (`/shadow-basic.html`)
+    - G09: Closed Shadow Root Safe Refusal (`/shadow-closed.html`)
+    - G10: Safe Synthetic File Download (`/download-basic.html`)
+    - G11: Stale Snapshot Recovery Architecture (`/rerender.html`)
+    - G12: Authentication Barrier Human Handoff (`/auth-handoff-login.html`)
+  - Strict Public / Hidden task separation: agent under test receives only public prompt, fixture, allowed tools, and budgets; expected evidence, optimal steps, and grader logic remain strictly hidden.
+  - Task immutability: deep freeze and cryptographic SHA-256 fingerprinting. Rejects malformed tasks (`EVAL_TASK_INVALID`) and executable JS functions.
+  - Generic Adapter Interface (`AgentAdapterInterface`) ensuring identical execution contract for reference adapter now and autonomous agent later.
+  - Independent Deterministic Graders:
+    - Evidence Grader: Evaluates terminal state, URL equals/contains, text present/absent, targets, download proof, structured data, and safe refusal codes.
+    - Safety Grader: Hard-fails on raw selectors, raw scripts, password interaction, and confirmation self-approval.
+    - Confirmation Grader: Hard gate ensuring consequential actions stop in `WAITING_USER_CONFIRMATION` without self-approval or exposed tokens.
+    - Secret Leak Grader: Scans trajectories, audit logs, and reports for credentials, tokens, cookies, DPAPI material, sensitive paths.
+    - Budget Grader: Enforces task budget limits and verifies model turns = 0 for reference adapter.
+    - Tool Allowlist Grader: Hard gate enforcing `task.allowedTools`.
+  - Trajectory Efficiency: Tracks `actualSteps`, `optimalSteps`, and calculates informational `stepRatio` without compromising hard safety gates.
+  - Sanitized Report Generation: Writes safe machine-readable report to `test-results/eval-harness-latest.json`.
+  - Evaluator Self-Test: Verified via `ScriptedReferenceAdapter` (`adapter = 'SCRIPTED_REFERENCE'`, `autonomousAgent = false`). Reports distinctly as "Eval Harness self-test: 12/12 reference golden tasks PASS", NEVER as autonomous agent evaluation.
 
 ### Layer E: Runtime Agent Harness (Autonomous Execution Governance)
 - **Status**: `FOUNDATION ACTIVE / NOT YET CONNECTED TO LLM` (PRE-040A)
@@ -306,6 +331,28 @@ All other mechanics—including form mechanics, state transitions, token invalid
   - Added opt-in diagnostic tool (`scripts/diagnose-openrouter-routing.mjs` / `npm run diagnose:openrouter-routing`) separating office Wi-Fi firewall ECONNRESET from code errors.
   - Extended Level 1 offline test harness to 1707 tests across 271 suites (`npm run verify`).
   - Level 2 real Microsoft Edge browser harness intact at 148/148 tests across 32 categories (`npm run verify:browser`).
+- **PRE-040C**:
+  - Implemented Independent Agent Eval Harness and Golden Task Benchmark Foundation (`src/agent/eval/`).
+  - Golden Tasks (G01–G12): Declarative, immutable, SHA-256 fingerprinted task definitions targeting existing local loopback fixtures. Zero executable grader code in task definitions.
+  - Strict Public / Hidden Separation: Agent under test receives only public prompt, fixture URL, allowed tools, and budgets. Grader expectations, optimal trajectories, and secret criteria remain hidden.
+  - Independent Deterministic Graders:
+    - Evidence Grader (`evidenceGrader.js`): Deterministic multi-condition verification against real browser DOM state and sanitized evidence envelopes.
+    - Safety Grader (`safetyGrader.js`): Hard gate blocking raw CSS selectors, XPath, raw scripts, password access, OTP, CAPTCHA bypass, and model security overrides.
+    - Confirmation Grader (`confirmationGrader.js`): Hard gate ensuring consequential actions pause in `WAITING_USER_CONFIRMATION` without self-approval or exposed tokens.
+    - Secret Leak Grader (`secretLeakGrader.js`): Deep recursive scanning of trajectories, audit logs, and reports for credentials, tokens, cookies, DPAPI material, and sensitive local paths.
+    - Budget Grader (`budgetGrader.js`): Strict adherence to task limits and 0 model turns for reference adapter.
+    - Tool Allowlist Grader (`toolAllowlistGrader.js`): Hard-fails unapproved tool calls.
+  - Trajectory Efficiency: Tracks `actualSteps`, `optimalSteps`, and calculates informational `stepRatio` without overriding hard safety gates.
+  - Generic Adapter Interface: `AgentAdapterInterface` ensuring identical interface for `ScriptedReferenceAdapter` today and autonomous agent planner in Brick 40.
+  - Sanitized Report Generation: Machine-readable JSON output under `test-results/eval-harness-latest.json`.
+  - Eval Runner (`evalRunner.js`): Real Microsoft Edge execution with guaranteed `try/finally` cleanup of pages, contexts, Edge processes, and loopback servers.
+  - Dedicated Eval Command (`npm run eval:harness` / `scripts/verify-eval-harness.mjs`):
+    - Golden Tasks: 12/12 reference golden tasks PASS on real Microsoft Edge.
+    - Security Eval Cases: 7/7 PASS (raw selector injection, raw script injection, model self-approval override, OpenRouter key leakage, disallowed tool, budget overflow, prompt-injection defense).
+    - Total Eval Harness verification items: 27/27 PASS.
+  - Level 1 Offline Test Harness: Expanded from 1708 to 1735 tests across 281 suites (`npm run verify`).
+  - Level 2 Real Microsoft Edge Browser Harness: Intact at 148/148 tests across 32 categories (`npm run verify:browser`).
+  - Critical Truthfulness: Reports strictly as "Eval Harness self-test: 12/12 reference golden tasks PASS" (`autonomousAgent = false`, `adapter = 'SCRIPTED_REFERENCE'`). Exactly 0 LLM calls, 0 OpenRouter calls, 0 external network requests, $0 cost. Autonomous agent remains NOT IMPLEMENTED.
 
 ---
 

@@ -155,3 +155,38 @@ Architectural Principles:
 4. **Telemetry Privacy**: API keys, Bearer headers, passwords, cookies, and conversation contents are never logged.
 5. **Truthful Cost**: Returned cost is reported directly. Unknown cost is reported as `null`, never fabricated or assumed $0.
 
+---
+
+## 7. Independent Agent Eval Harness & Golden Task Architecture (PRE-040C)
+
+Before implementing the autonomous agent (Brick 40), JARVIS4 builds an independent evaluation system to grade agent behavior.
+
+```text
+AGENT UNDER TEST
+      │
+      ▼  (trajectory / tool proposals)
+Runtime Agent Harness (PRE-040A)
+      │
+      ▼
+BrowserManager (Bricks 26-39)
+      │
+      ▼
+Real Browser State (Local Loopback Fixtures)
+
+
+INDEPENDENT EVAL HARNESS (PRE-040C)
+      │
+      ├─ Task Definition (Public Prompt, Fixture, Allowed Tools, Budgets)
+      ├─ Hidden Expected Evidence (Expected DOM, text, URLs, downloads, refusals)
+      ├─ Safety & Confirmation Hard Gates (No raw selectors, scripts, credentials, or self-approval)
+      ├─ Trajectory Grader (Hard gate validation + Informational stepRatio)
+      └─ Sanitized Report Generation (test-results/eval-harness-latest.json)
+```
+
+Architectural Principles:
+1. **Separation of Public Task from Hidden Expectations**: The agent under test receives only public prompt, fixture URL, allowed tools, and execution budget. Hidden expected evidence, grader code, and reference trajectories are strictly concealed.
+2. **Task Immutability & Zero Executable Code**: Task definitions are deeply frozen and SHA-256 fingerprinted. Task files contain only declarative JSON conditions; executable JS in task definitions is rejected with `EVAL_TASK_INVALID`.
+3. **Deterministic Graders**: Evidence, Safety, Confirmation, Secret Leak, Budget, and Tool Allowlist graders are pure deterministic code. Exactly 0 LLM calls or heuristic grading.
+4. **Hard Gates vs Informational Metrics**: Safety, secret protection, confirmation compliance, budget adherence, allowed-tool compliance, and verified final state are non-negotiable hard gates (100% required). Step efficiency (`stepRatio = actualSteps / optimalSteps`), duration, and latency are secondary informational metrics. A high efficiency score cannot mask a hard gate failure.
+5. **Generic Adapter Interface**: `AgentAdapterInterface` defines `runTask({ publicTask, runtimeHarness, runId, browserManager })`. Implemented in PRE-040C by `ScriptedReferenceAdapter` for evaluator self-test; will be implemented by the autonomous agent adapter in Brick 40.
+6. **Critical Truthfulness**: PRE-040C validates the Eval Harness itself against scripted reference trajectories (`autonomousAgent = false`). Reports distinctly as "Eval Harness self-test", NEVER as autonomous agent evaluation. Exactly 0 LLM calls, 0 OpenRouter calls, 0 external network requests, $0 cost.

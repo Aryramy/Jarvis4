@@ -13,7 +13,8 @@
     "benchmark:gateways": "node scripts/benchmark-ai-gateways.mjs",
     "diagnose:openrouter-routing": "node scripts/diagnose-openrouter-routing.mjs",
     "verify": "node scripts/verify.mjs",
-    "verify:browser": "node scripts/verify-browser.mjs"
+    "verify:browser": "node scripts/verify-browser.mjs",
+    "eval:harness": "node scripts/verify-eval-harness.mjs"
   },
   "keywords": [
     "jarvis",

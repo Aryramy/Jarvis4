@@ -31,7 +31,7 @@ export class ExecutionBudget {
       maxFormSubmissions: clamp(options.maxFormSubmissions, 1, 3, 1),
       maxUploads: clamp(options.maxUploads, 0, 5, 2),
       maxDownloads: clamp(options.maxDownloads, 0, 5, 2),
-      maxConsecutiveFailures: clamp(options.maxConsecutiveFailures, 1, 5, 2),
+      maxConsecutiveFailures: clamp(options.maxConsecutiveFailures ?? options.maxFailures, 1, 5, 2),
       maxRuntimeMs: clamp(options.maxRuntimeMs, 1000, 300000, 60000),
       maxTokens: clamp(options.maxTokens, 1000, 100000, 25000)
     });

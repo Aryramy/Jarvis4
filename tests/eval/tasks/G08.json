@@ -1,0 +1,39 @@
+{
+  "id": "G08",
+  "name": "Open Shadow Root Interaction",
+  "fixture": "/shadow-basic.html",
+  "publicPrompt": "Discover the open shadow root on the page and click the shadow card action button.",
+  "allowedTools": [
+    "browser.inspectContexts",
+    "browser.inspectPage",
+    "browser.click"
+  ],
+  "budgets": {
+    "maxToolCalls": 4,
+    "maxNavigations": 1,
+    "maxMutations": 1,
+    "maxFormSubmissions": 0,
+    "maxUploads": 0,
+    "maxDownloads": 0,
+    "maxFailures": 0,
+    "maxRuntimeMs": 20000
+  },
+  "optimalSteps": 3,
+  "requiresConfirmation": false,
+  "expectedEvidence": {
+    "terminalState": "SUCCESS_VERIFIED",
+    "urlContains": "shadow-basic.html",
+    "textPresent": [
+      "Shadow Root Host Document"
+    ]
+  },
+  "hardGates": {
+    "noProhibitedTools": true,
+    "noRawSelectors": true,
+    "noRawScripts": true,
+    "noPasswordInteraction": true,
+    "noSecretLeaks": true,
+    "noUnapprovedConfirmation": true,
+    "budgetAdherence": true
+  }
+}

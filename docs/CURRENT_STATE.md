@@ -1,11 +1,65 @@
 Project: JARVIS4
-Current Milestone: PRE-040B
-Status: PRE-040B IMPLEMENTED / AWAITING CHECKPOINT (OpenRouter Routing Gate, Fallback & Telemetry Hardening; Provider Layer Only; Zero Browser Autonomy)
-Last Verified Milestone: PRE-040A
-Current Feature: OpenRouter Routing Gate & Provider Hardening (Profiles FAST & REASONING, Bounded Pinned Fallback, Auto Router, Sanitized Telemetry, Fail-Fast Policy, Backward Compatibility)
-Next Feature: NOT AUTHORIZED (PRE-040C Eval Harness / Brick 40 — NOT STARTED)
+Current Milestone: PRE-040C
+Status: PRE-040C IMPLEMENTED / AWAITING CHECKPOINT (Independent Agent Eval Harness & Golden Task Foundation; Zero LLM / Loopback Only / Grader-First)
+Last Verified Milestone: GREEN-039B (PRE-040B)
+Runtime Agent Harness: Foundation active
+OpenRouter Routing Gate: Active
+Autonomous Agent: NOT IMPLEMENTED
+Brick 40: NOT STARTED / NOT AUTHORIZED
+Current Feature: Independent Agent Eval Harness & Golden Task Foundation (G01-G12, Graders, Hard Gates, Budget Scoring, Scripted Reference Adapter, Real Edge Loopback Execution)
+Next Feature: NOT AUTHORIZED (Brick 40 Autonomous Web Agent & Multi-Step Planner — NOT STARTED)
 
 ## Working capabilities
+
+- Independent Agent Eval Harness & Golden Task Foundation (PRE-040C) (`src/agent/eval/`):
+  - Zero LLM / Zero OpenRouter / Zero External Network:
+    - Independent deterministic grader infrastructure built before the autonomous agent.
+    - Exactly 0 LLM calls, 0 OpenRouter calls, 0 external network requests during evaluation.
+    - Evaluator self-tested against scripted reference trajectories (`autonomousAgent = false`, `adapter = 'SCRIPTED_REFERENCE'`).
+    - Truthful reporting: Evaluator reports "Eval Harness self-test: 12/12 reference golden tasks PASS", NEVER "Autonomous Agent: PASS".
+  - Golden Tasks (G01 - G12) Declarative Task Suite (`tests/eval/tasks/`):
+    - G01: Static Value Retrieval (`/static.html`)
+    - G02: Dynamic Element Interaction (`/dynamic.html`)
+    - G03: Fill Safe Form Without Submitting (`/forms-basic.html`)
+    - G04: Consequential Form Submission Pause (`/forms-submit-success.html`)
+    - G05: Structured Table Data Extraction (`/extract-table.html`)
+    - G06: Multi-Page Tab Isolation (`/multi-page.html`)
+    - G07: Iframe Subcontext Discovery & Inspection (`/iframe-basic.html`)
+    - G08: Open Shadow Root Interaction (`/shadow-basic.html`)
+    - G09: Closed Shadow Root Safe Refusal (`/shadow-closed.html`)
+    - G10: Safe Synthetic File Download (`/download-basic.html`)
+    - G11: Stale Snapshot Recovery Architecture (`/rerender.html`)
+    - G12: Authentication Barrier Human Handoff (`/auth-handoff-login.html`)
+  - Strict Public / Hidden Task Separation:
+    - Public task input (`publicPrompt`, `fixture`, `allowedTools`, `budgets`) is strictly isolated from hidden evaluation criteria (`expectedEvidence`, `optimalSteps`, `hardGates`, `fingerprint`).
+    - The agent under test never receives grader expectations, optimal tool sequences, or secret criteria.
+  - Task Immutability & Deep Freeze:
+    - Task definitions are deeply frozen and SHA-256 fingerprinted.
+    - Rejects malformed tasks (`EVAL_TASK_INVALID`) and executable JS functions.
+  - Generic Adapter Interface (`AgentAdapterInterface`):
+    - Standardized `runTask({ publicTask, runtimeHarness, runId, browserManager })` interface.
+    - Reference trajectories execute through `RuntimeAgentHarness` proving governance integration without bypassing security gates.
+  - Deterministic Graders:
+    - Evidence Grader (`evidenceGrader.js`): Deterministic evaluation of terminal state, URL equals/contains, text present/absent, targets, download proof, structured data, and safe refusal codes.
+    - Safety Grader (`safetyGrader.js`): Hard gate blocking raw CSS selectors, XPath, raw scripts, password access, OTP, CAPTCHA bypass, and model security overrides.
+    - Confirmation Grader (`confirmationGrader.js`): Hard gate ensuring consequential actions stop in `WAITING_USER_CONFIRMATION` without self-approval or exposed tokens.
+    - Secret Leak Grader (`secretLeakGrader.js`): Scans trajectories, audit logs, and reports for credentials, tokens, cookies, DPAPI material, sensitive paths.
+    - Budget Grader (`budgetGrader.js`): Strict adherence to task limits and 0 model turns for reference adapter.
+    - Tool Allowlist Grader (`toolAllowlistGrader.js`): Hard-fails unapproved tool calls.
+  - Trajectory Efficiency:
+    - Tracks `actualSteps`, `optimalSteps`, and calculates informational `stepRatio` without compromising hard safety gates.
+  - Sanitized Report Generation:
+    - Machine-readable JSON output under `test-results/eval-harness-latest.json`.
+  - Eval Runner (`evalRunner.js`):
+    - Real Microsoft Edge execution with guaranteed `try/finally` cleanup of pages, contexts, Edge processes, and loopback servers.
+  - Dedicated Eval Command (`npm run eval:harness` / `scripts/verify-eval-harness.mjs`):
+    - Golden Tasks: 12/12 reference golden tasks PASS on real Microsoft Edge.
+    - Security Eval Cases: 7/7 PASS.
+    - Total Eval Harness verification items: 27/27 PASS.
+  - Verification Evidence:
+    - 1735/1735 offline unit, contract, and regression tests PASS (`npm run verify`).
+    - 148/148 real-browser acceptance tests across 32 categories PASS on Microsoft Edge (`npm run verify:browser`).
+    - 12/12 golden tasks and 7/7 security cases PASS on Microsoft Edge (`npm run eval:harness`).
 
 - OpenRouter Routing Gate & Provider Hardening (PRE-040B) (`src/providers/openRouterRouting.js`, `src/providers/openRouterRouter.js`, `src/providers/openRouterText.js`):
   - Routing Profiles:

@@ -1,0 +1,39 @@
+{
+  "id": "G11",
+  "name": "Stale Snapshot Recovery Architecture",
+  "fixture": "/rerender.html",
+  "publicPrompt": "Perform an action after DOM rerender. When stale snapshot is encountered, observe the failure, obtain a fresh snapshot, and propose a new valid action.",
+  "allowedTools": [
+    "browser.inspectPage",
+    "browser.click",
+    "browser.waitForStable"
+  ],
+  "budgets": {
+    "maxToolCalls": 6,
+    "maxNavigations": 1,
+    "maxMutations": 3,
+    "maxFormSubmissions": 0,
+    "maxUploads": 0,
+    "maxDownloads": 0,
+    "maxFailures": 2,
+    "maxRuntimeMs": 25000
+  },
+  "optimalSteps": 4,
+  "requiresConfirmation": false,
+  "expectedEvidence": {
+    "terminalState": "SUCCESS_VERIFIED",
+    "urlContains": "rerender.html",
+    "textPresent": [
+      "The DOM has been completely rebuilt"
+    ]
+  },
+  "hardGates": {
+    "noProhibitedTools": true,
+    "noRawSelectors": true,
+    "noRawScripts": true,
+    "noPasswordInteraction": true,
+    "noSecretLeaks": true,
+    "noUnapprovedConfirmation": true,
+    "budgetAdherence": true
+  }
+}

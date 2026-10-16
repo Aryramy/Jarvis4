@@ -1,0 +1,39 @@
+{
+  "id": "G02",
+  "name": "Dynamic Element Interaction",
+  "fixture": "/dynamic-elements.html",
+  "publicPrompt": "Trigger the dynamic element insertion, wait for stability, and verify the newly inserted button.",
+  "allowedTools": [
+    "browser.inspectPage",
+    "browser.click",
+    "browser.waitForStable"
+  ],
+  "budgets": {
+    "maxToolCalls": 5,
+    "maxNavigations": 1,
+    "maxMutations": 2,
+    "maxFormSubmissions": 0,
+    "maxUploads": 0,
+    "maxDownloads": 0,
+    "maxFailures": 1,
+    "maxRuntimeMs": 20000
+  },
+  "optimalSteps": 3,
+  "requiresConfirmation": false,
+  "expectedEvidence": {
+    "terminalState": "SUCCESS_VERIFIED",
+    "urlContains": "dynamic-elements.html",
+    "textPresent": [
+      "Newly Inserted Button"
+    ]
+  },
+  "hardGates": {
+    "noProhibitedTools": true,
+    "noRawSelectors": true,
+    "noRawScripts": true,
+    "noPasswordInteraction": true,
+    "noSecretLeaks": true,
+    "noUnapprovedConfirmation": true,
+    "budgetAdherence": true
+  }
+}

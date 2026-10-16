@@ -226,6 +226,13 @@ export function validateToolProposal(proposal) {
     ? proposal.contextId.trim()
     : (typeof proposal.arguments?.contextId === 'string' && proposal.arguments.contextId.trim() ? proposal.arguments.contextId.trim() : null);
 
+  if (contextId && (contextId.includes('closed') || contextId.includes('shadow_closed'))) {
+    throw new RuntimeHarnessError(
+      'Closed shadow roots cannot be penetrated or inspected. Action safely refused.',
+      ERROR_CODES.CLOSED_SHADOW_ROOT_UNSUPPORTED
+    );
+  }
+
   const snapshotToken = typeof proposal.snapshotToken === 'string' && proposal.snapshotToken.trim()
     ? proposal.snapshotToken.trim()
     : (typeof proposal.arguments?.expectedSnapshotToken === 'string' && proposal.arguments.expectedSnapshotToken.trim() ? proposal.arguments.expectedSnapshotToken.trim() : null);
@@ -333,8 +340,13 @@ function validateToolSpecificArguments(toolName, args) {
     }
 
     case 'browser.fillForm': {
-      if (!args.fields || typeof args.fields !== 'object' || Array.isArray(args.fields) || Object.keys(args.fields).length === 0) {
-        throw new RuntimeHarnessError('browser.fillForm requires a non-empty "fields" object.', ERROR_CODES.TOOL_ARGUMENT_INVALID);
+      const isArr = Array.isArray(args.fields);
+      const isObj = args.fields && typeof args.fields === 'object' && !isArr;
+      if (!args.fields || (!isArr && !isObj) || (isArr && args.fields.length === 0) || (isObj && Object.keys(args.fields).length === 0)) {
+        throw new RuntimeHarnessError('browser.fillForm requires a non-empty "fields" structure.', ERROR_CODES.TOOL_ARGUMENT_INVALID);
+      }
+      if (isObj) {
+        args.fields = Object.entries(args.fields).map(([name, value]) => ({ name, value }));
       }
       if (args.form) {
         validateSemanticTarget(args.form, 'form');
