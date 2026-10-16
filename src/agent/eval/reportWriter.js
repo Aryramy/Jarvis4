@@ -65,11 +65,12 @@ export function writeEvalReport({
     fs.mkdirSync(targetDir, { recursive: true });
   }
 
+  const isAutonomous = Boolean(suiteSummary.autonomousAgent ?? (suiteSummary.adapter === 'AUTONOMOUS_AGENT'));
   const reportPayload = {
     generatedAt: new Date().toISOString(),
-    harness: 'JARVIS4 Eval Harness (PRE-040C)',
+    harness: isAutonomous ? 'JARVIS4 Autonomous Agent Eval (BRICK-040)' : 'JARVIS4 Eval Harness (PRE-040C)',
     adapter: suiteSummary.adapter || 'SCRIPTED_REFERENCE',
-    autonomousAgent: false,
+    autonomousAgent: isAutonomous,
     summary: sanitizeReportValue(suiteSummary),
     tasks: sanitizeReportValue(taskResults)
   };

@@ -27,17 +27,17 @@ JARVIS4 distinguishes five distinct harness layers across development, verificat
   |     Scope: Context construction, rule loading, skill selection, tool
   |            permissions, bounded repair loops, task contracts, and worktrees.
   |
-  +-- [D] EVAL HARNESS (Model & Autonomous Behavior Evaluation) [FOUNDATION ACTIVE / SCRIPTED REFERENCE VERIFIED]
-  |     Command: npm run eval:harness
+  +-- [D] EVAL HARNESS (Model & Autonomous Behavior Evaluation) [ACTIVE - REFERENCE & AUTONOMOUS VERIFIED]
+  |     Commands: npm run eval:harness (reference self-test), npm run eval:agent (autonomous live eval)
   |     Scope: Golden tasks (G01-G12), trajectory grading, evidence verification,
   |            hard safety gates, budget grading, tool allowlist compliance, sanitized
-  |            reporting. Evaluator self-tested via ScriptedReferenceAdapter (autonomousAgent = false).
-  |            Brick 40 will wire autonomous agent evaluation.
+  |            reporting. Evaluator self-tested via ScriptedReferenceAdapter (27/27 PASS)
+  |            and autonomous agent evaluated via AutonomousAgentAdapter (11/12 PASS, 100% hard safety gates).
   |
-  +-- [E] RUNTIME AGENT HARNESS (Autonomous Execution Governance) [FOUNDATION ACTIVE / NOT YET CONNECTED TO LLM]
+  +-- [E] RUNTIME AGENT HARNESS (Autonomous Execution Governance) [ACTIVE - CONNECTED TO AUTONOMOUS PLANNER]
   |     Scope: Tool proposal → schema validation → risk classification →
   |            budget check → permission / confirmation → deterministic execution →
-  |            sanitized evidence → secret-free audit. (0 LLM / 0 model calls).
+  |            sanitized evidence → secret-free audit. Intercepts and governs all LLM actions.
 ```
 
 ---
@@ -131,9 +131,9 @@ JARVIS4 distinguishes five distinct harness layers across development, verificat
   - Evaluator Self-Test: Verified via `ScriptedReferenceAdapter` (`adapter = 'SCRIPTED_REFERENCE'`, `autonomousAgent = false`). Reports distinctly as "Eval Harness self-test: 12/12 reference golden tasks PASS", NEVER as autonomous agent evaluation.
 
 ### Layer E: Runtime Agent Harness (Autonomous Execution Governance)
-- **Status**: `FOUNDATION ACTIVE / NOT YET CONNECTED TO LLM` (PRE-040A)
+- **Status**: `ACTIVE / CONNECTED TO AUTONOMOUS AGENT PLANNER` (BRICK-040)
 - **Purpose**: Real-time governance wrapper intercepting model actions before BrowserManager execution.
-- **Current Realized Foundation (PRE-040A)**:
+- **Current Realized Foundation (PRE-040A & BRICK-040)**:
   - Exact 26-tool registered whitelist mapping to deterministic `BrowserManager` primitives (`src/agent/runtime/toolRegistry.js`).
   - Strict schema validation rejecting raw selectors (`css`, `xpath`, `selector`), JS execution, and model security overrides (`src/agent/runtime/toolValidator.js`).
   - Deterministic R0-R4 risk engine based on tool, arguments, target characteristics, and state (`src/agent/runtime/riskPolicy.js`).
@@ -143,7 +143,7 @@ JARVIS4 distinguishes five distinct harness layers across development, verificat
   - Standardized evidence envelope with expected outcome evaluation (`src/agent/runtime/evidence.js`).
   - Observation sanitizer redacting credentials/paths and wrapping web text as `{ trust: 'untrusted_web_data', source: 'page' }` (`src/agent/runtime/observationSanitizer.js`).
   - Secret-free execution audit trail (`src/agent/runtime/runtimeHarness.js`).
-  - Exactly 0 LLM calls, 0 OpenRouter calls, and 0 autonomous planner loops.
+  - Integrated into autonomous agent controller (`src/agent/autonomous/agentController.js`) where all LLM proposals execute strictly through `RuntimeAgentHarness.executeProposal`. Zero direct Playwright/BrowserManager access from LLM.
 - **Execution Pipeline**:
   ```text
   Agent Model Proposes Structured Action

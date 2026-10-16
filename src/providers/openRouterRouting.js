@@ -386,6 +386,10 @@ export function buildRoutingRequest(params = {}) {
     requestBody.temperature = params.temperature;
   }
 
+  if (params.reasoning && typeof params.reasoning === 'object') {
+    requestBody.reasoning = params.reasoning;
+  }
+
   return {
     profile,
     routingMode,

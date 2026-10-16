@@ -215,7 +215,20 @@ const REQUIRED_FILES = [
   'tests/eval/tasks/G09.json',
   'tests/eval/tasks/G10.json',
   'tests/eval/tasks/G11.json',
-  'tests/eval/tasks/G12.json'
+  'tests/eval/tasks/G12.json',
+  'src/agent/autonomous/agentState.js',
+  'src/agent/autonomous/outputValidator.js',
+  'src/agent/autonomous/agentPlanner.js',
+  'src/agent/autonomous/agentController.js',
+  'src/agent/autonomous/index.js',
+  'src/agent/eval/adapters/autonomousAgentAdapter.js',
+  'scripts/verify-eval-agent.mjs',
+  'tests/unit/autonomousAgentState.test.js',
+  'tests/unit/autonomousOutputValidator.test.js',
+  'tests/unit/autonomousPlanner.test.js',
+  'tests/unit/autonomousAgentController.test.js',
+  'tests/contract/autonomousAgentEndpoints.test.js',
+  'tests/regression/autonomousAgentSecurity.test.js'
 ];
 
 const REQUIRED_DIRS = [
@@ -227,6 +240,7 @@ const REQUIRED_DIRS = [
   'src/routing',
   'src/browser',
   'src/agent/runtime',
+  'src/agent/autonomous',
   'src/agent/eval',
   'src/agent/eval/adapters',
   'src/webpage',

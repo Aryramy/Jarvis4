@@ -1,15 +1,42 @@
 Project: JARVIS4
-Current Milestone: PRE-040C
-Status: PRE-040C IMPLEMENTED / AWAITING CHECKPOINT (Independent Agent Eval Harness & Golden Task Foundation; Zero LLM / Loopback Only / Grader-First)
-Last Verified Milestone: GREEN-039B (PRE-040B)
-Runtime Agent Harness: Foundation active
-OpenRouter Routing Gate: Active
-Autonomous Agent: NOT IMPLEMENTED
-Brick 40: NOT STARTED / NOT AUTHORIZED
-Current Feature: Independent Agent Eval Harness & Golden Task Foundation (G01-G12, Graders, Hard Gates, Budget Scoring, Scripted Reference Adapter, Real Edge Loopback Execution)
-Next Feature: NOT AUTHORIZED (Brick 40 Autonomous Web Agent & Multi-Step Planner — NOT STARTED)
+Current Milestone: BRICK-040
+Status: BRICK-040 VERIFIED (Autonomous Multi-Step Browser Agent v1: Hybrid Short-Plan + Runtime Governance + Independent Eval)
+Last Verified Milestone: GREEN-040 (BRICK-040 VERIFIED; PRE-040C VERIFIED at GREEN-039C commit 0b1426b)
+Runtime Agent Harness: Active & Governed
+OpenRouter Routing Gate: Active (FAST default, bounded REASONING escalation)
+Autonomous Agent: VERIFIED (Single tool per turn, strict output validation, loopback fixtures only)
+Brick 40: COMPLETE & VERIFIED (GREEN-040)
+Current Feature: Autonomous Multi-Step Browser Agent v1 (AgentController, AgentRunStateMachine, OutputValidator, AgentPlanner, AutonomousAgentAdapter, Control Center UI integration)
+Next Feature: NOT AUTHORIZED (Brick 41 — NOT STARTED)
 
 ## Working capabilities
+
+- Autonomous Multi-Step Browser Agent v1 (BRICK-040) (`src/agent/autonomous/`):
+  - AgentRunStateMachine (`agentState.js`):
+    - Formal deterministic state machine with terminal states (`SUCCESS_VERIFIED`, `FAILED`, `CANCELLED`, `BUDGET_EXCEEDED`, `BLOCKED_BY_POLICY`, `NEEDS_HUMAN_AUTH`) and active states (`IDLE`, `PLANNING`, `OBSERVING`, `DECIDING`, `EXECUTING`, `WAITING_USER_CONFIRMATION`, `REPLANNING`, `VERIFYING`).
+  - OutputValidator (`outputValidator.js`):
+    - Strict schema verification for planning (2-4 milestones) and action outputs (Option A: TOOL, Option B: COMPLETE, Option C: NEEDS_HUMAN_AUTH, Option D: CANNOT_PROCEED).
+    - Strips model security/risk declarations; rejects raw selectors, scripts, or non-whitelisted tools (`AGENT_PROPOSAL_DISALLOWED_FIELD`).
+    - Bidirectional normalization of top-level tool arguments and contextId/pageId.
+  - AgentPlanner (`agentPlanner.js`):
+    - Compact observation builder stripping excessive whitespace and formatting structured summaries (elements, forms, contexts).
+    - Prompt message constructors for planning, action decision, and single repair attempts.
+    - Last-action execution result inclusion and milestone completion directives.
+  - AgentController (`agentController.js`):
+    - Multi-step execution coordinator enforcing hybrid short-plan execution.
+    - Strictly exactly one tool execution per model turn (zero batch dispatch).
+    - Default FAST OpenRouter profile routing with `effort: 'none'` parameter suppression; bounded escalation to REASONING (`maxReasoningTurns = 2`).
+    - Active snapshotToken propagation from latest observation to mutating tool proposals.
+    - Consequential action pause in `WAITING_USER_CONFIRMATION` without exposing tokens to model.
+    - Authentication handoff pause in `NEEDS_HUMAN_AUTH`.
+    - Strict finite timeout on every model call bounded by task budget.
+  - Independent Evaluation Adapter (`AutonomousAgentAdapter.js`):
+    - Connects autonomous agent to independent PRE-040C evaluation harness.
+    - Strict public task separation asserting zero leakage of hidden expected evidence or optimal steps.
+    - Verified against 12 Golden Tasks with 91.7% pass rate (11/12 PASS) and 100% compliance across all 6 hard safety gates.
+  - Control Center UI & Endpoints:
+    - Endpoints `POST /api/agent/run`, `GET /api/agent/runs/:runId`, `POST /api/agent/runs/:runId/cancel`, `POST /api/agent/runs/:runId/confirm`.
+    - UI container `#autonomous-agent-section` in `src/web/index.html`.
 
 - Independent Agent Eval Harness & Golden Task Foundation (PRE-040C) (`src/agent/eval/`):
   - Zero LLM / Zero OpenRouter / Zero External Network:

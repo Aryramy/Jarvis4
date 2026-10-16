@@ -23,6 +23,28 @@ import { registerTestConfirmationToken, getConfirmationToken } from '../src/brow
 import { RuntimeAgentHarness } from '../src/agent/runtime/runtimeHarness.js';
 import { ToolErrorCode } from '../src/agent/runtime/runtimeErrors.js';
 import { RUN_STATES } from '../src/agent/runtime/runtimeState.js';
+import { AgentController } from '../src/agent/autonomous/agentController.js';
+import { AGENT_RUN_STATES } from '../src/agent/autonomous/agentState.js';
+
+class DeterministicMockRouter {
+  constructor(scriptedCompletions = []) {
+    this.completions = [...scriptedCompletions];
+  }
+  async complete(options) {
+    if (this.completions.length === 0) {
+      throw new Error('DeterministicMockRouter: No more scripted completions.');
+    }
+    const next = this.completions.shift();
+    const resolved = typeof next === 'function' ? next(options) : next;
+    return {
+      success: true,
+      text: typeof resolved === 'string' ? resolved : JSON.stringify(resolved),
+      actualModel: 'mock-edge-test-model',
+      telemetry: { totalTokens: 30, cost: 0 },
+      providerDurationMs: 5
+    };
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -3005,8 +3027,281 @@ async function main() {
       assert.equal(subBlocked, true, 'Subcontext submit proposal must be rejected');
     });
 
-    // 148. Real browser cleanup succeeds
-    await runTest(148, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
+    // =========================================================================
+    // Category 33: Autonomous Browser Agent v1 (Brick 40)
+    // =========================================================================
+
+    // 148. Multi-step navigate -> inspect -> click -> verify on real Edge
+    await runTest(148, 'Multi-Step Autonomous Planning, Tool Proposal, & Verification', 'Autonomous Browser Agent v1 (Brick 40)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/dynamic-elements.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        // Plan
+        {
+          goal: 'Click reveal button and verify content',
+          milestones: [
+            { id: 'm1', description: 'Click reveal button', status: 'pending' },
+            { id: 'm2', description: 'Verify revealed content', status: 'pending' }
+          ]
+        },
+        // Action turn 1: Click button
+        () => ({
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.click',
+            arguments: {
+              target: { kind: 'button', text: 'Trigger Dynamic Element' },
+              expectedSnapshotToken: bm.snapshotToken
+            }
+          },
+          reasonSummary: 'Click trigger button to insert dynamic element'
+        }),
+        // Action turn 2: Complete
+        {
+          decision: 'COMPLETE',
+          completionClaim: 'Dynamically revealed content is verified.'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: { publicPrompt: 'Click dynamic button and verify text', allowedTools: ['browser.click', 'browser.inspectPage'] },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.SUCCESS_VERIFIED);
+      assert.equal(controller.stateMachine.state, AGENT_RUN_STATES.SUCCESS_VERIFIED);
+      assert.ok(controller.steps.length >= 1);
+      assert.equal(controller.steps[0].tool, 'browser.click');
+    });
+
+    // 149. Form fill -> prepare -> confirmation pause on real Edge
+    await runTest(149, 'Form Submission Triggers Consequential Confirmation Pause', 'Autonomous Browser Agent v1 (Brick 40)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/forms-submit-success.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        // Plan
+        {
+          goal: 'Fill form and submit',
+          milestones: [
+            { id: 'm1', description: 'Fill name field', status: 'pending' },
+            { id: 'm2', description: 'Submit form', status: 'pending' }
+          ]
+        },
+        // Turn 1: Fill
+        () => ({
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.fill',
+            arguments: {
+              target: { kind: 'input', name: 'name' },
+              value: 'autonomous-user',
+              expectedSnapshotToken: bm.snapshotToken
+            }
+          }
+        }),
+        // Turn 2: Submit form
+        () => ({
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.submitForm',
+            arguments: {
+              submitter: 'Send Message',
+              expectedSnapshotToken: bm.snapshotToken
+            }
+          }
+        })
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: { publicPrompt: 'Submit user form', allowedTools: ['browser.fill', 'browser.submitForm'] },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const runRes = await controller.run();
+
+      // Invariant: Pauses in WAITING_USER_CONFIRMATION without exposing token to model
+      assert.equal(runRes.terminalState, AGENT_RUN_STATES.WAITING_USER_CONFIRMATION);
+      assert.equal(controller.stateMachine.state, AGENT_RUN_STATES.WAITING_USER_CONFIRMATION);
+      assert.ok(controller.activePendingAction);
+      assert.equal(controller.activePendingAction.tool, 'browser.submitForm');
+
+      // Operator confirms action via trusted boundary
+      const confirmRes = await controller.confirmAction();
+      assert.ok(confirmRes);
+      assert.equal(controller.stateMachine.state, AGENT_RUN_STATES.SUCCESS_VERIFIED);
+    });
+
+    // 150. Stale snapshot recovery -> reinspect -> new tool proposal on real Edge
+    await runTest(150, 'Stale Snapshot Rejection Triggers Fresh Observation Recovery', 'Autonomous Browser Agent v1 (Brick 40)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/rerender.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Recover from stale snapshot',
+          milestones: [
+            { id: 'm1', description: 'Trigger action', status: 'pending' }
+          ]
+        },
+        // Turn 1: Stale token proposal
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.click',
+            arguments: {
+              target: { kind: 'button', text: 'Re-render' },
+              expectedSnapshotToken: 'snap_stale_9999'
+            }
+          }
+        },
+        // Turn 2: Complete after inspection
+        {
+          decision: 'COMPLETE',
+          completionClaim: 'Recovery verified.'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: { publicPrompt: 'Test stale recovery', allowedTools: ['browser.click', 'browser.inspectPage'] },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const runRes = await controller.run();
+      assert.ok(runRes);
+      // Tool proposal 1 failed with TARGET_STALE, and controller recorded failure and updated observation
+      assert.ok(controller.steps.length >= 1);
+      assert.equal(controller.steps[0].executed, false);
+      assert.ok(controller.totalFailures >= 1);
+    });
+
+    // 151. Context choice inside iframe on real Edge
+    await runTest(151, 'Autonomous Controller Context Choice Inside iframe', 'Autonomous Browser Agent v1 (Brick 40)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/iframe-basic.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Interact inside iframe',
+          milestones: [
+            { id: 'm1', description: 'Inspect context', status: 'pending' },
+            { id: 'm2', description: 'Complete', status: 'pending' }
+          ]
+        },
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.inspectContexts',
+            arguments: {}
+          }
+        },
+        {
+          decision: 'COMPLETE',
+          completionClaim: 'Iframe context discovered.'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: { publicPrompt: 'Inspect iframe context', allowedTools: ['browser.inspectContexts'] },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.SUCCESS_VERIFIED);
+      assert.equal(controller.steps[0].tool, 'browser.inspectContexts');
+      assert.equal(controller.steps[0].executed, true);
+    });
+
+    // 152. Human handoff pause on authentication barrier on real Edge
+    await runTest(152, 'Authentication Barrier Halts Autonomous Agent in NEEDS_HUMAN_AUTH', 'Autonomous Browser Agent v1 (Brick 40)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/auth-handoff-login.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Login to portal',
+          milestones: [
+            { id: 'm1', description: 'Check auth barrier', status: 'pending' }
+          ]
+        },
+        {
+          decision: 'NEEDS_HUMAN_AUTH',
+          authReason: 'LOGIN_REQUIRED'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: { publicPrompt: 'Access protected portal', allowedTools: ['browser.inspectPage'] },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.NEEDS_HUMAN_AUTH);
+      assert.equal(controller.stateMachine.state, AGENT_RUN_STATES.NEEDS_HUMAN_AUTH);
+
+      // Clean up handoff state so subsequent tests can navigate
+      const hStatus = bm.getHandoffStatus();
+      if (hStatus && hStatus.active && hStatus.handoff) {
+        await bm.cancelHandoff({ handoffId: hStatus.handoff.handoffId });
+      }
+    });
+
+    // 153. Execution budget exhaustion stops run cleanly on real Edge
+    await runTest(153, 'Execution Budget Exhaustion Halts Agent with BUDGET_EXCEEDED', 'Autonomous Browser Agent v1 (Brick 40)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/static.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Loop tool proposal',
+          milestones: [{ id: 'm1', description: 'inspect repeatedly', status: 'pending' }]
+        },
+        { decision: 'TOOL', toolProposal: { tool: 'browser.inspectPage', arguments: {} } },
+        { decision: 'TOOL', toolProposal: { tool: 'browser.inspectPage', arguments: {} } },
+        { decision: 'TOOL', toolProposal: { tool: 'browser.inspectPage', arguments: {} } }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: { publicPrompt: 'Loop test', allowedTools: ['browser.inspectPage'], budgets: { maxToolCalls: 2 } },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.BUDGET_EXCEEDED);
+    });
+
+    // 154. Explicit cancellation on real Edge
+    await runTest(154, 'Explicit Cancellation Safely Halts Agent Run', 'Autonomous Browser Agent v1 (Brick 40)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/static.html`, { allowLoopbackTest: true });
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: { publicPrompt: 'Cancel test', allowedTools: ['browser.inspectPage'] },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: new DeterministicMockRouter()
+      });
+
+      controller.cancel('User requested cancellation');
+      assert.equal(controller.stateMachine.state, AGENT_RUN_STATES.CANCELLED);
+    });
+
+    // 155. Real browser cleanup succeeds
+    await runTest(155, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
       await bm.close();
       assert.equal(bm.isBrowserConnected(), false);
       assert.equal(bm.pageCount, 0);
@@ -3078,6 +3373,7 @@ async function main() {
     'Structured Extraction (Brick 38)',
     'Complex UI Contexts (Brick 39)',
     'Runtime Agent Harness Governance (PRE-040A)',
+    'Autonomous Browser Agent v1 (Brick 40)',
     'Cleanup'
   ];
 

@@ -633,6 +633,49 @@
         </table>
       </div>
     </div>
+
+    <!-- Autonomous Browser Agent v1 Section (Brick 40) -->
+    <div id="autonomous-agent-section" style="margin-top: 16px; border: 1px solid #38bdf8; border-radius: 8px; padding: 12px; background: #0f172a;">
+      <h3 style="margin: 0 0 8px 0; font-size: 1rem; color: #38bdf8;">Autonomous Browser Agent v1</h3>
+      <p style="font-size: 0.82rem; color: #94a3b8; margin: 0 0 10px 0;">
+        Multi-step autonomous planning, runtime governance, and deterministic verification.
+      </p>
+
+      <div class="input-group" style="margin-bottom: 8px;">
+        <input type="text" id="agent-task-input" placeholder="Autonomous task (e.g. Inspect the static page and verify heading)" autocomplete="off" style="width: 100%; padding: 8px 12px; background: #1e293b; color: #f8fafc; border: 1px solid #475569; border-radius: 6px; font-size: 0.9rem; margin-bottom: 6px;" />
+        <div class="button-group" style="display: flex; gap: 8px;">
+          <button type="button" id="agent-run-btn">Run Task</button>
+          <button type="button" id="agent-cancel-btn" class="secondary">Cancel</button>
+          <button type="button" id="agent-refresh-btn" class="secondary">Refresh Status</button>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; font-size: 0.85rem; color: #94a3b8; margin-bottom: 8px; background: #1e293b; padding: 8px; border-radius: 6px;">
+        <div>State: <span id="agent-state-display" style="color: #38bdf8; font-weight: 600;">IDLE</span></div>
+        <div>Run ID: <span id="agent-run-id-display" style="color: #cbd5e1;">(None)</span></div>
+        <div>Current Step: <span id="agent-step-display" style="color: #cbd5e1;">0</span></div>
+        <div>Tool Used: <span id="agent-tool-display" style="color: #cbd5e1;">(None)</span></div>
+        <div>Risk: <span id="agent-risk-display" style="color: #cbd5e1;">(None)</span></div>
+        <div>Verification: <span id="agent-verification-display" style="color: #cbd5e1;">(None)</span></div>
+        <div>Model Profile: <span id="agent-profile-display" style="color: #cbd5e1;">(None)</span></div>
+        <div>Latency: <span id="agent-latency-display" style="color: #cbd5e1;">0 ms</span></div>
+        <div>Cost: <span id="agent-cost-display" style="color: #cbd5e1;">n/a</span></div>
+        <div>Budgets: <span id="agent-budget-display" style="color: #cbd5e1;">n/a</span></div>
+      </div>
+
+      <!-- Human Confirmation Operator Boundary -->
+      <div id="agent-confirmation-panel" style="display: none; margin-bottom: 8px; padding: 8px 12px; background: #451a03; border: 1px solid #d97706; border-radius: 6px;">
+        <div style="font-size: 0.85rem; font-weight: 600; color: #fbbf24; margin-bottom: 4px;">Human Confirmation Required</div>
+        <div id="agent-confirmation-summary" style="font-size: 0.82rem; color: #fef3c7; margin-bottom: 6px;"></div>
+        <button type="button" id="agent-confirm-btn" style="background: #d97706; border: none; color: #fff; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">Approve &amp; Execute</button>
+      </div>
+
+      <div style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Plan Milestones:</div>
+      <div id="agent-plan-display" style="font-size: 0.82rem; color: #cbd5e1; background: #020617; border: 1px solid #334155; border-radius: 6px; padding: 8px; margin-bottom: 8px; min-height: 40px; white-space: pre-wrap;">No active plan.</div>
+
+      <div id="agent-status-msg" class="mic-status">Agent: Idle</div>
+      <div id="agent-result-area" class="response-area" style="display: none; max-height: 200px; overflow-y: auto; margin-top: 6px; white-space: pre-wrap;"></div>
+    </div>
   </div>
 
   <script type="module">
@@ -4165,6 +4208,179 @@
     if (refreshContextsBtn) {
       refreshContextsBtn.addEventListener('click', refreshContextsList);
     }
+
+    // --- Autonomous Browser Agent v1 (Brick 40) UI Wiring ---
+    const agentTaskInput = document.getElementById('agent-task-input');
+    const agentRunBtn = document.getElementById('agent-run-btn');
+    const agentCancelBtn = document.getElementById('agent-cancel-btn');
+    const agentRefreshBtn = document.getElementById('agent-refresh-btn');
+    const agentConfirmBtn = document.getElementById('agent-confirm-btn');
+    const agentStateDisplay = document.getElementById('agent-state-display');
+    const agentRunIdDisplay = document.getElementById('agent-run-id-display');
+    const agentStepDisplay = document.getElementById('agent-step-display');
+    const agentToolDisplay = document.getElementById('agent-tool-display');
+    const agentRiskDisplay = document.getElementById('agent-risk-display');
+    const agentVerificationDisplay = document.getElementById('agent-verification-display');
+    const agentProfileDisplay = document.getElementById('agent-profile-display');
+    const agentLatencyDisplay = document.getElementById('agent-latency-display');
+    const agentCostDisplay = document.getElementById('agent-cost-display');
+    const agentBudgetDisplay = document.getElementById('agent-budget-display');
+    const agentConfirmationPanel = document.getElementById('agent-confirmation-panel');
+    const agentConfirmationSummary = document.getElementById('agent-confirmation-summary');
+    const agentPlanDisplay = document.getElementById('agent-plan-display');
+    const agentStatusMsg = document.getElementById('agent-status-msg');
+    const agentResultArea = document.getElementById('agent-result-area');
+
+    let currentAgentRunId = null;
+
+    function renderAgentState(runData) {
+      if (!runData) return;
+      if (runData.runId) {
+        currentAgentRunId = runData.runId;
+        if (agentRunIdDisplay) agentRunIdDisplay.textContent = runData.runId;
+      }
+      if (agentStateDisplay) agentStateDisplay.textContent = runData.state || 'IDLE';
+      if (agentStepDisplay) agentStepDisplay.textContent = String(runData.currentStep || 0);
+      if (agentToolDisplay) agentToolDisplay.textContent = runData.latestTool || '(None)';
+      if (agentRiskDisplay) agentRiskDisplay.textContent = runData.latestRisk || '(None)';
+      if (agentVerificationDisplay) {
+        agentVerificationDisplay.textContent = runData.verificationResult ? JSON.stringify(runData.verificationResult) : (runData.latestVerification || '(None)');
+      }
+      if (agentProfileDisplay) agentProfileDisplay.textContent = runData.latestProfile || '(None)';
+      if (agentLatencyDisplay) agentLatencyDisplay.textContent = `${runData.telemetry?.totalLatencyMs || runData.latencyMs || 0} ms`;
+      if (agentCostDisplay) agentCostDisplay.textContent = runData.cost != null ? `$${runData.cost}` : 'n/a';
+      if (agentBudgetDisplay && runData.budgets) {
+        agentBudgetDisplay.textContent = `T:${runData.budgets.toolCallsRemaining || 0} M:${runData.budgets.modelTurnsRemaining || 0} N:${runData.budgets.navigationsRemaining || 0}`;
+      }
+
+      // Confirmation panel visibility
+      if (agentConfirmationPanel) {
+        if (runData.state === 'WAITING_USER_CONFIRMATION') {
+          agentConfirmationPanel.style.display = 'block';
+          if (agentConfirmationSummary) {
+            agentConfirmationSummary.textContent = runData.pendingConfirmation?.summary || 'Pending action requires operator confirmation.';
+          }
+        } else {
+          agentConfirmationPanel.style.display = 'none';
+        }
+      }
+
+      // Milestones rendering
+      if (agentPlanDisplay) {
+        if (runData.plan && Array.isArray(runData.plan.milestones) && runData.plan.milestones.length > 0) {
+          const lines = [`Goal: ${runData.plan.goal || ''}`];
+          for (const m of runData.plan.milestones) {
+            lines.push(` [${m.status || 'pending'}] ${m.id}: ${m.description}`);
+          }
+          agentPlanDisplay.textContent = lines.join('\n');
+        } else if (runData.plan?.goal) {
+          agentPlanDisplay.textContent = `Goal: ${runData.plan.goal}`;
+        } else {
+          agentPlanDisplay.textContent = 'No active plan.';
+        }
+      }
+
+      if (agentStatusMsg) {
+        agentStatusMsg.textContent = `Agent: ${runData.state || 'Idle'}`;
+        if (runData.state === 'SUCCESS_VERIFIED') {
+          agentStatusMsg.className = 'mic-status success';
+        } else if (['FAILED', 'CANCELLED', 'BUDGET_EXCEEDED', 'BLOCKED_BY_POLICY'].includes(runData.state)) {
+          agentStatusMsg.className = 'mic-status error';
+        } else if (runData.state === 'WAITING_USER_CONFIRMATION' || runData.state === 'NEEDS_HUMAN_AUTH') {
+          agentStatusMsg.className = 'mic-status warning';
+        } else {
+          agentStatusMsg.className = 'mic-status active';
+        }
+      }
+
+      if (agentResultArea && runData.result) {
+        agentResultArea.style.display = 'block';
+        agentResultArea.textContent = typeof runData.result === 'string' ? runData.result : JSON.stringify(runData.result, null, 2);
+      }
+    }
+
+    async function runAgentTask() {
+      const task = agentTaskInput ? agentTaskInput.value.trim() : '';
+      if (!task) {
+        if (agentStatusMsg) {
+          agentStatusMsg.textContent = 'Agent: Please enter a task';
+          agentStatusMsg.className = 'mic-status error';
+        }
+        return;
+      }
+      if (agentRunBtn) agentRunBtn.disabled = true;
+      if (agentStatusMsg) {
+        agentStatusMsg.textContent = 'Agent: Starting task...';
+        agentStatusMsg.className = 'mic-status active';
+      }
+      try {
+        const res = await fetch('/api/agent/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ task })
+        });
+        const data = await res.json();
+        renderAgentState(data);
+      } catch (err) {
+        if (agentStatusMsg) {
+          agentStatusMsg.textContent = `Agent Error: ${err.message}`;
+          agentStatusMsg.className = 'mic-status error';
+        }
+      } finally {
+        if (agentRunBtn) agentRunBtn.disabled = false;
+      }
+    }
+
+    async function cancelAgentRun() {
+      if (!currentAgentRunId) {
+        if (agentStatusMsg) agentStatusMsg.textContent = 'Agent: No active run to cancel';
+        return;
+      }
+      try {
+        const res = await fetch(`/api/agent/runs/${encodeURIComponent(currentAgentRunId)}/cancel`, {
+          method: 'POST'
+        });
+        const data = await res.json();
+        renderAgentState(data);
+      } catch (err) {
+        if (agentStatusMsg) agentStatusMsg.textContent = `Agent Cancel Error: ${err.message}`;
+      }
+    }
+
+    async function refreshAgentStatus() {
+      if (!currentAgentRunId) {
+        if (agentStatusMsg) agentStatusMsg.textContent = 'Agent: No active run ID';
+        return;
+      }
+      try {
+        const res = await fetch(`/api/agent/runs/${encodeURIComponent(currentAgentRunId)}`);
+        const data = await res.json();
+        renderAgentState(data);
+      } catch (err) {
+        if (agentStatusMsg) agentStatusMsg.textContent = `Agent Status Error: ${err.message}`;
+      }
+    }
+
+    async function confirmPendingAction() {
+      if (!currentAgentRunId) return;
+      if (agentConfirmBtn) agentConfirmBtn.disabled = true;
+      try {
+        const res = await fetch(`/api/agent/runs/${encodeURIComponent(currentAgentRunId)}/confirm`, {
+          method: 'POST'
+        });
+        const data = await res.json();
+        renderAgentState(data);
+      } catch (err) {
+        if (agentStatusMsg) agentStatusMsg.textContent = `Agent Confirm Error: ${err.message}`;
+      } finally {
+        if (agentConfirmBtn) agentConfirmBtn.disabled = false;
+      }
+    }
+
+    if (agentRunBtn) agentRunBtn.addEventListener('click', runAgentTask);
+    if (agentCancelBtn) agentCancelBtn.addEventListener('click', cancelAgentRun);
+    if (agentRefreshBtn) agentRefreshBtn.addEventListener('click', refreshAgentStatus);
+    if (agentConfirmBtn) agentConfirmBtn.addEventListener('click', confirmPendingAction);
   </script>
 </body>
 </html>

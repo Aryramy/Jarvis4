@@ -190,3 +190,41 @@ Architectural Principles:
 4. **Hard Gates vs Informational Metrics**: Safety, secret protection, confirmation compliance, budget adherence, allowed-tool compliance, and verified final state are non-negotiable hard gates (100% required). Step efficiency (`stepRatio = actualSteps / optimalSteps`), duration, and latency are secondary informational metrics. A high efficiency score cannot mask a hard gate failure.
 5. **Generic Adapter Interface**: `AgentAdapterInterface` defines `runTask({ publicTask, runtimeHarness, runId, browserManager })`. Implemented in PRE-040C by `ScriptedReferenceAdapter` for evaluator self-test; will be implemented by the autonomous agent adapter in Brick 40.
 6. **Critical Truthfulness**: PRE-040C validates the Eval Harness itself against scripted reference trajectories (`autonomousAgent = false`). Reports distinctly as "Eval Harness self-test", NEVER as autonomous agent evaluation. Exactly 0 LLM calls, 0 OpenRouter calls, 0 external network requests, $0 cost.
+
+---
+
+## 8. Autonomous Web Agent & Multi-Step Planner Architecture (BRICK-040)
+
+```text
+User Task Request / Evaluation Harness
+                │
+                ▼
+     AutonomousAgentController
+                │
+   ┌────────────┴────────────┐
+   │  Hybrid Planner Loop    │
+   │  (State Machine +       │
+   │   Structured Output)    │
+   └────────────┬────────────┘
+                │
+                ▼  1 Tool Call Per Turn
+    RuntimeAgentHarness (PRE-040A)
+                │
+   ┌────────────┴────────────┐
+   ▼                         ▼
+Consequential Action?     Allowed Read/Mutating Action?
+   │                         │
+   ▼                         ▼
+PAUSE (Operator Approval)  BrowserManager (Bricks 26-39)
+                             │
+                             ▼
+                    Real Browser Fixtures
+```
+
+Architectural Principles:
+1. **Hybrid Planning Model**: Initial 2-4 milestone plan formulated at task start. Plan is dynamically updated on state changes, unexpected observations, or harness rejection without rigid lock-in.
+2. **One Tool Proposal Per Turn**: Strictly one proposal per turn. Parallel or bulk tool executions are rejected.
+3. **Deterministic Governance Enforcement**: All agent actions pass through `RuntimeAgentHarness`. Consequential submissions pause for human operator approval; authentication barriers halt in `NEEDS_HUMAN_AUTH`; stale snapshots trigger re-observation.
+4. **Strict Schema Validation & Sanitization**: LLM output is strictly validated against JSON schema. Unredacted secrets and raw selectors/code are blocked.
+5. **Bounded Routing & Timeouts**: Routing defaults to `FAST` profile (`deepseek-v4-flash-0731`) with `reasoning: { effort: 'none' }` to eliminate reasoning token blowup and clamp latency to ~800ms per turn. Each model call is bounded by `Math.min(10000, remainingBudgetMs)` with zero infinite retry.
+6. **Evaluator Isolation**: The agent interacts solely with public task data via `AutonomousAgentAdapter`. Hidden criteria and expected evidence are completely isolated.

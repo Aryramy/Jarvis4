@@ -124,7 +124,7 @@ PRE-040B — OpenRouter Routing Gate & Provider Hardening
 Status: VERIFIED
 
 PRE-040C — Eval Harness & Golden-Task Benchmark Framework
-Status: IMPLEMENTED / AWAITING CHECKPOINT
+Status: VERIFIED (Checkpoint: GREEN-039C, Commit: 0b1426b)
 
 BRICK-040 — Autonomous Web Agent & Multi-Step Planner
-Status: NOT STARTED / NOT AUTHORIZED
+Status: VERIFIED (Checkpoint: GREEN-040)

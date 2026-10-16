@@ -36,3 +36,4 @@ export { writeEvalReport } from './reportWriter.js';
 export { EvalRunner } from './evalRunner.js';
 export { AgentAdapterInterface } from './adapters/agentAdapterInterface.js';
 export { ScriptedReferenceAdapter } from './adapters/scriptedReferenceAdapter.js';
+export { AutonomousAgentAdapter } from './adapters/autonomousAgentAdapter.js';

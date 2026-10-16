@@ -1274,7 +1274,7 @@
   - Real browser baseline intact at 148/148 PASS on Microsoft Edge.
 
 ## ADR-0057: Independent Agent Eval Harness & Golden Task Foundation (PRE-040C)
-- **Status**: Accepted (PRE-040C IMPLEMENTED / AWAITING CHECKPOINT)
+- **Status**: Accepted (PRE-040C VERIFIED, Checkpoint: GREEN-039C, Commit: 0b1426b)
 - **Context**:
   - Building an autonomous browser agent (Brick 40) requires an independent evaluation harness to grade agent behavior deterministically before the autonomous agent itself is implemented ("Grader Before Agent").
   - The evaluator must grade real DOM interactions, terminal states, budgets, and safety compliance without relying on LLM graders or trusting model self-reports ("I completed the task").
@@ -1325,10 +1325,34 @@
   - Eval harness self-test validates 12/12 reference golden tasks and 7/7 security/adversarial cases PASS.
   - Real browser baseline remains intact at 148/148 PASS on Microsoft Edge.
 
-
-
-
-
-
-
-
+## Decision 40 — Autonomous Multi-Step Browser Agent v1: Hybrid Short-Plan + Runtime Governance + Independent Eval (BRICK-040)
+- **Status**: Accepted (BRICK-040 VERIFIED, Checkpoint: GREEN-040)
+- **Context**:
+  - Following the PRE-040A runtime harness, PRE-040B OpenRouter routing gate, and PRE-040C independent evaluation harness, Brick 40 introduces the genuine autonomous multi-step browser agent under strict governance.
+  - The agent must generate a hybrid short-plan, execute exactly one tool per turn, operate through the Runtime Agent Harness (zero direct Playwright control), handle bounded error recovery, pause on consequential actions (R3) and human auth barriers, and verify against independent golden tasks.
+- **Decision**:
+  1. **Subsystem Architecture (`src/agent/autonomous/`)**:
+     - `agentState.js`: `AgentRunStateMachine` managing transitions across terminal states (`SUCCESS_VERIFIED`, `FAILED`, `CANCELLED`, `BUDGET_EXCEEDED`, `BLOCKED_BY_POLICY`, `NEEDS_HUMAN_AUTH`).
+     - `outputValidator.js`: Strict validation of hybrid short-plans (2-4 milestones) and action proposals (Option A: TOOL, Option B: COMPLETE, Option C: NEEDS_HUMAN_AUTH, Option D: CANNOT_PROCEED). Strips model-claimed risks and blocks raw selectors/scripts.
+     - `agentPlanner.js`: Compact observation construction, message formatting for planning, action decision, and single repair turns. Includes last action result and milestone completion directives.
+     - `agentController.js`: Multi-step controller enforcing one tool execution per model turn, active snapshotToken propagation, consequential confirmation pausing, and bounded execution budgets.
+  2. **OpenRouter Routing & Parameter Policy**:
+     - Default to `FAST` profile; escalate to `REASONING` only on bounded recovery (`maxReasoningTurns = 2`).
+     - Model calls configure `reasoning: { effort: 'none' }` for `FAST` profile, eliminating uncontrolled reasoning token explosion and dropping latency from ~10s to ~800ms.
+     - Strict per-call timeout clamped to remaining task budget (`Math.min(10000, remainingMs)`).
+  3. **Runtime Harness Integration & Security Invariants**:
+     - The autonomous agent interacts with the browser strictly through `RuntimeAgentHarness.executeToolProposal` or `executeProposal`.
+     - Zero direct Playwright/BrowserManager access from LLM.
+     - Consequential actions pause in `WAITING_USER_CONFIRMATION` without exposing confirmation tokens to the model.
+     - Authentication barriers halt execution in `NEEDS_HUMAN_AUTH`.
+     - Context switching (`browser.switchPage`) is categorized as non-mutating (`isMutating: false`).
+     - Context IDs from discovery are preserved and propagated bi-directionally.
+  4. **Independent Autonomous Evaluation (`AutonomousAgentAdapter`, `verify-eval-agent.mjs`)**:
+     - Implements `AgentAdapterInterface` with `assertPublicTaskSanity` verifying zero leakage of hidden criteria (`expectedEvidence`, `optimalSteps`).
+     - Tested on real Microsoft Edge across 12 Golden Tasks: 11/12 PASS (91.7%), 100% compliance on all 6 hard safety gates.
+- **Consequences**:
+  - Verified multi-step autonomous browsing capability achieved within release criteria.
+  - Offline test baseline expanded to 1777/1777 PASS across 294 suites.
+  - Browser verification suite expanded to 155/155 PASS on real Microsoft Edge.
+  - Eval harness self-test remains at 27/27 PASS.
+  - Live autonomous eval suite achieves 11/12 PASS (91.7% functional rate, 100% hard safety gates).

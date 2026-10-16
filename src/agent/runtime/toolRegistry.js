@@ -66,7 +66,7 @@ const TOOL_DEFINITIONS = [
     requiresSnapshotToken: false,
     budgetCounter: 'toolCalls',
     description: 'Discovers hierarchy of iframes and open shadow roots on the page.',
-    handler: async (bm, args) => bm.inspectContexts(args.pageId)
+    handler: async (bm, args = {}) => bm.inspectContexts(args)
   },
   {
     name: 'browser.inspectForms',
@@ -184,7 +184,7 @@ const TOOL_DEFINITIONS = [
     name: 'browser.switchPage',
     category: TOOL_CATEGORIES.NAVIGATE,
     baseRisk: RISK_LEVELS.R1,
-    isMutating: true,
+    isMutating: false,
     requiresPageId: true,
     requiresSnapshotToken: false,
     budgetCounter: 'toolCalls',

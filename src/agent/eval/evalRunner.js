@@ -121,7 +121,7 @@ export class EvalRunner {
    * @param {boolean} [options.writeReport=true]
    * @returns {Promise<{ suiteSummary: Object, taskResults: Array<Object>, reportPath: string|null }>}
    */
-  async runSuite({ tasks, adapter = new ScriptedReferenceAdapter(), writeReport = true }) {
+  async runSuite({ tasks, adapter = new ScriptedReferenceAdapter(), writeReport = true, reportFilename = null }) {
     let fixtureServer = null;
     let browserManager = null;
     const taskResults = [];
@@ -235,9 +235,13 @@ export class EvalRunner {
 
       let reportPath = null;
       if (writeReport) {
+        const defaultFilename = adapter.adapterName === 'AUTONOMOUS_AGENT'
+          ? 'eval-agent-latest.json'
+          : 'eval-harness-latest.json';
         reportPath = writeEvalReport({
           suiteSummary,
-          taskResults
+          taskResults,
+          filename: reportFilename || defaultFilename
         });
       }
 

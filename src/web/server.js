@@ -25,6 +25,7 @@ import { decideBrowserEscalation, BrowserEscalationError } from '../routing/brow
 import { defaultBrowserManager, BrowserManager, BrowserManagerError, FormInspectionError, FormPopulationError, FormSubmissionError, SessionVaultError, HumanHandoffError, FileTransferError, StructuredExtractionError, DomContextError } from '../browser/browserManager.js';
 import { TargetResolutionError, SUPPORTED_KINDS } from '../browser/targetResolver.js';
 import { ActionExecutionError } from '../browser/actionExecutor.js';
+import { AgentController } from '../agent/autonomous/agentController.js';
 
 const __dirname = resolve(fileURLToPath(new URL('.', import.meta.url)));
 const HTML_FILE_PATH = join(__dirname, 'index.html');
@@ -66,6 +67,7 @@ export function createRequestListener(options = {}) {
     : (options.session ? null : new ConversationStore());
   const session = options.session || new ConversationSession();
   const browserManager = options.browserManager || defaultBrowserManager;
+  const agentRuns = options.agentRuns || new Map();
 
   // Restore persisted messages on startup if session is not already populated
   if (store && session.size === 0) {
@@ -3923,6 +3925,226 @@ export function createRequestListener(options = {}) {
         }
       });
 
+      return;
+    }
+
+    // Route: POST /api/agent/run (Brick 40 Autonomous Agent Execution)
+    if (url.pathname === '/api/agent/run') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Method Not Allowed' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk;
+        if (body.length > 20000) {
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Payload Too Large' }));
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        let parsedBody;
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid JSON body' }));
+          return;
+        }
+
+        const taskPrompt = parsedBody.task || parsedBody.publicPrompt || parsedBody.prompt;
+        if (typeof taskPrompt !== 'string' || taskPrompt.trim().length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Missing or empty "task" prompt. Task prompt must be a non-empty string' }));
+          return;
+        }
+
+        if (taskPrompt.length > 2000) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Task prompt exceeds maximum allowed length of 2000 characters' }));
+          return;
+        }
+
+        // Strict security assertion: caller is forbidden from overriding internal security/routing properties
+        const forbiddenKeys = [
+          'systemPrompt', 'model', 'provider', 'risk', 'token', 'confirmationToken',
+          'selectors', 'cssSelector', 'xpath', 'script', 'javascript', 'permission',
+          'budgetOverride', 'allowedTools'
+        ];
+        for (const k of forbiddenKeys) {
+          if (parsedBody[k] !== undefined) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: `Security violation: caller override of "${k}" is not permitted / prohibited.` }));
+            return;
+          }
+        }
+
+        try {
+          const controller = new AgentController({
+            task: taskPrompt.trim(),
+            browserManager,
+            routingGate: options.routingGate,
+            budgets: parsedBody.budget || parsedBody.budgets
+          });
+
+          agentRuns.set(controller.agentRunId, controller);
+
+          // If caller requests async start without waiting
+          if (parsedBody.async === true) {
+            controller.run().catch(() => {});
+            res.writeHead(202, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: true,
+              agentRunId: controller.agentRunId,
+              state: controller.state,
+              message: 'Autonomous agent execution started'
+            }));
+            return;
+          }
+
+          // Otherwise wait for task execution up to timeout
+          const waitMs = Math.min(Math.max(Number(parsedBody.waitMs) || 15000, 1000), 45000);
+          const runPromise = controller.run();
+          const timeoutPromise = new Promise(resolve => setTimeout(() => resolve('TIMEOUT'), waitMs));
+
+          await Promise.race([runPromise, timeoutPromise]);
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: true,
+            agentRunId: controller.agentRunId,
+            state: controller.state,
+            isTerminal: controller.isTerminal,
+            paused: controller.paused,
+            plan: controller.plan,
+            pendingAction: controller.activePendingAction ? {
+              pendingActionId: controller.activePendingAction.pendingActionId,
+              tool: controller.activePendingAction.tool,
+              summary: controller.activePendingAction.summary
+            } : null,
+            steps: controller.steps,
+            telemetry: {
+              modelTurns: controller.modelTurns.length,
+              toolCalls: controller.steps.length,
+              fastTurns: controller.fastTurnsCount,
+              reasoningTurns: controller.reasoningTurnsCount,
+              tokens: controller.totalTokens,
+              cost: controller.totalCost
+            }
+          }));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+      });
+
+      return;
+    }
+
+    // Route: GET /api/agent/runs/:runId (Brick 40 Agent Run Status)
+    const agentRunGetMatch = url.pathname.match(/^\/api\/agent\/runs\/([^/]+)$/);
+    if (agentRunGetMatch && req.method === 'GET') {
+      const runId = agentRunGetMatch[1];
+      const controller = agentRuns.get(runId);
+      if (!controller) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Agent run not found' }));
+        return;
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        agentRunId: controller.agentRunId,
+        state: controller.state,
+        isTerminal: controller.isTerminal,
+        paused: controller.paused,
+        plan: controller.plan,
+        pendingAction: controller.activePendingAction ? {
+          pendingActionId: controller.activePendingAction.pendingActionId,
+          tool: controller.activePendingAction.tool,
+          summary: controller.activePendingAction.summary
+        } : null,
+        steps: controller.steps,
+        handoffActive: Boolean(controller.latestObservation?.handoffActive),
+        telemetry: {
+          modelTurns: controller.modelTurns.length,
+          toolCalls: controller.steps.length,
+          fastTurns: controller.fastTurnsCount,
+          reasoningTurns: controller.reasoningTurnsCount,
+          tokens: controller.totalTokens,
+          cost: controller.totalCost
+        }
+      }));
+      return;
+    }
+
+    // Route: POST /api/agent/runs/:runId/cancel (Brick 40 Cancel Agent Run)
+    const agentRunCancelMatch = url.pathname.match(/^\/api\/agent\/runs\/([^/]+)\/cancel$/);
+    if (agentRunCancelMatch && req.method === 'POST') {
+      const runId = agentRunCancelMatch[1];
+      const controller = agentRuns.get(runId);
+      if (!controller) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Agent run not found' }));
+        return;
+      }
+
+      controller.cancel();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        agentRunId: runId,
+        state: controller.state,
+        message: 'Agent run cancelled successfully'
+      }));
+      return;
+    }
+
+    // Route: POST /api/agent/runs/:runId/confirm (Brick 40 Operator Confirmation Boundary)
+    const agentRunConfirmMatch = url.pathname.match(/^\/api\/agent\/runs\/([^/]+)\/confirm$/);
+    if (agentRunConfirmMatch && req.method === 'POST') {
+      const runId = agentRunConfirmMatch[1];
+      const controller = agentRuns.get(runId);
+      if (!controller) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Agent run not found' }));
+        return;
+      }
+
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', async () => {
+        let parsedBody = {};
+        try {
+          parsedBody = body ? JSON.parse(body) : {};
+        } catch {}
+
+        const pendingActionId = parsedBody.pendingActionId || (controller.activePendingAction && controller.activePendingAction.pendingActionId);
+        if (!pendingActionId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'pendingActionId is required to approve consequential action' }));
+          return;
+        }
+
+        try {
+          const result = await controller.approvePendingAction(pendingActionId);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: true,
+            agentRunId: runId,
+            state: controller.state,
+            result
+          }));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+      });
       return;
     }
 

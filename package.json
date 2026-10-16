@@ -14,7 +14,8 @@
     "diagnose:openrouter-routing": "node scripts/diagnose-openrouter-routing.mjs",
     "verify": "node scripts/verify.mjs",
     "verify:browser": "node scripts/verify-browser.mjs",
-    "eval:harness": "node scripts/verify-eval-harness.mjs"
+    "eval:harness": "node scripts/verify-eval-harness.mjs",
+    "eval:agent": "node scripts/verify-eval-agent.mjs"
   },
   "keywords": [
     "jarvis",

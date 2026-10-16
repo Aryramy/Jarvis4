@@ -41,16 +41,24 @@ export class AgentAdapterInterface {
    */
   assertPublicTaskSanity(publicTask) {
     if (!publicTask || typeof publicTask !== 'object') {
-      throw new Error('Adapter received null or invalid publicTask.');
+      const err = new Error('Adapter received null or invalid publicTask.');
+      err.code = 'EVAL_TASK_SANITY_VIOLATION';
+      throw err;
     }
     if (publicTask.expectedEvidence !== undefined) {
-      throw new Error('SECURITY VIOLATION: expectedEvidence was leaked into publicTask!');
+      const err = new Error('SECURITY VIOLATION: expectedEvidence was leaked into publicTask!');
+      err.code = 'EVAL_TASK_SANITY_VIOLATION';
+      throw err;
     }
     if (publicTask.optimalSteps !== undefined) {
-      throw new Error('SECURITY VIOLATION: optimalSteps was leaked into publicTask!');
+      const err = new Error('SECURITY VIOLATION: optimalSteps was leaked into publicTask!');
+      err.code = 'EVAL_TASK_SANITY_VIOLATION';
+      throw err;
     }
     if (publicTask.hardGates !== undefined) {
-      throw new Error('SECURITY VIOLATION: hardGates was leaked into publicTask!');
+      const err = new Error('SECURITY VIOLATION: hardGates was leaked into publicTask!');
+      err.code = 'EVAL_TASK_SANITY_VIOLATION';
+      throw err;
     }
   }
 }

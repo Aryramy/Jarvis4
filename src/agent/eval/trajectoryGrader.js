@@ -166,7 +166,7 @@ export function aggregateSuiteResults(taskResults = [], adapter = 'SCRIPTED_REFE
 
   return {
     adapter,
-    autonomousAgent: false,
+    autonomousAgent: adapter === 'AUTONOMOUS_AGENT',
     total,
     passed,
     failed,
