@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Verification Page Misbinding Fixture (V04)</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .panel { border: 1px solid #ccc; padding: 10px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Verification Fixture V04</h1>
+  <p>Tests that evidence from secondary context or page cannot verify primary context.</p>
+  <div id="primary-panel" class="panel">
+    <h3>Primary Panel</h3>
+    <div id="primary-status">Active Panel: Pending</div>
+  </div>
+  <iframe id="sub-frame" srcdoc="<html><body><div id='frame-status'>Active Panel: Complete</div></body></html>" style="margin-top: 15px; width: 300px; height: 100px;"></iframe>
+</body>
+</html>

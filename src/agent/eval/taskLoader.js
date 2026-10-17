@@ -56,8 +56,11 @@ export function loadTaskById(taskId, options = {}) {
   let filePath = path.join(tasksDir, `${cleanId}.json`);
   if (!fs.existsSync(filePath)) {
     const recoveryPath = path.resolve(__dirname, '../../../tests/eval/recovery-tasks', `${cleanId}.json`);
+    const verificationPath = path.resolve(__dirname, '../../../tests/eval/verification-tasks', `${cleanId}.json`);
     if (fs.existsSync(recoveryPath)) {
       filePath = recoveryPath;
+    } else if (fs.existsSync(verificationPath)) {
+      filePath = verificationPath;
     } else {
       throw new EvalTaskError(`Eval task file "${cleanId}.json" not found in "${tasksDir}".`, EVAL_ERROR_CODES.EVAL_TASK_INVALID, { taskId: cleanId, filePath });
     }
@@ -114,6 +117,17 @@ export function loadAllTasks(options = {}) {
 export function loadRecoveryTasks(options = {}) {
   const recoveryDir = path.resolve(__dirname, '../../../tests/eval/recovery-tasks');
   return loadAllTasks({ ...options, tasksDir: recoveryDir });
+}
+
+/**
+ * Loads all verification benchmark tasks (V01-V08).
+ *
+ * @param {Object} [options={}]
+ * @returns {Array<Object>} Sorted list of validated verification tasks
+ */
+export function loadVerificationTasks(options = {}) {
+  const verificationDir = path.resolve(__dirname, '../../../tests/eval/verification-tasks');
+  return loadAllTasks({ ...options, tasksDir: verificationDir });
 }
 
 /**

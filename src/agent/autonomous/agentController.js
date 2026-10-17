@@ -44,6 +44,15 @@ import {
   getRecoveryHint,
   stripRecoveryOverrides
 } from './recoveryPolicy.js';
+import {
+  TRUST_LEVELS,
+  VERIFICATION_CRITERIA_TYPES,
+  VERIFICATION_OUTCOMES,
+  EvidenceLedger,
+  VerificationContract,
+  VerificationEngine,
+  deriveVerificationContract
+} from './verificationPolicy.js';
 
 function isMutation(toolName) {
   const def = getRegisteredTool(toolName);
@@ -61,7 +70,8 @@ export const CONTROLLER_DEFAULTS = Object.freeze({
   maxConsecutiveFailures: 2,
   maxRuntimeMs: 60000,
   maxTokens: 25000,
-  maxReasoningTurns: 2
+  maxReasoningTurns: 2,
+  maxVerificationCycles: 2
 });
 
 export class AgentController {
@@ -117,7 +127,8 @@ export class AgentController {
       maxConsecutiveFailures: Math.min(Math.max(Number(mergedBudgets.maxConsecutiveFailures) || 2, 1), 5),
       maxRuntimeMs: Math.min(Math.max(Number(mergedBudgets.maxRuntimeMs) || 60000, 1000), 120000),
       maxTokens: Math.min(Math.max(Number(mergedBudgets.maxTokens) || 25000, 1000), 50000),
-      maxReasoningTurns: Math.min(Math.max(Number(mergedBudgets.maxReasoningTurns) || 2, 0), 4)
+      maxReasoningTurns: Math.min(Math.max(Number(mergedBudgets.maxReasoningTurns) || 2, 0), 4),
+      maxVerificationCycles: Math.min(Math.max(Number(mergedBudgets.maxVerificationCycles) || 2, 1), 3)
     });
 
     this.agentRunId = `agentrun_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
@@ -147,6 +158,26 @@ export class AgentController {
     this.lastMutationFailed = false;
     this.lastMutationOutcome = null;
     this.recoveryHint = null;
+
+    // Verification & Evidence Policy state (BRICK-042)
+    this.evidenceLedger = new EvidenceLedger();
+    this.verificationEngine = new VerificationEngine({
+      maxVerificationCycles: this.budgets.maxVerificationCycles
+    });
+    if (options.verificationContract instanceof VerificationContract) {
+      this.verificationContract = options.verificationContract;
+    } else if (Array.isArray(options.verificationContract)) {
+      this.verificationContract = new VerificationContract(options.verificationContract);
+    } else {
+      this.verificationContract = deriveVerificationContract(this.publicPrompt, rawTask);
+    }
+    if (!this.verificationContract.isFrozen) {
+      this.verificationContract.freeze();
+    }
+    this.actionSequence = 0;
+    this.lastMutationSequence = 0;
+    this.verificationResult = null;
+    this.verificationTelemetry = null;
   }
 
   get state() {
@@ -251,6 +282,25 @@ export class AgentController {
           planVersion: this.planVersion,
           mutationOutcome: this.lastMutationOutcome
         };
+        if (this.evidenceLedger) {
+          this.evidenceLedger.addEvidence({
+            evidenceType: 'OBSERVATION',
+            sourceTool: 'browser.inspectPage',
+            pageId: this.latestObservation.pageId,
+            contextId: this.latestObservation.contextId,
+            snapshotToken: this.latestObservation.snapshotToken,
+            relatedActionId: this.actionSequence,
+            trustLevel: TRUST_LEVELS.TRUSTED_RUNTIME_EVIDENCE,
+            value: {
+              currentUrl: this.latestObservation.currentUrl,
+              title: this.latestObservation.title,
+              visibleText: this.latestObservation.visibleText,
+              elementsCount: this.latestObservation.elements?.length || 0,
+              formsCount: this.latestObservation.forms?.length || 0
+            },
+            verificationPurpose: 'state_observation'
+          });
+        }
         return this.latestObservation;
       }
 
@@ -274,6 +324,25 @@ export class AgentController {
         planVersion: this.planVersion,
         mutationOutcome: this.lastMutationOutcome
       };
+      if (this.evidenceLedger) {
+        this.evidenceLedger.addEvidence({
+          evidenceType: 'OBSERVATION',
+          sourceTool: 'browser.inspectPage',
+          pageId: this.latestObservation.pageId,
+          contextId: this.latestObservation.contextId,
+          snapshotToken: this.latestObservation.snapshotToken,
+          relatedActionId: this.actionSequence,
+          trustLevel: TRUST_LEVELS.TRUSTED_RUNTIME_EVIDENCE,
+          value: {
+            currentUrl: this.latestObservation.currentUrl,
+            title: this.latestObservation.title,
+            visibleText: this.latestObservation.visibleText,
+            elementsCount: this.latestObservation.elements?.length || 0,
+            formsCount: this.latestObservation.forms?.length || 0
+          },
+          verificationPurpose: 'state_observation'
+        });
+      }
       return this.latestObservation;
     } catch (err) {
       this.latestObservation = {
@@ -560,6 +629,13 @@ export class AgentController {
       steps: this.steps,
       modelTurns: this.modelTurns,
       recovery: this.recoveryManager.getTelemetry(),
+      verification: this.verificationTelemetry || {
+        outcome: this.stateMachine.state === AGENT_RUN_STATES.SUCCESS_VERIFIED ? 'VERIFIED' : 'NOT_EVALUATED',
+        criteriaCount: this.verificationContract?.getCriteria()?.length || 0,
+        criteriaPassed: this.stateMachine.state === AGENT_RUN_STATES.SUCCESS_VERIFIED ? (this.verificationContract?.getCriteria()?.length || 0) : 0,
+        cycles: this.verificationEngine?.verificationCycles || 0,
+        evidenceLedgerSummary: this.evidenceLedger?.getTelemetrySummary() || []
+      },
       telemetry: {
         totalModelTurns: this.modelTurns.length,
         fastTurns: this.fastTurnsCount,
@@ -569,7 +645,8 @@ export class AgentController {
         cost: this.totalCost,
         consecutiveFailures: this.consecutiveFailures,
         totalFailures: this.totalFailures,
-        recovery: this.recoveryManager.getTelemetry()
+        recovery: this.recoveryManager.getTelemetry(),
+        verification: this.verificationTelemetry || null
       }
     };
 
@@ -631,9 +708,14 @@ export class AgentController {
     const runId = this._ensureHarnessRun();
     this.stateMachine.transitionTo(AGENT_RUN_STATES.EXECUTING);
     const stepStart = Date.now();
+    this.actionSequence++;
+    const currentActionId = this.actionSequence;
 
     // Anti-replay guard: Prohibit repeating uncertain mutations or R3 consequential retries
     const isMut = isMutation(proposal.tool);
+    if (isMut) {
+      this.lastMutationSequence = currentActionId;
+    }
     if (isMut && this.lastMutationOutcome === MUTATION_OUTCOMES.OUTCOME_UNCERTAIN) {
       const isConsequential = proposal.tool === 'browser.submitForm' || this.lastMutationProposal?.tool === 'browser.submitForm';
       const targetState = isConsequential
@@ -679,6 +761,55 @@ export class AgentController {
         status: result.status
       };
       this.steps.push(stepRecord);
+
+      if (this.evidenceLedger) {
+        this.evidenceLedger.addEvidence({
+          evidenceType: isMut ? 'MUTATION_RESULT' : 'ACTION_RESULT',
+          sourceTool: proposal.tool,
+          pageId: this.latestObservation?.pageId || null,
+          contextId: proposal.contextId || null,
+          snapshotToken: proposalToSend.snapshotToken || activeSnapshot,
+          relatedActionId: currentActionId,
+          trustLevel: TRUST_LEVELS.TRUSTED_RUNTIME_EVIDENCE,
+          value: {
+            executed: stepRecord.executed,
+            verified: stepRecord.verified,
+            status: result.status,
+            downloaded: Boolean(result.evidence?.downloaded || result.downloaded),
+            uploaded: Boolean(result.evidence?.uploaded || result.uploaded),
+            refusalCode: result.evidence?.refusalCode
+          },
+          verificationPurpose: 'tool_execution'
+        });
+
+        if (result.evidence?.downloaded || result.downloaded) {
+          this.evidenceLedger.addEvidence({
+            evidenceType: 'DOWNLOAD',
+            sourceTool: proposal.tool,
+            pageId: this.latestObservation?.pageId || null,
+            relatedActionId: currentActionId,
+            trustLevel: TRUST_LEVELS.TRUSTED_RUNTIME_EVIDENCE,
+            value: {
+              downloaded: true,
+              filename: result.evidence?.filename || result.filename,
+              size: result.evidence?.size || result.size
+            },
+            verificationPurpose: 'download_verification'
+          });
+        }
+
+        if (proposal.tool === 'browser.listPages') {
+          const pages = result.evidence?.observed?.pages || result.data?.pages || [];
+          this.evidenceLedger.addEvidence({
+            evidenceType: 'PAGE_INVENTORY',
+            sourceTool: 'browser.listPages',
+            relatedActionId: currentActionId,
+            trustLevel: TRUST_LEVELS.TRUSTED_RUNTIME_EVIDENCE,
+            value: { pages: pages.map(p => ({ pageId: p.pageId, url: p.url, title: p.title })) },
+            verificationPurpose: 'page_inventory'
+          });
+        }
+      }
 
       // Check for human confirmation pause (R3)
       const isConsequential = proposal.tool === 'browser.submitForm' || result.status === 'WAITING_USER_CONFIRMATION' || result.requiresConfirmation;
@@ -773,6 +904,23 @@ export class AgentController {
       mutationOutcome
     };
     this.steps.push(stepRecord);
+
+    if (this.evidenceLedger) {
+      this.evidenceLedger.addEvidence({
+        evidenceType: 'REFUSAL',
+        sourceTool: proposal.tool,
+        pageId: this.latestObservation?.pageId || null,
+        contextId: proposal.contextId || null,
+        relatedActionId: currentActionId,
+        trustLevel: TRUST_LEVELS.TRUSTED_RUNTIME_EVIDENCE,
+        value: {
+          errorCode: err.code || 'UNKNOWN_ERROR',
+          refusalCode: err.code || null,
+          failureClass: classification.failureClass
+        },
+        verificationPurpose: 'failure_record'
+      });
+    }
 
     if (this.latestObservation) {
       this.latestObservation.lastResult = stepRecord;
@@ -908,17 +1056,69 @@ export class AgentController {
       return;
     }
 
-    // Verify task state: require at least one action to have executed without unhandled fatal error
-    const executedSteps = this.steps.filter(s => s.executed);
+    // Verify task state: require unhandled failures to not exceed limit
     const hasFatal = this.consecutiveFailures >= this.budgets.maxConsecutiveFailures;
-
     if (hasFatal) {
       this.stateMachine.transitionTo(AGENT_RUN_STATES.FAILED, 'Task terminated with unrecovered failures.');
       return;
     }
 
-    // Success verified
-    this.stateMachine.transitionTo(AGENT_RUN_STATES.SUCCESS_VERIFIED, claim);
+    // Evaluate verification contract
+    let evalResult = this.verificationEngine.evaluate({
+      contract: this.verificationContract,
+      ledger: this.evidenceLedger,
+      currentObservation: this.latestObservation,
+      lastMutationSequence: this.lastMutationSequence,
+      activePageId: this.browserManager?.activePageId || this.latestObservation?.pageId,
+      activeContextId: this.latestObservation?.contextId
+    });
+
+    // If missing post-action evidence and verification cycles remain, fetch fresh observation and re-evaluate
+    while (
+      evalResult.outcome === VERIFICATION_OUTCOMES.MISSING_EVIDENCE &&
+      this.verificationEngine.verificationCycles <= this.budgets.maxVerificationCycles
+    ) {
+      this._assertBudget();
+      await this._fetchBrowserObservation();
+      evalResult = this.verificationEngine.evaluate({
+        contract: this.verificationContract,
+        ledger: this.evidenceLedger,
+        currentObservation: this.latestObservation,
+        lastMutationSequence: this.lastMutationSequence,
+        activePageId: this.browserManager?.activePageId || this.latestObservation?.pageId,
+        activeContextId: this.latestObservation?.contextId
+      });
+    }
+
+    this.verificationResult = evalResult.outcome;
+    this.verificationTelemetry = {
+      verificationCycles: this.verificationEngine.verificationCycles,
+      maxVerificationCycles: this.budgets.maxVerificationCycles,
+      criteriaCount: evalResult.criteriaCount,
+      criteriaPassed: evalResult.criteriaPassed,
+      criteriaResults: evalResult.criteriaResults,
+      outcome: evalResult.outcome,
+      reason: evalResult.reason,
+      evidenceLedgerSummary: this.evidenceLedger.getTelemetrySummary()
+    };
+
+    if (evalResult.outcome === VERIFICATION_OUTCOMES.VERIFIED) {
+      this.stateMachine.transitionTo(AGENT_RUN_STATES.SUCCESS_VERIFIED, claim);
+      return;
+    }
+
+    if (evalResult.outcome === VERIFICATION_OUTCOMES.VERIFICATION_CONFLICT) {
+      this.stateMachine.transitionTo(AGENT_RUN_STATES.VERIFICATION_CONFLICT, evalResult.reason || 'Conflicting evidence detected during verification.');
+      return;
+    }
+
+    if (evalResult.outcome === VERIFICATION_OUTCOMES.VERIFICATION_EXHAUSTED) {
+      this.stateMachine.transitionTo(AGENT_RUN_STATES.VERIFICATION_EXHAUSTED, evalResult.reason || 'Verification exhausted.');
+      return;
+    }
+
+    // Default failure: VERIFICATION_FAILED
+    this.stateMachine.transitionTo(AGENT_RUN_STATES.VERIFICATION_FAILED, evalResult.reason || 'Completion verification failed.');
   }
 
   /**

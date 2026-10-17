@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Verification Post-Action Fixture (V02)</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .status { margin-top: 15px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Verification Fixture V02</h1>
+  <p>Tests that fresh post-action observation proves the requested outcome.</p>
+  <button id="process-btn" type="button" onclick="handleProcess()">Process Application</button>
+  <div id="status-display" class="status">Status: Pending</div>
+
+  <script>
+    function handleProcess() {
+      // Updates state to verified outcome
+      document.getElementById('status-display').textContent = 'Status: Approved';
+    }
+  </script>
+</body>
+</html>

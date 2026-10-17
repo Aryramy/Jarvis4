@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Verification Stale Replay Fixture (V03)</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .status { margin-top: 15px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Verification Fixture V03</h1>
+  <p>Tests that pre-action evidence cannot be replayed to verify post-action state.</p>
+  <div id="old-session">Previous Session: Fresh Verified</div>
+  <button id="reset-btn" type="button" onclick="handleReset()">Reset and Verify</button>
+  <div id="status-display" class="status">Current Session: Uninitialized</div>
+
+  <script>
+    function handleReset() {
+      // Clears old session display and shows generation incomplete
+      document.getElementById('old-session').textContent = 'Previous Session: Cleared';
+      document.getElementById('status-display').textContent = 'Current Session: Generation Incomplete';
+    }
+  </script>
+</body>
+</html>

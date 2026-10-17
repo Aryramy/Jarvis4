@@ -1,22 +1,76 @@
 Project: JARVIS4
-Current Milestone: BRICK-041
-Status: VERIFIED (Checkpoint: GREEN-041) (Bounded Recovery & Self-Healing Browser Agent v1: Deterministic Recovery Policy + Safe Fingerprinting + Zero Mutation Replay + Eval Suite)
-Last Verified Milestone: GREEN-040 (BRICK-040 VERIFIED at commit 7157ab9)
+Current Milestone: BRICK-042
+Status: VERIFIED (Checkpoint: GREEN-042) (Verification-Before-Completion Hardening v1: Evidence Contracts + Fresh Post-Action Proof + No Self-Grading + Fixture-Only)
+Last Verified Milestone: GREEN-041 (BRICK-041 VERIFIED at commit 4470491)
 Runtime Agent Harness: Active & Governed
 OpenRouter Routing Gate: Active (FAST default, bounded REASONING escalation)
 Autonomous Agent: VERIFIED (Single tool per turn, strict output validation, loopback fixtures only)
 Recovery/Self-Healing: V1 BOUNDED / FIXTURE-ONLY
+Verification-Before-Completion: V1 / FIXTURE-ONLY
+Model completion authoritative: NO
+Tool execution success equals task success: NO
+Fresh post-action evidence: REQUIRED WHERE RELEVANT
+Trusted evidence provenance: ENFORCED
+Page/context binding: ENFORCED
 Automatic mutation replay: PROHIBITED
 Uncertain mutation retry: PROHIBITED
 Consequential automatic retry: PROHIBITED
 Public-web production autonomy: NO
 Voice integration: NO
 Persistent agent memory: NO
-Brick 40: COMPLETE & VERIFIED (GREEN-040, commit 7157ab9)
-Brick 41: VERIFIED (Checkpoint: GREEN-041)
-Brick 42: NOT STARTED / NOT AUTHORIZED
+Brick 41: COMPLETE & VERIFIED (GREEN-041, commit 4470491)
+Brick 42: COMPLETE & VERIFIED (GREEN-042)
+Brick 43: NOT STARTED / NOT AUTHORIZED
 
 ## Working capabilities
+
+- Verification-Before-Completion Hardening v1 (BRICK-042) (`src/agent/autonomous/verificationPolicy.js`, `agentController.js`, `agentState.js`, `outputValidator.js`, `index.js`):
+  - Strict Prohibition of Model Self-Grading:
+    - Model has zero authority over task verification or completion flags. Authoritative fields (`verificationPassed`, `successVerified`, `taskCompleted`) are strictly rejected and stripped from model proposals.
+    - Model proposal of `COMPLETE` is treated strictly as an unverified completion request (`COMPLETION_REQUESTED`).
+    - Webpage text is treated as `UNTRUSTED_PAGE_DATA`; prompt injection payloads attempting to claim verification completion are ignored.
+  - Separation of Semantic Concepts:
+    - Tool execution success != action effect verified != user goal verified.
+    - Only deterministic runtime evidence proving user goal completion authorizes `SUCCESS_VERIFIED`.
+  - Deterministic Verification Policy & Contract (`verificationPolicy.js`):
+    - Declarative runtime completion contract (`maxCriteria = 4`) containing deterministic criteria types (`TEXT_PRESENT`, `TEXT_ABSENT`, `TEXT_EQUALS`, `URL_EQUALS`, `URL_CONTAINS`, `TARGET_PRESENT`, etc.).
+    - Contract is deep-frozen at run start; cannot be modified or weakened mid-run.
+  - Bounded Evidence Ledger & Trust Levels:
+    - Records evidence entries with monotonic sequence, timestamp, pageId, contextId, and trust level (`TRUSTED_RUNTIME_EVIDENCE`, `UNTRUSTED_PAGE_DATA`, `MODEL_CLAIM`).
+    - Strict sanitization: raw DOM objects, raw attribute maps, full HTML, cookies, tokens, Authorization headers, passwords, OTP, and private absolute paths are never serialized.
+  - Freshness & Provenance Enforcement:
+    - Pre-action evidence predating a mutation cannot satisfy post-action verification criteria.
+    - Strict page binding and context binding prevent cross-page or detached context misattributions.
+  - Safe Conflict & Loop Handling:
+    - Contradictory evidence signals safely halt in `VERIFICATION_CONFLICT`.
+    - Repeated identical insufficient evidence safely halts in `VERIFICATION_EXHAUSTED`.
+    - Bounded verification loop (`maxVerificationCycles = 2`); non-mutating only.
+  - Dedicated Verification Benchmark Suite (V01–V08) (`tests/eval/verification-tasks/`, `scripts/verify-eval-verification.mjs`):
+    - V01: Post-Action State Change Proof
+    - V02: Premature Completion Model Rejection
+    - V03: Stale Evidence Replay Rejection
+    - V04: Multi-Page Evidence Misbinding Rejection
+    - V05: Conflicting Evidence Safe Halt
+    - V06: No-Effect Action Verification Failure
+    - V07: Prompt Injection Bypass Blocking
+    - V08: Consequential Submission Verification Proof
+    - Evaluated via `npm run eval:verification`: 8/8 Verification Tasks PASS (100% functional pass rate, 100% hard verification gates).
+  - Preserved G06 Autonomous Evaluation Audit Result:
+    - Initial G06 run result: FAIL — BUDGET_EXCEEDED
+    - Root cause: Live model variance
+    - Single bounded targeted rerun: PASS
+    - Final full autonomous suite: 12/12 PASS
+    - Actual product regression: NO
+    - Verification criteria weakened: NO
+    - Golden acceptance changed: NO
+  - Verification Evidence:
+    - 1835/1835 offline unit, contract, and regression tests PASS (`npm run verify`).
+    - 169/169 real-browser acceptance tests across 34 categories PASS on Microsoft Edge (`npm run verify:browser`).
+    - 12/12 golden tasks and 7/7 security cases PASS on Microsoft Edge (`npm run eval:harness`).
+    - 12/12 autonomous golden tasks PASS on Microsoft Edge (`npm run eval:agent`).
+    - 8/8 recovery tasks PASS on Microsoft Edge (`npm run eval:recovery`).
+    - 8/8 verification tasks PASS on Microsoft Edge (`npm run eval:verification`).
+    - Verification hard gates: 100% PASS.
 
 - Bounded Recovery & Self-Healing Browser Agent v1 (BRICK-041) (`src/agent/autonomous/recoveryPolicy.js`, `agentController.js`, `agentState.js`, `outputValidator.js`, `agentPlanner.js`):
   - Deterministic Recovery Policy (`recoveryPolicy.js`):

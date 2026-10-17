@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Verification Conflict Fixture (V06)</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .status { margin-top: 15px; font-weight: bold; }
+    .error { color: red; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Verification Fixture V06</h1>
+  <p>Tests that conflicting fresh trusted evidence safely halts in VERIFICATION_CONFLICT.</p>
+  <button id="transact-btn" type="button" onclick="handleTransact()">Process Transaction</button>
+  <div id="tx-status" class="status">Transaction Status: Ready</div>
+  <div id="tx-error" class="error" style="display: none;">Transaction Error: Finalized Rollback Triggered</div>
+
+  <script>
+    function handleTransact() {
+      // Produces conflicting simultaneous signals
+      document.getElementById('tx-status').textContent = 'Transaction Status: Finalized';
+      const err = document.getElementById('tx-error');
+      err.style.display = 'block';
+    }
+  </script>
+</body>
+</html>

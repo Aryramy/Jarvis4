@@ -132,5 +132,8 @@ Status: VERIFIED (Checkpoint: GREEN-040)
 BRICK-041 — Bounded Recovery & Self-Healing Browser Agent v1 (Evidence-First Recovery / No Blind Retries / No New Autonomy Scope)
 Status: VERIFIED (Checkpoint: GREEN-041)
 
-BRICK-042 — Verification-Before-Completion Hardening
+BRICK-042 — Verification-Before-Completion Hardening v1 (Evidence Contracts / Fresh Post-Action Proof / No Self-Grading / Fixture-Only)
+Status: VERIFIED (Checkpoint: GREEN-042)
+
+BRICK-043 — Safety / Permissions / Consequential Confirmation Hardening
 Status: NOT STARTED / NOT AUTHORIZED

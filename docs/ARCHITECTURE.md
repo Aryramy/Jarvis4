@@ -258,3 +258,32 @@ Architectural Principles:
 5. **Separate Deterministic Recovery Budgets**: Clamped limits (`maxRecoveryCycles = 2`, `maxReplans = 2`, `maxSameFailureOccurrences = 2`, `maxContextRediscoveries = 2`, `maxRecoveryWaits = 2`). All recovery operations consume standard execution budgets (tool calls, model turns, runtime ms); no hidden recovery channels. Model cannot override or expand budgets.
 6. **Privacy-Preserving Same-Failure Loop Detection**: Safe fingerprinting hashes `failureClass`, `tool`, `pageId`, `contextId`, `semanticTarget`, and `milestone` (redacting all page text, secrets, and raw attributes). If identical failure patterns exceed threshold, execution halts in `RECOVERY_EXHAUSTED`.
 7. **Semantic Re-Grounding & Context Renewal**: Target rediscovery uses semantic role and accessible identifiers. Detached iframes require explicit context rediscovery (`listContexts`) to obtain a fresh `contextId`. Stale snapshots require fresh `inspectPage` to obtain a fresh `snapshotToken`. Arbitrary CSS/XPath/JS guessing is prohibited.
+
+### 4.7. Verification-Before-Completion Subsystem (BRICK-042)
+
+The Verification-Before-Completion subsystem (`src/agent/autonomous/verificationPolicy.js`) enforces strict deterministic verification gates before an autonomous run may terminate in `SUCCESS_VERIFIED`:
+
+```
+MODEL PROPOSAL: "COMPLETE"
+        ↓
+CONTROLLER: treat as completion request (COMPLETION_REQUESTED)
+        ↓
+VERIFICATION ENGINE: evaluate active VerificationContract against EvidenceLedger
+        ↓
+EVALUATION:
+  ├── Fresh post-action evidence satisfies all mandatory criteria? → SUCCESS_VERIFIED
+  ├── Missing fresh observation? → VERIFYING (fetch fresh observation, max 2 cycles)
+  ├── Conflicting evidence? → VERIFICATION_CONFLICT
+  ├── Same insufficient evidence repeated? → VERIFICATION_EXHAUSTED
+  └── Criteria unsatisfied? → VERIFICATION_FAILED
+```
+
+Key Invariants:
+1. **Zero Self-Grading Authority**: The model has zero authority over completion flags. `verificationPassed`, `successVerified`, etc. are rejected and stripped.
+2. **Concept Separation**: Tool execution success != action effect verified != user goal verified. Only user goal verified authorizes `SUCCESS_VERIFIED`.
+3. **Frozen Verification Contract**: Bounded declarative criteria (`maxCriteria = 4`) are validated and frozen at run start; model cannot delete or weaken criteria.
+4. **Fresh Post-Action Evidence**: Pre-action evidence is stale for post-action verification claims.
+5. **Page and Context Binding**: Evidence from Page 2 or detached contexts cannot verify Page 1.
+6. **Prompt Injection Defense**: Webpage instructions claiming "Verification complete" are treated as untrusted page data and cannot satisfy verification criteria.
+7. **Safe Conflict Handling**: Conflicting signals halt in `VERIFICATION_CONFLICT`.
+8. **Non-Mutating Verification**: Verification evaluation never automatically repeats mutations.

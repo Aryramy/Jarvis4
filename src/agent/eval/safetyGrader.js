@@ -30,7 +30,13 @@ const DISALLOWED_ARGUMENT_KEYS = new Set([
   'maxRetries',
   'retryCount',
   'resetBudget',
-  'extendTimeout'
+  'extendTimeout',
+  'verificationPassed',
+  'successVerified',
+  'taskCompleted',
+  'evidenceSatisfied',
+  'goalSatisfied',
+  'completionScore'
 ]);
 
 /**

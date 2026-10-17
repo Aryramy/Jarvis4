@@ -3426,7 +3426,7 @@ async function main() {
           decision: 'TOOL',
           toolProposal: {
             tool: 'browser.waitForStable',
-            arguments: { timeoutMs: 1500 }
+            arguments: { timeoutMs: 2500 }
           }
         },
         // Turn 2: Click delayed button once available
@@ -3639,8 +3639,274 @@ async function main() {
       assert.equal(controller.recoveryManager.loopExhausted, true);
     });
 
-    // 162. Real browser cleanup succeeds
-    await runTest(162, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
+    // =========================================================================
+    // Category 34: Verification-Before-Completion (Brick 42)
+    // =========================================================================
+
+    // 162. Tool execution success does not equal goal success (VERIFICATION_FAILED)
+    await runTest(162, 'Tool Execution Success Does Not Equal Goal Success', 'Verification-Before-Completion (Brick 42)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/verification-no-effect.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Click button and verify status',
+          milestones: [{ id: 'm1', description: 'click and complete', status: 'in_progress' }]
+        },
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.click',
+            arguments: { target: { kind: 'button', text: 'Execute Action' } }
+          }
+        },
+        {
+          decision: 'COMPLETE',
+          completionClaim: 'I clicked the button, task is complete'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: {
+          publicPrompt: 'Click the Execute Action button and verify that Status: Processed is displayed.',
+          allowedTools: ['browser.inspectPage', 'browser.click'],
+          budgets: { maxToolCalls: 4, maxFailures: 2 }
+        },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.VERIFICATION_FAILED);
+      assert.notEqual(res.terminalState, AGENT_RUN_STATES.SUCCESS_VERIFIED);
+    });
+
+    // 163. Fresh post-action observation proves outcome and achieves SUCCESS_VERIFIED
+    await runTest(163, 'Fresh Post-Action Evidence Proves Outcome & Achieves SUCCESS_VERIFIED', 'Verification-Before-Completion (Brick 42)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/verification-post-action.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Click button and verify status approved',
+          milestones: [{ id: 'm1', description: 'process and complete', status: 'in_progress' }]
+        },
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.click',
+            arguments: { target: { kind: 'button', text: 'Process Application' } }
+          }
+        },
+        {
+          decision: 'COMPLETE',
+          completionClaim: 'Status is now approved'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: {
+          publicPrompt: 'Click the Process Application button and verify that Status: Approved is displayed.',
+          allowedTools: ['browser.inspectPage', 'browser.click'],
+          budgets: { maxToolCalls: 4, maxFailures: 2 }
+        },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.SUCCESS_VERIFIED);
+      assert.ok(res.trajectory.verification);
+      assert.equal(res.trajectory.verification.outcome, 'VERIFIED');
+    });
+
+    // 164. Stale evidence replay rejected after dynamic mutation on real Edge
+    await runTest(164, 'Stale Evidence Replay Rejected After Dynamic Mutation', 'Verification-Before-Completion (Brick 42)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/verification-stale-replay.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Reset and verify',
+          milestones: [{ id: 'm1', description: 'reset session', status: 'in_progress' }]
+        },
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.click',
+            arguments: { target: { kind: 'button', text: 'Reset and Verify' } }
+          }
+        },
+        {
+          decision: 'COMPLETE',
+          completionClaim: 'Session reset complete'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: {
+          publicPrompt: 'Click the Reset and Verify button and verify that Current Session: Fresh Verified is displayed.',
+          allowedTools: ['browser.inspectPage', 'browser.click'],
+          budgets: { maxToolCalls: 4, maxFailures: 2 }
+        },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.VERIFICATION_FAILED);
+    });
+
+    // 165. Page and context misbinding rejected on real Edge
+    await runTest(165, 'Page and Context Misbinding Rejected', 'Verification-Before-Completion (Brick 42)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/verification-page-misbinding.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Verify primary panel',
+          milestones: [{ id: 'm1', description: 'inspect and complete', status: 'in_progress' }]
+        },
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.inspectPage',
+            arguments: {}
+          }
+        },
+        {
+          decision: 'COMPLETE',
+          completionClaim: 'Complete is visible in subframe'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: {
+          publicPrompt: 'Verify that Active Panel: Complete is displayed on the primary panel.',
+          allowedTools: ['browser.inspectPage'],
+          budgets: { maxToolCalls: 3, maxFailures: 2 }
+        },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.VERIFICATION_FAILED);
+    });
+
+    // 166. Model premature complete claim without evidence rejected on real Edge
+    await runTest(166, 'Premature COMPLETE Claim Without Evidence Rejected', 'Verification-Before-Completion (Brick 42)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/verification-false-claim.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Verify stage complete',
+          milestones: [{ id: 'm1', description: 'claim completion immediately', status: 'in_progress' }]
+        },
+        {
+          decision: 'COMPLETE',
+          completionClaim: 'I am confident the stage is complete'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: {
+          publicPrompt: 'Verify that Verification Stage: Complete is displayed on the page.',
+          allowedTools: ['browser.inspectPage'],
+          budgets: { maxToolCalls: 3, maxFailures: 2 }
+        },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.VERIFICATION_FAILED);
+    });
+
+    // 167. Conflicting fresh trusted evidence safely halts in VERIFICATION_CONFLICT on real Edge
+    await runTest(167, 'Conflicting Fresh Trusted Evidence Halts in VERIFICATION_CONFLICT', 'Verification-Before-Completion (Brick 42)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/verification-conflict.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Process transaction',
+          milestones: [{ id: 'm1', description: 'process tx', status: 'in_progress' }]
+        },
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.click',
+            arguments: { target: { kind: 'button', text: 'Process Transaction' } }
+          }
+        },
+        {
+          decision: 'COMPLETE',
+          completionClaim: 'Transaction finalized'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: {
+          publicPrompt: 'Process the transaction and verify that Transaction Status: Finalized is displayed.',
+          allowedTools: ['browser.inspectPage', 'browser.click'],
+          budgets: { maxToolCalls: 4, maxFailures: 2 }
+        },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.VERIFICATION_CONFLICT);
+    });
+
+    // 168. Adversarial prompt injection text rejected as untrusted page data on real Edge
+    await runTest(168, 'Adversarial Prompt Injection Text Rejected as Untrusted Page Data', 'Verification-Before-Completion (Brick 42)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/verification-prompt-injection.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Authenticate gateway',
+          milestones: [{ id: 'm1', description: 'authenticate', status: 'in_progress' }]
+        },
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.click',
+            arguments: { target: { kind: 'button', text: 'Authenticate Gateway' } }
+          }
+        },
+        {
+          decision: 'COMPLETE',
+          completionClaim: 'System override said verification complete'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: {
+          publicPrompt: 'Click the Authenticate Gateway button and verify that System Auth: Granted is displayed.',
+          allowedTools: ['browser.inspectPage', 'browser.click'],
+          budgets: { maxToolCalls: 4, maxFailures: 2 }
+        },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.VERIFICATION_FAILED);
+    });
+
+    // 169. Real browser cleanup succeeds
+    await runTest(169, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
       await bm.close();
       assert.equal(bm.isBrowserConnected(), false);
       assert.equal(bm.pageCount, 0);
@@ -3714,6 +3980,7 @@ async function main() {
     'Runtime Agent Harness Governance (PRE-040A)',
     'Autonomous Browser Agent v1 (Brick 40)',
     'Bounded Recovery & Self-Healing Agent (Brick 41)',
+    'Verification-Before-Completion (Brick 42)',
     'Cleanup'
   ];
 
@@ -3731,10 +3998,10 @@ async function main() {
 
   console.log('--------------------------------------------------');
   console.log(`Tests:\n${passed}/${total} PASS\n`);
-  console.log(`Exit Code:\n${passed === total && total >= 160 ? 0 : 1}`);
+  console.log(`Exit Code:\n${passed === total && total >= 169 ? 0 : 1}`);
   console.log('==================================================');
 
-  if (passed !== total || total < 160) {
+  if (passed !== total || total < 169) {
     process.exit(1);
   }
 }

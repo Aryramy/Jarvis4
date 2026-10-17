@@ -16,7 +16,8 @@
     "verify:browser": "node scripts/verify-browser.mjs",
     "eval:harness": "node scripts/verify-eval-harness.mjs",
     "eval:agent": "node scripts/verify-eval-agent.mjs",
-    "eval:recovery": "node scripts/verify-eval-recovery.mjs"
+    "eval:recovery": "node scripts/verify-eval-recovery.mjs",
+    "eval:verification": "node scripts/verify-eval-verification.mjs"
   },
   "keywords": [
     "jarvis",

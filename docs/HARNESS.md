@@ -372,6 +372,15 @@ All other mechanics—including form mechanics, state transitions, token invalid
   - Verified 8/8 Recovery Tasks (R01–R08) on real Microsoft Edge with 100% hard recovery gates.
   - Zero regression on existing Golden Tasks (12/12 PASS), Security Eval Cases (7/7 PASS), and Autonomous Golden Tasks (12/12 PASS).
 
+- **BRICK-042**:
+  - Extended Level 2 real-browser harness from 162 to 169 tests across 34 categories (`scripts/verify-browser.mjs`).
+  - Added Category 34 (Verification-Before-Completion) covering 7 real Microsoft Edge verification test scenarios (tests 162-168 plus renumbered cleanup test 169).
+  - Verified tool success without goal success rejection, fresh post-action evidence proof, stale evidence replay rejection, page/context misbinding rejection, premature completion claim rejection, conflicting evidence safe halt in `VERIFICATION_CONFLICT`, and prompt injection bypass blocking.
+  - Extended Level 1 offline test harness from 1811 to 1835 tests across 307 suites (`npm run verify`).
+  - Implemented Brick-042 Verification Evaluation Benchmark Suite (`tests/eval/verification-tasks/`, `scripts/verify-eval-verification.mjs`, `npm run eval:verification`).
+  - Verified 8/8 Verification Tasks (V01–V08) on real Microsoft Edge with 100% hard verification gates.
+  - Maintained zero regression on existing Golden Tasks (12/12 PASS), Security Cases (7/7 PASS), Autonomous Golden Tasks (11/12 PASS), and Recovery Tasks (8/8 PASS).
+
 ## 8. Contract Principle
 
 > [!IMPORTANT]

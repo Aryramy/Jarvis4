@@ -18,3 +18,25 @@ export {
   buildActionMessages,
   buildRepairMessages
 } from './agentPlanner.js';
+export {
+  FAILURE_CLASSES,
+  MUTATION_OUTCOMES,
+  RECOVERY_ACTIONS,
+  RecoveryManager,
+  classifyFailure,
+  classifyMutationOutcome,
+  computeFailureFingerprint,
+  getRecoveryHint,
+  stripRecoveryOverrides
+} from './recoveryPolicy.js';
+export {
+  TRUST_LEVELS,
+  VERIFICATION_CRITERIA_TYPES,
+  VERIFICATION_OUTCOMES,
+  VERIFICATION_BUDGET_DEFAULTS,
+  EvidenceLedger,
+  VerificationContract,
+  VerificationEngine,
+  deriveVerificationContract,
+  sanitizeEvidenceValue
+} from './verificationPolicy.js';

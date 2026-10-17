@@ -27,6 +27,7 @@ import {
   loadTaskById,
   loadAllTasks,
   loadRecoveryTasks,
+  loadVerificationTasks,
   getPublicTask,
   clearTaskCache
 } from '../../src/agent/eval/taskLoader.js';
@@ -175,6 +176,14 @@ describe('Eval Harness Task Schema & Loader Tests', () => {
     assert.equal(tasks.length, 8);
     const ids = tasks.map(t => t.id).sort();
     assert.deepEqual(ids, ['R01', 'R02', 'R03', 'R04', 'R05', 'R06', 'R07', 'R08']);
+  });
+
+  it('loads all 8 verification tasks successfully from verification-tasks directory', () => {
+    clearTaskCache();
+    const tasks = loadVerificationTasks();
+    assert.equal(tasks.length, 8);
+    const ids = tasks.map(t => t.id).sort();
+    assert.deepEqual(ids, ['V01', 'V02', 'V03', 'V04', 'V05', 'V06', 'V07', 'V08']);
   });
 
   it('rejects path traversal in loadTaskById with EVAL_TASK_INVALID', () => {

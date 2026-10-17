@@ -21,6 +21,7 @@ export {
   loadTaskById,
   loadAllTasks,
   loadRecoveryTasks,
+  loadVerificationTasks,
   getPublicTask,
   clearTaskCache,
   getTasksDirectory

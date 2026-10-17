@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Verification Consequential Fixture (V07)</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .status { margin-top: 15px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Verification Fixture V07</h1>
+  <p>Tests that consequential action verification safeguard prevents automatic retry when outcome is uncertain.</p>
+  <form id="payment-form" action="/api/test/submit" method="POST">
+    <label for="amount">Amount:</label>
+    <input type="text" id="amount" name="amount" value="500">
+    <button type="submit" id="submit-btn">Authorize Payment</button>
+  </form>
+  <div id="status-display" class="status">Status: Awaiting Approval</div>
+</body>
+</html>

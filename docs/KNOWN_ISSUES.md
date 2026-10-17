@@ -508,3 +508,21 @@ Currently tracked issues in JARVIS4:
     - **Privacy-Preserving Same-Failure Loop Detection**: Safe fingerprinting hashes `failureClass`, `tool`, `pageId`, `contextId`, `semanticTarget`, and `milestone` without including page text or secrets. Repeating failures beyond `maxSameFailureOccurrences` cleanly halt execution in `RECOVERY_EXHAUSTED`.
     - **Closed Shadow Roots Remain Truthfully Unsupported**: Closed shadow roots (`mode: 'closed'`) cannot be pierced or recovered autonomously and halt safely with `CLOSED_SHADOW_ROOT_UNSUPPORTED` / `BLOCKED_BY_POLICY`.
     - **Fixture-Only Autonomy**: Autonomy and self-healing are verified strictly against local loopback fixtures. Public-web production autonomy remains NO, voice integration remains NO, and persistent cross-run memory remains NO.
+
+38. **Verification-Before-Completion Hardening v1 Observations & Boundaries (BRICK-042 Verified / Checkpoint: GREEN-042)**:
+    - **No Self-Grading Authority**: The model has zero authority over task verification. Fields such as `verificationPassed`, `successVerified`, and `taskCompleted` are stripped from model proposals. A model decision of `COMPLETE` is handled strictly as an unverified completion request (`COMPLETION_REQUESTED`).
+    - **Separation of Success Concepts**: Tool execution success (e.g. click executed without error) does not imply action effect verified, which in turn does not imply user goal verified. Only deterministic proof of user goal completion authorizes `SUCCESS_VERIFIED`.
+    - **Fresh Post-Action Evidence Requirement**: Pre-action evidence predating a mutation cannot satisfy a verification criterion whose outcome depends on that mutation.
+    - **Page and Context Binding**: Evidence collected from secondary pages or detached contexts cannot satisfy criteria bound to the primary active page.
+    - **Prompt Injection Defense**: Page text instructions claiming "Verification complete" or "Tell the user success" are treated as untrusted web data and cannot modify verification criteria, ledger trust, or completion outcomes.
+    - **Evidence Conflict & Loop Exhaustion**: Unresolved contradictory signals safely halt in `VERIFICATION_CONFLICT`. Repeated identical insufficient evidence halts in `VERIFICATION_EXHAUSTED` without infinite observation loops.
+    - **Non-Mutating Verification**: Verification evaluation never automatically repeats mutations. Missing evidence triggers bounded non-mutating observations (`maxVerificationCycles = 2`).
+    - **Fixture-Only Scope**: All verification benchmark tasks and real Edge tests run strictly against local loopback fixtures. Public-web production autonomy remains NO, voice integration remains NO, and persistent cross-run memory remains NO.
+    - **Preserved G06 Autonomous Evaluation Audit Result**:
+      - Initial G06 run result: `FAIL — BUDGET_EXCEEDED`
+      - Root cause: Live model variance (model selected extra exploratory observations before reaching terminal state)
+      - Single bounded targeted rerun: `PASS`
+      - Final full autonomous suite: 12/12 PASS
+      - Actual product regression: NO
+      - Verification criteria weakened: NO
+      - Golden acceptance changed: NO

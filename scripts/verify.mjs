@@ -239,7 +239,26 @@ const REQUIRED_FILES = [
   'tests/eval/recovery-tasks/R05.json',
   'tests/eval/recovery-tasks/R06.json',
   'tests/eval/recovery-tasks/R07.json',
-  'tests/eval/recovery-tasks/R08.json'
+  'tests/eval/recovery-tasks/R08.json',
+  'src/agent/autonomous/verificationPolicy.js',
+  'scripts/verify-eval-verification.mjs',
+  'tests/unit/verificationPolicy.test.js',
+  'tests/eval/verification-tasks/V01.json',
+  'tests/eval/verification-tasks/V02.json',
+  'tests/eval/verification-tasks/V03.json',
+  'tests/eval/verification-tasks/V04.json',
+  'tests/eval/verification-tasks/V05.json',
+  'tests/eval/verification-tasks/V06.json',
+  'tests/eval/verification-tasks/V07.json',
+  'tests/eval/verification-tasks/V08.json',
+  'tests/browser-fixtures/verification-no-effect.html',
+  'tests/browser-fixtures/verification-post-action.html',
+  'tests/browser-fixtures/verification-stale-replay.html',
+  'tests/browser-fixtures/verification-page-misbinding.html',
+  'tests/browser-fixtures/verification-false-claim.html',
+  'tests/browser-fixtures/verification-conflict.html',
+  'tests/browser-fixtures/verification-consequential.html',
+  'tests/browser-fixtures/verification-prompt-injection.html'
 ];
 
 const REQUIRED_DIRS = [
@@ -266,6 +285,7 @@ const REQUIRED_DIRS = [
   'tests/eval',
   'tests/eval/tasks',
   'tests/eval/recovery-tasks',
+  'tests/eval/verification-tasks',
   'tests/fixtures/html',
   'scripts'
 ];

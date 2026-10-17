@@ -1395,3 +1395,39 @@
   - Zero regression on existing Golden Tasks (12/12 PASS) and Security Cases (7/7 PASS) (`npm run eval:harness`).
   - Zero regression on live autonomous agent Golden Tasks (12/12 PASS) (`npm run eval:agent`).
   - 8/8 Recovery Tasks PASS on real Microsoft Edge (`npm run eval:recovery`).
+
+## Decision 42 — Verification-Before-Completion Hardening v1 (BRICK-042)
+- **Status**: Accepted (BRICK-042 VERIFIED, Checkpoint: GREEN-042)
+- **Context**:
+  - In Brick 40 and 41, the autonomous agent could plan, act, inspect, and recover within bounded budgets.
+  - However, model confidence is NOT task success, tool execution success is NOT task success, and model completion claims must never self-author success.
+  - Previously, when the model issued `COMPLETE`, the controller lacked an explicit, declarative runtime evidence contract to independently verify whether user goals were satisfied.
+  - Brick 42 hardens completion semantics: the agent may enter `SUCCESS_VERIFIED` ONLY when trusted deterministic runtime evidence proves the requested task outcome.
+- **Decision**:
+  1. **Strict Prohibition of Self-Grading**:
+     - Model has zero authority over verification. Authoritative verification flags (`verificationPassed`, `successVerified`, etc.) are stripped and rejected.
+     - Webpage text is categorized as `UNTRUSTED_PAGE_DATA`; prompt injections claiming "Verification complete" are ignored.
+  2. **Separation of Semantic Concepts**:
+     - Distinct semantics: A) Tool Execution Success != B) Action Effect Verified != C) User Goal Verified. Only C authorizes `SUCCESS_VERIFIED`.
+  3. **Deterministic Verification Policy & Contract (`src/agent/autonomous/verificationPolicy.js`)**:
+     - Declarative runtime completion contract (`maxCriteria = 4`) containing deterministic criteria types (`TEXT_PRESENT`, `TEXT_ABSENT`, `TEXT_EQUALS`, `URL_EQUALS`, `URL_CONTAINS`, `TARGET_PRESENT`, etc.).
+     - Contract deep-frozen at run start; cannot be modified or weakened mid-run.
+  4. **Bounded Evidence Ledger & Trust Levels**:
+     - Records evidence with sequence, pageId, contextId, and trust level (`TRUSTED_RUNTIME_EVIDENCE`, `UNTRUSTED_PAGE_DATA`, `MODEL_CLAIM`).
+     - Sanitizes payloads to prevent secret leaks and oversized DOM dumps.
+  5. **Freshness & Provenance Enforcement**:
+     - Pre-action evidence cannot verify post-action mutation states.
+     - Strict page binding and context binding prevent cross-page or detached context misattributions.
+  6. **Safe Conflict & Loop Handling**:
+     - Conflicting evidence triggers `VERIFICATION_CONFLICT`.
+     - Repeated insufficient evidence without progress halts in `VERIFICATION_EXHAUSTED`.
+     - Bounded verification loop (`maxVerificationCycles = 2`); non-mutating only.
+  7. **Dedicated Verification Benchmark Suite (V01–V08)**:
+     - 8 deterministic benchmark tasks (`tests/eval/verification-tasks/`, `scripts/verify-eval-verification.mjs`).
+     - Verified 8/8 PASS with 100% hard verification gates.
+- **Consequences**:
+  - Robust completion verification established; model can never hallucinate or self-declare task completion.
+  - Offline tests expanded from 1811 to 1835 PASS (`npm run verify`).
+  - Real Edge tests expanded from 162 to 169 across 34 categories PASS (`npm run verify:browser`).
+  - All existing suites preserved: 12/12 Golden & 7/7 Security in eval:harness, 12/12 in eval:agent, 8/8 in eval:recovery, 8/8 in eval:verification.
+  - Preserved G06 Autonomous Evaluation Audit Result: Initial G06 run result: FAIL — BUDGET_EXCEEDED (root cause: live model variance); single bounded targeted rerun: PASS; final full autonomous suite: 12/12 PASS; actual product regression: NO; verification criteria weakened: NO; golden acceptance changed: NO.

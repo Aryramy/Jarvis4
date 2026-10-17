@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Verification No-Effect Fixture (V01)</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .status { margin-top: 15px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Verification Fixture V01</h1>
+  <p>Tests that tool execution success without goal outcome does not produce SUCCESS_VERIFIED.</p>
+  <button id="exec-btn" type="button" onclick="handleClick()">Execute Action</button>
+  <div id="status-display" class="status">Status: Unprocessed</div>
+
+  <script>
+    function handleClick() {
+      // Button executes successfully without error, but goal state 'Status: Processed' does NOT occur
+      document.getElementById('status-display').textContent = 'Status: Incomplete';
+    }
+  </script>
+</body>
+</html>

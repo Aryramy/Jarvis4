@@ -63,7 +63,16 @@ const FORBIDDEN_SECURITY_KEYS = Object.freeze([
   'resetBudget',
   'extendTimeout',
   'retry',
-  'retryOverride'
+  'retryOverride',
+  'verificationPassed',
+  'successVerified',
+  'taskCompleted',
+  'evidenceSatisfied',
+  'goalSatisfied',
+  'finalState',
+  'completionScore',
+  'maxVerificationCycles',
+  'skipVerification'
 ]);
 
 const FORBIDDEN_SELECTOR_KEYS = Object.freeze([
