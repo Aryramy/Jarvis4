@@ -1,15 +1,58 @@
 Project: JARVIS4
-Current Milestone: BRICK-040
-Status: BRICK-040 VERIFIED (Autonomous Multi-Step Browser Agent v1: Hybrid Short-Plan + Runtime Governance + Independent Eval)
-Last Verified Milestone: GREEN-040 (BRICK-040 VERIFIED; PRE-040C VERIFIED at GREEN-039C commit 0b1426b)
+Current Milestone: BRICK-041
+Status: VERIFIED (Checkpoint: GREEN-041) (Bounded Recovery & Self-Healing Browser Agent v1: Deterministic Recovery Policy + Safe Fingerprinting + Zero Mutation Replay + Eval Suite)
+Last Verified Milestone: GREEN-040 (BRICK-040 VERIFIED at commit 7157ab9)
 Runtime Agent Harness: Active & Governed
 OpenRouter Routing Gate: Active (FAST default, bounded REASONING escalation)
 Autonomous Agent: VERIFIED (Single tool per turn, strict output validation, loopback fixtures only)
-Brick 40: COMPLETE & VERIFIED (GREEN-040)
-Current Feature: Autonomous Multi-Step Browser Agent v1 (AgentController, AgentRunStateMachine, OutputValidator, AgentPlanner, AutonomousAgentAdapter, Control Center UI integration)
-Next Feature: NOT AUTHORIZED (Brick 41 — NOT STARTED)
+Recovery/Self-Healing: V1 BOUNDED / FIXTURE-ONLY
+Automatic mutation replay: PROHIBITED
+Uncertain mutation retry: PROHIBITED
+Consequential automatic retry: PROHIBITED
+Public-web production autonomy: NO
+Voice integration: NO
+Persistent agent memory: NO
+Brick 40: COMPLETE & VERIFIED (GREEN-040, commit 7157ab9)
+Brick 41: VERIFIED (Checkpoint: GREEN-041)
+Brick 42: NOT STARTED / NOT AUTHORIZED
 
 ## Working capabilities
+
+- Bounded Recovery & Self-Healing Browser Agent v1 (BRICK-041) (`src/agent/autonomous/recoveryPolicy.js`, `agentController.js`, `agentState.js`, `outputValidator.js`, `agentPlanner.js`):
+  - Deterministic Recovery Policy (`recoveryPolicy.js`):
+    - Runtime/controller policy exclusively determines failure classification, recoverability, and recovery actions.
+    - Model NEVER decides whether a failure is recoverable; caller and model attempts to override recovery budgets or parameters are stripped and rejected.
+    - Standard taxonomy: `TARGET_STALE`, `TARGET_NOT_FOUND`, `SNAPSHOT_STALE`, `CONTEXT_STALE`, `CONTEXT_DETACHED`, `PAGE_CHANGED`, `PAGE_CLOSED`, `PAGE_NOT_ACTIVE`, `WAIT_TIMEOUT`, `DOM_CHANGED`, `VERIFICATION_FAILED`, `NAVIGATION_FAILED`, `AGENT_OUTPUT_INVALID`, `TOOL_FAILURE`, `AUTH_REQUIRED`, `CONFIRMATION_REQUIRED`, `POLICY_BLOCKED`, `BUDGET_EXCEEDED`, `CLOSED_SHADOW_UNSUPPORTED`, `MUTATION_OUTCOME_UNCERTAIN`.
+    - Recoverable vs Non-Recoverable classification: Policy blocks recovery on security/policy boundaries (`POLICY_BLOCKED`, `BUDGET_EXCEEDED`, `CLOSED_SHADOW_UNSUPPORTED`, `AUTH_REQUIRED`, `MFA_REQUIRED`, `CAPTCHA_REQUIRED`, `CONFIRMATION_REQUIRED`, `MUTATION_OUTCOME_UNCERTAIN`).
+  - Strict Anti-Replay & Mutation Outcome Classification:
+    - Zero automatic mutation replay: Runtime code NEVER replays mutating actions (`click`, `fill`, `check`, `uncheck`, `select`, `fillForm`, `uploadFile`, `downloadFile`, `submitForm`) after failure.
+    - Explicit mutation outcome states: `EFFECT_VERIFIED` (mutation occurred, do not repeat), `NO_EFFECT_VERIFIED` (mutation did not occur, new proposal permitted after fresh observation), `OUTCOME_UNCERTAIN` (safe stop in `MUTATION_OUTCOME_UNCERTAIN`).
+    - Consequential R3 retry protection: Consequential actions stop safely in `CONSEQUENTIAL_OUTCOME_UNCERTAIN`; zero confirmation token reuse, zero token leakage, zero model self-approval.
+  - Dedicated Clamped Recovery Budgets:
+    - Separate deterministic limits: `maxRecoveryCycles = 2`, `maxReplans = 2`, `maxSameFailureOccurrences = 2`, `maxContextRediscoveries = 2`, `maxRecoveryWaits = 2`.
+    - Recovery operations consume standard execution budgets (tool calls, model turns, runtime ms); no hidden or infinite channels.
+  - Safe Same-Failure Loop Detection:
+    - Safe fingerprinting hashing `failureClass`, `tool`, `pageId`, `contextId`, `semanticTarget`, and `milestone` (redacting all page text and secrets).
+    - Exceeding `maxSameFailureOccurrences` halts recovery deterministically in `RECOVERY_EXHAUSTED`.
+  - Non-Mutating Recovery Flow:
+    - Recovery loop transitions: `EXECUTING` -> failure -> `RECOVERING` -> non-mutating fresh observation (`inspectPage`, `inspectContexts`, `listPages`) -> `REPLANNING` -> `DECIDING` -> new proposal.
+  - Dedicated Brick-041 Recovery Evaluation Suite (`tests/eval/recovery-tasks/`, `scripts/verify-eval-recovery.mjs`):
+    - R01: Stale Target Recovery (re-inspect -> fresh snapshot -> new proposal -> success).
+    - R02: Detached Context Recovery (context rediscovery -> new contextId -> fresh inspect -> verified continuation).
+    - R03: Dynamic Target Delay (bounded wait/stability -> fresh inspect -> success).
+    - R04: Page State Change (open pages inventory -> switchPage -> fresh inspect -> safe continuation).
+    - R05: Verified No-Effect Mutation (safe non-consequential retry prevention -> new proposal -> verified success).
+    - R06: Uncertain Mutation Safe Halt (uncertain mutation halts in `MUTATION_OUTCOME_UNCERTAIN`).
+    - R07: Consequential Retry Protection (operator approval gateway timeout halts in `CONSEQUENTIAL_OUTCOME_UNCERTAIN` with zero confirmation replay).
+    - R08: Auth Barrier Recovery Halt (halts in `NEEDS_HUMAN_AUTH` with zero credential automation).
+    - Evaluated via `npm run eval:recovery`: 8/8 Recovery Tasks PASS (100% functional pass rate, 100% hard recovery gates).
+  - Verification Evidence:
+    - 1811/1811 offline unit, contract, and regression tests PASS (`npm run verify`).
+    - 162/162 real-browser acceptance tests across 33 categories PASS on Microsoft Edge (`npm run verify:browser`).
+    - 12/12 golden tasks and 7/7 security cases PASS on Microsoft Edge (`npm run eval:harness`).
+    - 12/12 autonomous golden tasks PASS on Microsoft Edge (`npm run eval:agent`).
+    - 8/8 recovery tasks PASS on Microsoft Edge (`npm run eval:recovery`).
+
 
 - Autonomous Multi-Step Browser Agent v1 (BRICK-040) (`src/agent/autonomous/`):
   - AgentRunStateMachine (`agentState.js`):

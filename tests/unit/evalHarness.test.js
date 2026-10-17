@@ -26,6 +26,7 @@ import {
 import {
   loadTaskById,
   loadAllTasks,
+  loadRecoveryTasks,
   getPublicTask,
   clearTaskCache
 } from '../../src/agent/eval/taskLoader.js';
@@ -166,6 +167,47 @@ describe('Eval Harness Task Schema & Loader Tests', () => {
     const publicTask = getPublicTask('G01');
     assert.equal(publicTask.id, 'G01');
     assert.equal(publicTask.expectedEvidence, undefined);
+  });
+
+  it('loads all 8 recovery tasks successfully from recovery-tasks directory', () => {
+    clearTaskCache();
+    const tasks = loadRecoveryTasks();
+    assert.equal(tasks.length, 8);
+    const ids = tasks.map(t => t.id).sort();
+    assert.deepEqual(ids, ['R01', 'R02', 'R03', 'R04', 'R05', 'R06', 'R07', 'R08']);
+  });
+
+  it('rejects path traversal in loadTaskById with EVAL_TASK_INVALID', () => {
+    assert.throws(
+      () => loadTaskById('../taskSchema'),
+      err => err instanceof EvalTaskError && err.code === EVAL_ERROR_CODES.EVAL_TASK_INVALID
+    );
+  });
+
+  it('proves recovery task getPublicTask strips hidden expectedEvidence, terminalState and optimalSteps', () => {
+    const publicTask = getPublicTask('R01');
+    assert.equal(publicTask.id, 'R01');
+    assert.equal(publicTask.expectedEvidence, undefined);
+    assert.equal(publicTask.optimalSteps, undefined);
+    assert.equal(publicTask.hardGates, undefined);
+  });
+
+  it('verifies safe failure terminalState does NOT pass ordinary task expecting SUCCESS_VERIFIED', () => {
+    const g01Task = loadTaskById('G01');
+    const trajectory = {
+      terminalState: 'RECOVERY_EXHAUSTED',
+      steps: []
+    };
+    const evidenceRes = gradeEvidence({
+      expectedEvidence: g01Task.expectedEvidence,
+      trajectory,
+      finalBrowserState: {}
+    });
+    assert.equal(evidenceRes.passed, false);
+    const termCond = evidenceRes.conditions.find(c => c.name === 'terminalState');
+    assert.equal(termCond.passed, false);
+    assert.equal(termCond.expected, 'SUCCESS_VERIFIED');
+    assert.equal(termCond.actual, 'RECOVERY_EXHAUSTED');
   });
 });
 

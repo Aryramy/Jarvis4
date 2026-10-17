@@ -228,7 +228,18 @@ const REQUIRED_FILES = [
   'tests/unit/autonomousPlanner.test.js',
   'tests/unit/autonomousAgentController.test.js',
   'tests/contract/autonomousAgentEndpoints.test.js',
-  'tests/regression/autonomousAgentSecurity.test.js'
+  'tests/regression/autonomousAgentSecurity.test.js',
+  'src/agent/autonomous/recoveryPolicy.js',
+  'scripts/verify-eval-recovery.mjs',
+  'tests/unit/recoveryPolicy.test.js',
+  'tests/eval/recovery-tasks/R01.json',
+  'tests/eval/recovery-tasks/R02.json',
+  'tests/eval/recovery-tasks/R03.json',
+  'tests/eval/recovery-tasks/R04.json',
+  'tests/eval/recovery-tasks/R05.json',
+  'tests/eval/recovery-tasks/R06.json',
+  'tests/eval/recovery-tasks/R07.json',
+  'tests/eval/recovery-tasks/R08.json'
 ];
 
 const REQUIRED_DIRS = [
@@ -254,6 +265,7 @@ const REQUIRED_DIRS = [
   'tests/smoke',
   'tests/eval',
   'tests/eval/tasks',
+  'tests/eval/recovery-tasks',
   'tests/fixtures/html',
   'scripts'
 ];

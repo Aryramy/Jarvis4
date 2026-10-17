@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Recovery Auth Barrier Fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .auth-wall { border: 2px solid #d83b01; padding: 16px; background: #fff4ce; }
+  </style>
+</head>
+<body>
+  <h1>Recovery Auth Barrier Fixture</h1>
+  <p>Tests that authentication barriers stop autonomous recovery and request Human Handoff.</p>
+
+  <div id="auth-wall" class="auth-wall">
+    <h2>Authentication Required</h2>
+    <p id="auth-message">LOGIN_REQUIRED: Operator Authentication Required</p>
+    <a id="login-link" href="/auth/login">Log In</a>
+  </div>
+</body>
+</html>

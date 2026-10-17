@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Recovery Subframe</title>
+</head>
+<body>
+  <h2>Recovery Subframe</h2>
+  <button type="button" id="subframe-btn" onclick="handleClick()">Subframe Action</button>
+  <div id="subframe-status">Ready</div>
+  <script>
+    function handleClick() {
+      document.getElementById('subframe-status').textContent = 'Subframe Action Verified';
+      try { window.parent.postMessage('subframe_done', '*'); } catch {}
+    }
+  </script>
+</body>
+</html>

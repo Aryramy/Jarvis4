@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Recovery No-Effect Fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    #status { font-weight: bold; color: green; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Recovery No-Effect Fixture</h1>
+  <p>Tests handling of actions that verify as producing no effect.</p>
+
+  <button id="noop-btn" type="button" aria-disabled="true">No-Op Toggle</button>
+  <button id="active-btn" type="button" onclick="handleActive()">Active Verified Toggle</button>
+
+  <div id="status">Waiting for toggle...</div>
+
+  <script>
+    function handleActive() {
+      document.getElementById('status').textContent = 'Active Toggle Verified';
+    }
+  </script>
+</body>
+</html>

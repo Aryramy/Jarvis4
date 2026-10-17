@@ -21,7 +21,9 @@ export const AGENT_VALIDATION_ERRORS = Object.freeze({
   AGENT_PROPOSAL_DISALLOWED_FIELD: 'AGENT_PROPOSAL_DISALLOWED_FIELD',
   AGENT_MULTIPLE_TOOLS_REJECTED: 'AGENT_MULTIPLE_TOOLS_REJECTED',
   MULTIPLE_TOOLS_NOT_SUPPORTED: 'MULTIPLE_TOOLS_NOT_SUPPORTED',
-  SECURITY_OVERRIDE_REJECTED: 'SECURITY_OVERRIDE_REJECTED'
+  SECURITY_OVERRIDE_REJECTED: 'SECURITY_OVERRIDE_REJECTED',
+  RECOVERY_BUDGET_OVERRIDE_REJECTED: 'RECOVERY_BUDGET_OVERRIDE_REJECTED',
+  MUTATION_REPLAY_PROHIBITED: 'MUTATION_REPLAY_PROHIBITED'
 });
 
 export class AgentOutputValidationError extends Error {
@@ -51,7 +53,17 @@ const FORBIDDEN_SECURITY_KEYS = Object.freeze([
   'toolAuthorization',
   'sessionAccess',
   'verificationSuccess',
-  'override'
+  'override',
+  'recoveryBudget',
+  'maxRetries',
+  'retryCount',
+  'maxRecoveryCycles',
+  'maxRecoveryWaits',
+  'maxContextRediscoveries',
+  'resetBudget',
+  'extendTimeout',
+  'retry',
+  'retryOverride'
 ]);
 
 const FORBIDDEN_SELECTOR_KEYS = Object.freeze([

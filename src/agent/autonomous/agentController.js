@@ -31,7 +31,24 @@ import { OpenRouterRoutingGate } from '../../providers/openRouterRouter.js';
 import { ROUTING_PROFILES } from '../../providers/openRouterRouting.js';
 import { RuntimeAgentHarness } from '../runtime/runtimeHarness.js';
 import { RuntimeHarnessError, ERROR_CODES } from '../runtime/runtimeErrors.js';
+import { getRegisteredTool } from '../runtime/toolRegistry.js';
 import { defaultBrowserManager } from '../../browser/browserManager.js';
+import {
+  FAILURE_CLASSES,
+  MUTATION_OUTCOMES,
+  RECOVERY_ACTIONS,
+  RecoveryManager,
+  classifyFailure,
+  classifyMutationOutcome,
+  computeFailureFingerprint,
+  getRecoveryHint,
+  stripRecoveryOverrides
+} from './recoveryPolicy.js';
+
+function isMutation(toolName) {
+  const def = getRegisteredTool(toolName);
+  return Boolean(def && def.isMutating);
+}
 
 export const CONTROLLER_DEFAULTS = Object.freeze({
   maxToolCalls: 10,
@@ -120,6 +137,16 @@ export class AgentController {
     this.latestObservation = null;
     this.totalTokens = 0;
     this.totalCost = null;
+
+    // Recovery & Self-Healing state (BRICK-041)
+    const recoveryBudgetInput = options.recoveryBudget || rawTask.recoveryBudget || {};
+    this.recoveryManager = new RecoveryManager(recoveryBudgetInput);
+    this.planVersion = 1;
+    this.planHistory = [];
+    this.lastMutationProposal = null;
+    this.lastMutationFailed = false;
+    this.lastMutationOutcome = null;
+    this.recoveryHint = null;
   }
 
   get state() {
@@ -219,7 +246,10 @@ export class AgentController {
           snapshotToken: insp.snapshotToken || baseObs.snapshotToken,
           visibleText: (insp.visibleText && typeof insp.visibleText === 'object') ? insp.visibleText.content : (insp.visibleText || ''),
           elements: insp.elements || [],
-          forms: insp.forms || []
+          forms: insp.forms || [],
+          recoveryHint: this.recoveryHint,
+          planVersion: this.planVersion,
+          mutationOutcome: this.lastMutationOutcome
         };
         return this.latestObservation;
       }
@@ -239,12 +269,18 @@ export class AgentController {
         snapshotToken: inspectResult.evidence?.snapshotToken || baseObs.snapshotToken,
         visibleText: inspectResult.evidence?.observed?.visibleText || '',
         elements: inspectResult.evidence?.observed?.elements || [],
-        forms: inspectResult.evidence?.observed?.forms || []
+        forms: inspectResult.evidence?.observed?.forms || [],
+        recoveryHint: this.recoveryHint,
+        planVersion: this.planVersion,
+        mutationOutcome: this.lastMutationOutcome
       };
       return this.latestObservation;
     } catch (err) {
       this.latestObservation = {
         ...baseObs,
+        recoveryHint: this.recoveryHint,
+        planVersion: this.planVersion,
+        mutationOutcome: this.lastMutationOutcome,
         lastError: err.code || err.message
       };
       return this.latestObservation;
@@ -477,7 +513,19 @@ export class AgentController {
         }
       }
     } catch (err) {
-      if (err.code === ERROR_CODES.BUDGET_EXCEEDED) {
+      if (err.code === AGENT_RUN_STATES.RECOVERY_EXHAUSTED || err.code === 'RECOVERY_EXHAUSTED') {
+        if (!this.stateMachine.isTerminal) {
+          this.stateMachine.transitionTo(AGENT_RUN_STATES.RECOVERY_EXHAUSTED, err.message);
+        }
+      } else if (err.code === AGENT_RUN_STATES.MUTATION_OUTCOME_UNCERTAIN || err.code === 'MUTATION_OUTCOME_UNCERTAIN') {
+        if (!this.stateMachine.isTerminal) {
+          this.stateMachine.transitionTo(AGENT_RUN_STATES.MUTATION_OUTCOME_UNCERTAIN, err.message);
+        }
+      } else if (err.code === AGENT_RUN_STATES.CONSEQUENTIAL_OUTCOME_UNCERTAIN || err.code === 'CONSEQUENTIAL_OUTCOME_UNCERTAIN') {
+        if (!this.stateMachine.isTerminal) {
+          this.stateMachine.transitionTo(AGENT_RUN_STATES.CONSEQUENTIAL_OUTCOME_UNCERTAIN, err.message);
+        }
+      } else if (err.code === ERROR_CODES.BUDGET_EXCEEDED) {
         if (!this.stateMachine.isTerminal) {
           this.stateMachine.transitionTo(AGENT_RUN_STATES.BUDGET_EXCEEDED, err.message);
         }
@@ -508,8 +556,10 @@ export class AgentController {
       terminalState: this.stateMachine.state,
       durationMs,
       budgets: finalHarnessRun.budget,
+      planVersion: this.planVersion,
       steps: this.steps,
       modelTurns: this.modelTurns,
+      recovery: this.recoveryManager.getTelemetry(),
       telemetry: {
         totalModelTurns: this.modelTurns.length,
         fastTurns: this.fastTurnsCount,
@@ -518,7 +568,8 @@ export class AgentController {
         totalTokens: this.totalTokens,
         cost: this.totalCost,
         consecutiveFailures: this.consecutiveFailures,
-        totalFailures: this.totalFailures
+        totalFailures: this.totalFailures,
+        recovery: this.recoveryManager.getTelemetry()
       }
     };
 
@@ -529,7 +580,50 @@ export class AgentController {
   }
 
   /**
-   * Executes a validated tool proposal through RuntimeAgentHarness.
+   * Performs fresh non-mutating recovery observation primitive based on recovery action.
+   *
+   * @param {string} action - From RECOVERY_ACTIONS
+   * @param {Object} proposal - Failed tool proposal
+   * @returns {Promise<void>}
+   */
+  async _executeRecoveryAction(action, proposal) {
+    const runId = this._ensureHarnessRun();
+    try {
+      if (action === RECOVERY_ACTIONS.REDISCOVER_CONTEXTS) {
+        const res = await this.runtimeHarness.executeToolProposal(runId, {
+          tool: 'browser.inspectContexts',
+          arguments: {}
+        });
+        const contexts = res.evidence?.observed?.contexts || res.data?.contexts;
+        if (Array.isArray(contexts) && this.latestObservation) {
+          this.latestObservation.contexts = contexts;
+        }
+      } else if (action === RECOVERY_ACTIONS.WAIT_FOR_STABLE) {
+        await this.runtimeHarness.executeToolProposal(runId, {
+          tool: 'browser.waitForStable',
+          arguments: { timeoutMs: 1500 }
+        });
+      } else if (action === RECOVERY_ACTIONS.SWITCH_PAGE) {
+        const pagesRes = await this.runtimeHarness.executeToolProposal(runId, {
+          tool: 'browser.listPages',
+          arguments: {}
+        });
+        const pages = pagesRes.evidence?.observed?.pages || pagesRes.data?.pages || [];
+        const validOther = pages.find(p => p.pageId !== this.browserManager?.activePageId && !p.closed);
+        if (validOther) {
+          await this.runtimeHarness.executeToolProposal(runId, {
+            tool: 'browser.switchPage',
+            arguments: { pageId: validOther.pageId }
+          });
+        }
+      }
+    } catch {
+      // Recovery observation attempt recorded; fresh observation fetch will handle current state
+    }
+  }
+
+  /**
+   * Executes a validated tool proposal through RuntimeAgentHarness with deterministic recovery.
    *
    * @param {Object} proposal
    */
@@ -537,6 +631,20 @@ export class AgentController {
     const runId = this._ensureHarnessRun();
     this.stateMachine.transitionTo(AGENT_RUN_STATES.EXECUTING);
     const stepStart = Date.now();
+
+    // Anti-replay guard: Prohibit repeating uncertain mutations or R3 consequential retries
+    const isMut = isMutation(proposal.tool);
+    if (isMut && this.lastMutationOutcome === MUTATION_OUTCOMES.OUTCOME_UNCERTAIN) {
+      const isConsequential = proposal.tool === 'browser.submitForm' || this.lastMutationProposal?.tool === 'browser.submitForm';
+      const targetState = isConsequential
+        ? AGENT_RUN_STATES.CONSEQUENTIAL_OUTCOME_UNCERTAIN
+        : AGENT_RUN_STATES.MUTATION_OUTCOME_UNCERTAIN;
+      this.stateMachine.transitionTo(targetState, 'Autonomous retry prohibited when previous mutation outcome is uncertain.');
+      throw new RuntimeHarnessError(
+        'Mutation outcome is uncertain; autonomous retry prohibited.',
+        targetState
+      );
+    }
 
     const activeSnapshot = this.latestObservation?.snapshotToken || this.browserManager?.snapshotToken;
     const proposalToSend = {
@@ -548,17 +656,24 @@ export class AgentController {
       proposalToSend.arguments.expectedSnapshotToken = activeSnapshot;
     }
 
-    try {
-      const result = await this.runtimeHarness.executeToolProposal(runId, proposalToSend);
+    let result = null;
+    let executionError = null;
 
+    try {
+      result = await this.runtimeHarness.executeToolProposal(runId, proposalToSend);
+    } catch (err) {
+      executionError = err;
+    }
+
+    if (!executionError && result) {
       const stepRecord = {
         index: this.steps.length + 1,
         tool: proposal.tool,
         arguments: proposal.arguments || {},
         contextId: proposal.contextId || null,
         risk: result.evidence?.risk || result.risk || 'R0',
-        executed: Boolean(result.evidence?.executed || result.status === 'READY'),
-        verified: Boolean(result.evidence?.verified),
+        executed: Boolean(result.evidence?.executed || result.status === 'READY' || result.success),
+        verified: result.evidence?.verified !== undefined ? Boolean(result.evidence.verified) : Boolean(result.success),
         latencyMs: Date.now() - stepStart,
         evidence: result.evidence || null,
         status: result.status
@@ -574,68 +689,199 @@ export class AgentController {
         return;
       }
 
-      // Success -> reset consecutive failures
-      this.consecutiveFailures = 0;
+      // Check for verification failure on executed mutation
+      if (stepRecord.executed && stepRecord.verified === false && isMut) {
+        executionError = new RuntimeHarnessError(
+          'Action executed but expected verification condition was not observed.',
+          'VERIFICATION_FAILED'
+        );
+      } else {
+        // Success -> reset failures and mutation tracking
+        this.consecutiveFailures = 0;
+        this.lastMutationFailed = false;
+        this.lastMutationProposal = null;
+        this.lastMutationOutcome = isMut ? MUTATION_OUTCOMES.EFFECT_VERIFIED : null;
+        this.recoveryHint = null;
 
-      // Update observation
-      this.stateMachine.transitionTo(AGENT_RUN_STATES.VERIFYING);
-      await this._fetchBrowserObservation({ contextId: proposal.contextId });
+        // Update observation
+        this.stateMachine.transitionTo(AGENT_RUN_STATES.VERIFYING);
+        await this._fetchBrowserObservation({ contextId: proposal.contextId });
 
-      if (this.latestObservation) {
-        this.latestObservation.lastResult = stepRecord;
-        const discovered = result.evidence?.observed?.contexts || result.data?.contexts;
-        if (Array.isArray(discovered) && discovered.length > 0) {
-          this.latestObservation.contexts = discovered;
+        if (this.latestObservation) {
+          this.latestObservation.lastResult = stepRecord;
+          const discovered = result.evidence?.observed?.contexts || result.data?.contexts;
+          if (Array.isArray(discovered) && discovered.length > 0) {
+            this.latestObservation.contexts = discovered;
+          }
+          const discoveredPages = result.evidence?.observed?.pages || result.data?.pages;
+          if (Array.isArray(discoveredPages) && discoveredPages.length > 0) {
+            this.latestObservation.pages = discoveredPages;
+          }
+          if (result.evidence?.observed?.closedShadowRootDetected || result.data?.closedShadowRootDetected) {
+            this.latestObservation.closedShadowRootDetected = true;
+          }
         }
-        if (result.evidence?.observed?.closedShadowRootDetected || result.data?.closedShadowRootDetected) {
-          this.latestObservation.closedShadowRootDetected = true;
-        }
+
+        this.stateMachine.transitionTo(AGENT_RUN_STATES.OBSERVING);
+        return;
       }
-
-      this.stateMachine.transitionTo(AGENT_RUN_STATES.OBSERVING);
-    } catch (err) {
-      this.consecutiveFailures++;
-      this.totalFailures++;
-
-      const stepRecord = {
-        index: this.steps.length + 1,
-        tool: proposal.tool,
-        arguments: proposal.arguments || {},
-        contextId: proposal.contextId || null,
-        risk: 'R0',
-        executed: false,
-        verified: false,
-        latencyMs: Date.now() - stepStart,
-        errorCode: err.code || 'UNKNOWN_ERROR',
-        errorMessage: err.message,
-        refusalCode: err.code
-      };
-      this.steps.push(stepRecord);
-
-      if (this.latestObservation) {
-        this.latestObservation.lastResult = stepRecord;
-      }
-
-      if (err.code === ERROR_CODES.HUMAN_HANDOFF_ACTIVE) {
-        this.stateMachine.transitionTo(AGENT_RUN_STATES.NEEDS_HUMAN_AUTH, err.message);
-        throw err;
-      }
-
-      if (err.code === ERROR_CODES.CLOSED_SHADOW_ROOT_UNSUPPORTED || err.code === ERROR_CODES.BLOCKED_BY_POLICY) {
-        this.stateMachine.transitionTo(AGENT_RUN_STATES.BLOCKED_BY_POLICY, err.message);
-        throw err;
-      }
-
-      if (err.code === ERROR_CODES.BUDGET_EXCEEDED) {
-        this.stateMachine.transitionTo(AGENT_RUN_STATES.BUDGET_EXCEEDED, err.message);
-        throw err;
-      }
-
-      // Stale snapshot or ordinary failure -> allow agent to recover
-      this.stateMachine.transitionTo(AGENT_RUN_STATES.REPLANNING, err.message);
-      await this._fetchBrowserObservation({ contextId: proposal.contextId });
-      this.stateMachine.transitionTo(AGENT_RUN_STATES.OBSERVING);
     }
+
+    // Handle failure and deterministic recovery
+    const err = executionError;
+    this.consecutiveFailures++;
+    this.totalFailures++;
+
+    const managedPagesCount = this.browserManager?.pages?.size || 1;
+    const classification = classifyFailure(err, {
+      tool: proposal.tool,
+      risk: proposal.risk || (proposal.tool === 'browser.submitForm' ? 'R3' : 'R1'),
+      arguments: proposal.arguments,
+      managedPagesCount
+    });
+
+    const mutationOutcome = classifyMutationOutcome({
+      tool: proposal.tool,
+      risk: proposal.risk || (proposal.tool === 'browser.submitForm' ? 'R3' : 'R1'),
+      executed: Boolean(result?.evidence?.executed),
+      verified: Boolean(result?.evidence?.verified),
+      error: err,
+      rawResult: result?.evidence
+    });
+
+    this.lastMutationOutcome = mutationOutcome;
+    this.recoveryManager.setMutationOutcome(mutationOutcome);
+
+    if (isMut) {
+      this.lastMutationFailed = true;
+      this.lastMutationProposal = proposal;
+    }
+
+    const stepRecord = {
+      index: this.steps.length + 1,
+      tool: proposal.tool,
+      arguments: proposal.arguments || {},
+      contextId: proposal.contextId || null,
+      risk: proposal.tool === 'browser.submitForm' ? 'R3' : 'R1',
+      executed: Boolean(result?.evidence?.executed),
+      verified: false,
+      latencyMs: Date.now() - stepStart,
+      errorCode: err.code || 'UNKNOWN_ERROR',
+      errorMessage: err.message,
+      refusalCode: err.code,
+      failureClass: classification.failureClass,
+      mutationOutcome
+    };
+    this.steps.push(stepRecord);
+
+    if (this.latestObservation) {
+      this.latestObservation.lastResult = stepRecord;
+    }
+
+    // 1. Non-recoverable security and policy gates
+    if (classification.failureClass === FAILURE_CLASSES.AUTH_REQUIRED || err.code === ERROR_CODES.HUMAN_HANDOFF_ACTIVE) {
+      if (!this.stateMachine.isTerminal) {
+        this.stateMachine.transitionTo(AGENT_RUN_STATES.NEEDS_HUMAN_AUTH, err.message);
+      }
+      throw err;
+    }
+
+    if (
+      classification.failureClass === FAILURE_CLASSES.CLOSED_SHADOW_UNSUPPORTED ||
+      err.code === ERROR_CODES.CLOSED_SHADOW_ROOT_UNSUPPORTED ||
+      classification.failureClass === FAILURE_CLASSES.POLICY_BLOCKED ||
+      err.code === ERROR_CODES.BLOCKED_BY_POLICY
+    ) {
+      if (!this.stateMachine.isTerminal) {
+        this.stateMachine.transitionTo(AGENT_RUN_STATES.BLOCKED_BY_POLICY, err.message);
+      }
+      throw err;
+    }
+
+    if (classification.failureClass === FAILURE_CLASSES.BUDGET_EXCEEDED || err.code === ERROR_CODES.BUDGET_EXCEEDED) {
+      if (!this.stateMachine.isTerminal) {
+        this.stateMachine.transitionTo(AGENT_RUN_STATES.BUDGET_EXCEEDED, err.message);
+      }
+      throw err;
+    }
+
+    // 2. Consequential action or uncertain mutation outcome
+    if (
+      classification.failureClass === FAILURE_CLASSES.CONSEQUENTIAL_OUTCOME_UNCERTAIN ||
+      (proposal.tool === 'browser.submitForm' && mutationOutcome === MUTATION_OUTCOMES.OUTCOME_UNCERTAIN)
+    ) {
+      if (!this.stateMachine.isTerminal) {
+        this.stateMachine.transitionTo(AGENT_RUN_STATES.CONSEQUENTIAL_OUTCOME_UNCERTAIN, err.message);
+      }
+      throw new RuntimeHarnessError(
+        'Consequential action outcome is uncertain. Replay and automated retry are strictly prohibited.',
+        AGENT_RUN_STATES.CONSEQUENTIAL_OUTCOME_UNCERTAIN
+      );
+    }
+
+    if (mutationOutcome === MUTATION_OUTCOMES.OUTCOME_UNCERTAIN) {
+      if (!this.stateMachine.isTerminal) {
+        this.stateMachine.transitionTo(AGENT_RUN_STATES.MUTATION_OUTCOME_UNCERTAIN, err.message);
+      }
+      throw new RuntimeHarnessError(
+        'Mutation outcome is uncertain; autonomous retry prohibited.',
+        AGENT_RUN_STATES.MUTATION_OUTCOME_UNCERTAIN
+      );
+    }
+
+    // 3. Loop detection via privacy-preserving fingerprint
+    const activeMilestone = this.plan?.milestones?.find(m => m.status === 'in_progress');
+    const fingerprint = computeFailureFingerprint({
+      failureClass: classification.failureClass,
+      tool: proposal.tool,
+      pageId: this.latestObservation?.pageId || '',
+      contextId: proposal.contextId || '',
+      target: proposal.arguments?.target,
+      milestoneId: activeMilestone?.id || ''
+    });
+
+    const recoveryDecision = this.recoveryManager.canRecover(classification, fingerprint);
+
+    if (!recoveryDecision.canRecover) {
+      const isExhausted = this.recoveryManager.loopExhausted || /exhausted|reached|loop/i.test(recoveryDecision.reason || '');
+      const terminalState = isExhausted
+        ? AGENT_RUN_STATES.RECOVERY_EXHAUSTED
+        : AGENT_RUN_STATES.FAILED;
+      if (!this.stateMachine.isTerminal) {
+        this.stateMachine.transitionTo(terminalState, recoveryDecision.reason || err.message);
+      }
+      const finalErr = new RuntimeHarnessError(recoveryDecision.reason || err.message, terminalState);
+      throw finalErr;
+    }
+
+    // 4. Record recovery cycle and enter RECOVERING
+    this.recoveryManager.recordFailure(classification, fingerprint);
+    this.stateMachine.transitionTo(AGENT_RUN_STATES.RECOVERING, classification.failureClass);
+
+    // Provide sanitized advisory recovery hint to model
+    this.recoveryHint = getRecoveryHint(classification.failureClass, classification.action);
+    this.planVersion++;
+
+    // Execute non-mutating recovery observation
+    await this._executeRecoveryAction(classification.action, proposal);
+
+    // Determine target context after rediscovery if applicable
+    let targetContextId = proposal.contextId;
+    if (classification.action === RECOVERY_ACTIONS.REDISCOVER_CONTEXTS) {
+      targetContextId = undefined;
+      if (this.latestObservation?.contexts?.length > 0) {
+        const validSubcontext = this.latestObservation.contexts.find(c => c.type === 'iframe' || c.type === 'main');
+        if (validSubcontext) targetContextId = validSubcontext.contextId;
+      }
+    }
+
+    // Fetch fresh observation (fresh snapshotToken, fresh elements)
+    await this._fetchBrowserObservation({ contextId: targetContextId });
+
+    // Transition to REPLANNING then back to OBSERVING for next model turn
+    this.stateMachine.transitionTo(AGENT_RUN_STATES.REPLANNING);
+    this.recoveryManager.recordReplan();
+    this.stateMachine.transitionTo(AGENT_RUN_STATES.OBSERVING);
   }
 
   /**
@@ -692,12 +938,31 @@ export class AgentController {
   async approvePendingAction(pendingActionId) {
     const runId = this._ensureHarnessRun();
     let result = null;
+    let executionErr = null;
     if (this.runtimeHarness && typeof this.runtimeHarness.approvePendingAction === 'function') {
-      result = await this.runtimeHarness.approvePendingAction(runId, pendingActionId);
+      try {
+        result = await this.runtimeHarness.approvePendingAction(runId, pendingActionId);
+      } catch (err) {
+        executionErr = err;
+      }
     }
 
     this.activePendingAction = null;
     this.paused = false;
+
+    if (executionErr) {
+      const code = executionErr.code || '';
+      if (code === AGENT_RUN_STATES.CONSEQUENTIAL_OUTCOME_UNCERTAIN || code === 'CONSEQUENTIAL_OUTCOME_UNCERTAIN' || /consequential.*uncertain/i.test(executionErr.message)) {
+        if (!this.stateMachine.isTerminal) {
+          this.stateMachine.transitionTo(AGENT_RUN_STATES.CONSEQUENTIAL_OUTCOME_UNCERTAIN, executionErr.message);
+        }
+        return { success: false, terminalState: AGENT_RUN_STATES.CONSEQUENTIAL_OUTCOME_UNCERTAIN };
+      }
+      if (!this.stateMachine.isTerminal) {
+        this.stateMachine.transitionTo(AGENT_RUN_STATES.FAILED, executionErr.message);
+      }
+      throw executionErr;
+    }
 
     // After approval and execution, resume controller state
     this.stateMachine.transitionTo(AGENT_RUN_STATES.EXECUTING);

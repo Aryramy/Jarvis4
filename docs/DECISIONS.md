@@ -1356,3 +1356,42 @@
   - Browser verification suite expanded to 155/155 PASS on real Microsoft Edge.
   - Eval harness self-test remains at 27/27 PASS.
   - Live autonomous eval suite achieves 11/12 PASS (91.7% functional rate, 100% hard safety gates).
+
+## Decision 41 — Bounded Recovery & Self-Healing Browser Agent v1 (BRICK-041)
+- **Status**: Accepted (BRICK-041 VERIFIED, Checkpoint: GREEN-041)
+- **Context**:
+  - In Brick 40, the autonomous browser agent was verified across 12 Golden Tasks with runtime governance.
+  - However, in dynamic web applications, transient DOM issues (stale snapshots after re-rendering, detached iframe contexts, delayed elements, tab/page state shifts, unverified safe mutations) frequently occur.
+  - Brick 41 implements bounded self-healing and recovery: evidence-first recovery without blind retries or expanding autonomous authority.
+  - Hard safety invariant: The model must NEVER decide if a failure is recoverable, runtime policy must NEVER automatically replay mutating actions, and consequential actions or uncertain outcomes must halt safely without confirmation token reuse.
+- **Decision**:
+  1. **Deterministic Recovery Policy (`src/agent/autonomous/recoveryPolicy.js`)**:
+     - Runtime policy determines failure classification, recoverability, and authorized recovery actions.
+     - Model outputs or caller parameters attempting to override recovery budgets (`recoveryBudget`, `maxRetries`, `retryCount`, `maxRecoveryCycles`) are strictly stripped and rejected.
+  2. **Deterministic Failure Taxonomy & Recoverability Engine**:
+     - Standard taxonomy: `TARGET_STALE`, `TARGET_NOT_FOUND`, `SNAPSHOT_STALE`, `CONTEXT_STALE`, `CONTEXT_DETACHED`, `PAGE_CHANGED`, `PAGE_CLOSED`, `PAGE_NOT_ACTIVE`, `WAIT_TIMEOUT`, `DOM_CHANGED`, `VERIFICATION_FAILED`, `NAVIGATION_FAILED`, `AGENT_OUTPUT_INVALID`, `TOOL_FAILURE`, `AUTH_REQUIRED`, `CONFIRMATION_REQUIRED`, `POLICY_BLOCKED`, `BUDGET_EXCEEDED`, `CLOSED_SHADOW_UNSUPPORTED`, `MUTATION_OUTCOME_UNCERTAIN`.
+     - Non-recoverable categories (`POLICY_BLOCKED`, `BUDGET_EXCEEDED`, `CLOSED_SHADOW_UNSUPPORTED`, `AUTH_REQUIRED`, `CONFIRMATION_REQUIRED`, `MUTATION_OUTCOME_UNCERTAIN`) immediately halt or pause at safe boundaries without recovery attempts.
+  3. **Strict Prohibition of Automatic Mutation Replay**:
+     - Runtime code strictly prohibits automatic replay of mutating actions (`click`, `fill`, `check`, `uncheck`, `select`, `fillForm`, `uploadFile`, `downloadFile`, `submitForm`) upon failure.
+     - Recovery requires fresh non-mutating observation (`inspectPage`, `inspectContexts`, `listPages`) and a fresh model proposal.
+  4. **Mutation Outcome Classification & Consequential Safety**:
+     - Explicit outcomes: `EFFECT_VERIFIED`, `NO_EFFECT_VERIFIED`, `OUTCOME_UNCERTAIN`.
+     - Consequential (R3) mutations with uncertain outcomes safely halt in `CONSEQUENTIAL_OUTCOME_UNCERTAIN`; confirmation tokens are single-use and cannot be replayed or reused.
+  5. **Separate Deterministic Recovery Budgets**:
+     - Defaults: `maxRecoveryCycles = 2`, `maxReplans = 2`, `maxSameFailureOccurrences = 2`, `maxContextRediscoveries = 2`, `maxRecoveryWaits = 2`.
+     - Recovery operations consume standard execution budgets (tool calls, model turns, runtime ms).
+  6. **Privacy-Preserving Same-Failure Loop Detection**:
+     - Hashes `failureClass`, `tool`, `pageId`, `contextId`, `semanticTarget`, and `milestone` without including page text or secrets.
+     - Repeating failures beyond `maxSameFailureOccurrences` cleanly halt execution in `RECOVERY_EXHAUSTED`.
+  7. **State Machine Extensions (`agentState.js`)**:
+     - Added formal states `RECOVERING`, `RECOVERY_EXHAUSTED`, `MUTATION_OUTCOME_UNCERTAIN`, `CONSEQUENTIAL_OUTCOME_UNCERTAIN`.
+  8. **Dedicated Recovery Evaluation Benchmark Suite (R01–R08)**:
+     - Implemented `tests/eval/recovery-tasks/` (R01-R08) and `scripts/verify-eval-recovery.mjs` (`npm run eval:recovery`).
+     - Verified across 8 real Microsoft Edge recovery scenarios: 8/8 PASS (100% pass rate, 100% compliance with hard recovery gates).
+- **Consequences**:
+  - Resilient, bounded, evidence-first recovery capability established for autonomous browser agent.
+  - Offline test baseline expanded from 1778 to 1811 tests across 295 suites (`npm run verify`).
+  - Real browser baseline expanded from 155 to 162 tests across 33 categories (`npm run verify:browser`).
+  - Zero regression on existing Golden Tasks (12/12 PASS) and Security Cases (7/7 PASS) (`npm run eval:harness`).
+  - Zero regression on live autonomous agent Golden Tasks (12/12 PASS) (`npm run eval:agent`).
+  - 8/8 Recovery Tasks PASS on real Microsoft Edge (`npm run eval:recovery`).

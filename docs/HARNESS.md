@@ -251,8 +251,10 @@ All other mechanics—including form mechanics, state transitions, token invalid
 | **Development context builder** | `PLANNED` | Automated preparation of minimal, token-efficient context for coding agents. |
 | **Automatic skill selection** | `PLANNED` | Agent skill dynamic loading based on task classification. |
 | **Bounded self-repair loop** | `PLANNED` | Bounded iteration loop allowing coding agents to fix failures deterministically. |
-| **Independent eval harness** | `PLANNED` | Benchmark harness for autonomous decision scoring, safety, and trajectory evals. |
-| **Runtime tool governance** | `FOUNDATION ACTIVE / NOT YET CONNECTED TO LLM` | Preflight gate, schema validation, R0-R4 risk categorization, execution budgets, human confirmation gate, and secret-free audit trails (PRE-040A; zero LLM connection). |
+| **Independent eval harness** | `ACTIVE` | Benchmark harness for autonomous decision scoring, safety, and trajectory evals (PRE-040C, BRICK-040, BRICK-041). |
+| **Runtime tool governance** | `ACTIVE` | Preflight gate, schema validation, R0-R4 risk categorization, execution budgets, human confirmation gate, and secret-free audit trails governed under autonomous controller. |
+| **Autonomous browser agent** | `V1 ACTIVE / FIXTURE-ONLY` | Multi-step hybrid planner with runtime governance and loopback fixtures only (BRICK-040). |
+| **Recovery & self-healing** | `V1 BOUNDED / FIXTURE-ONLY / VERIFIED` | Deterministic taxonomy, non-mutating fresh observations, anti-replay guards, safe loop detection (BRICK-041). |
 | **Parallel worktree agents** | `PLANNED` | Git worktree isolation allowing concurrent development and verification runs. |
 
 *(Note: Planned features are documented for architectural alignment and must not be treated as implemented).*
@@ -355,6 +357,20 @@ All other mechanics—including form mechanics, state transitions, token invalid
   - Critical Truthfulness: Reports strictly as "Eval Harness self-test: 12/12 reference golden tasks PASS" (`autonomousAgent = false`, `adapter = 'SCRIPTED_REFERENCE'`). Exactly 0 LLM calls, 0 OpenRouter calls, 0 external network requests, $0 cost. Autonomous agent remains NOT IMPLEMENTED.
 
 ---
+
+
+- **BRICK-040**:
+  - Verified autonomous browser agent with hybrid short-plan execution through `RuntimeAgentHarness`.
+  - Real Microsoft Edge execution of 12 Golden Tasks with 100% hard safety gates.
+  - Added `npm run eval:agent` runner.
+- **BRICK-041**:
+  - Extended Level 2 real-browser harness from 155 to 162 tests across 33 categories (`scripts/verify-browser.mjs`).
+  - Added Category 33 (Deterministic Recovery & Self-Healing Mechanics) covering 7 real Microsoft Edge recovery test scenarios (tests 155-161 plus renumbered cleanup test 162).
+  - Verified stale target recovery via fresh snapshot, detached iframe recovery via context rediscovery, delayed dynamic targets via bounded wait, multi-page inventory switching, safe non-consequential retry prevention, and repeated failure loop exhaustion in `RECOVERY_EXHAUSTED`.
+  - Extended Level 1 offline test harness from 1778 to 1811 tests across 295 suites (`npm run verify`).
+  - Implemented Brick-041 Recovery Evaluation Suite (`tests/eval/recovery-tasks/`, `scripts/verify-eval-recovery.mjs`, `npm run eval:recovery`).
+  - Verified 8/8 Recovery Tasks (R01–R08) on real Microsoft Edge with 100% hard recovery gates.
+  - Zero regression on existing Golden Tasks (12/12 PASS), Security Eval Cases (7/7 PASS), and Autonomous Golden Tasks (12/12 PASS).
 
 ## 8. Contract Principle
 

@@ -26,14 +26,18 @@ export function buildSystemPrompt() {
     '3. You must execute ONE tool proposal at a time. Batch proposals are strictly prohibited.',
     '4. When taking actions on elements (click, fill, select, extract, download), you MUST provide the fresh "expectedSnapshotToken" from the latest page observation.',
     '   If a snapshot is stale, observe the page again to obtain a fresh snapshot token before proposing the action.',
-    '5. Consequential form submissions (browser.submitForm) require human operator confirmation.',
+    '5. Failures are evidence of dynamic page state, not permission to blind retry.',
+    '   Never automatically replay failed or uncertain mutations. Re-observe page state before replanning.',
+    '6. Consequential form submissions (browser.submitForm) require human operator confirmation.',
     '   The harness will automatically pause in WAITING_USER_CONFIRMATION. Never attempt to self-confirm.',
-    '6. Authentication barriers (login, password, MFA, CAPTCHA) require human handoff.',
+    '7. Authentication barriers (login, password, MFA, CAPTCHA) require human handoff.',
     '   Never automate passwords or OTPs. When an authentication barrier is detected, output decision: "NEEDS_HUMAN_AUTH".',
-    '7. When interacting inside iframes or shadow roots, discover contexts with browser.inspectContexts and provide the explicit "contextId".',
-    '8. Stop immediately and output decision: "COMPLETE" when the task goal has been achieved.',
-    '   Do not invent success if evidence is missing.',
-    '9. Output strictly valid JSON matching the requested schema. No conversational prose or markdown chatter.'
+    '8. When interacting inside iframes or shadow roots, discover contexts with browser.inspectContexts and provide the explicit "contextId".',
+    '9. Closed shadow roots are inaccessible (CLOSED_SHADOW_ROOT_UNSUPPORTED). Choose CANNOT_PROCEED if requested task targets a closed shadow root.',
+    '10. Stop immediately and output decision: "COMPLETE" when the task goal has been achieved.',
+    '    Do not invent success if evidence is missing.',
+    '11. When switching tabs, list open pages with browser.listPages and pass the target tab pageId to browser.switchPage (not the currently active pageId).',
+    '12. Output strictly valid JSON matching the requested schema. No conversational prose or markdown chatter.'
   ].join('\n');
 }
 
@@ -54,8 +58,21 @@ export function compactObservation(obs = {}) {
   parts.push(`PAGE: "${title}" (${url}) [pageId: ${pageId}]`);
   parts.push(`SNAPSHOT TOKEN: ${snapshotToken}`);
 
+  if (obs.planVersion && obs.planVersion > 1) {
+    parts.push(`PLAN REVISION: Version ${obs.planVersion}`);
+  }
+
   if (obs.contextId && obs.contextId !== 'ctx_main_1') {
     parts.push(`CONTEXT ID: ${obs.contextId}`);
+  }
+
+  // Recovery Advisory Hint
+  if (obs.recoveryHint) {
+    parts.push(`RECOVERY ADVISORY HINT: ${obs.recoveryHint}`);
+  }
+
+  if (obs.mutationOutcome) {
+    parts.push(`MUTATION OUTCOME: ${obs.mutationOutcome}`);
   }
 
   // Last action result / evidence
@@ -68,6 +85,13 @@ export function compactObservation(obs = {}) {
     if (lr.refusalCode) {
       parts.push(`REFUSAL CODE: ${lr.refusalCode}`);
     }
+  }
+
+  // Open pages inventory summary (for multi-page / tab recovery)
+  const pages = obs.pages || obs.lastResult?.evidence?.observed?.pages || [];
+  if (Array.isArray(pages) && pages.length > 0) {
+    const pageSummaries = pages.map(p => `pageId: "${p.pageId}" (active: ${p.active ? 'YES' : 'NO'}, title: "${p.title || ''}", url: "${p.url || ''}")`);
+    parts.push(`OPEN PAGES:\n${pageSummaries.join('\n')}`);
   }
 
   // Visible text summary (truncated and wrapped as untrusted data)

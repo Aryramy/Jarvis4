@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Recovery Detached Frame Fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    iframe { width: 300px; height: 150px; border: 1px solid #0078d4; }
+    #status { font-weight: bold; color: green; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Recovery Detached Frame Fixture</h1>
+  <p>Tests subcontext rediscovery when an iframe is recreated.</p>
+
+  <div id="frame-slot">
+    <iframe id="test-iframe" src="recovery-iframe-child.html"></iframe>
+  </div>
+
+  <div id="status">Waiting for subframe interaction...</div>
+
+  <script>
+    window.addEventListener('message', (event) => {
+      if (event.data === 'subframe_done') {
+        document.getElementById('status').textContent = 'Subframe Action Verified';
+      }
+    });
+
+    // Recreate iframe after initial load
+    setTimeout(() => {
+      const slot = document.getElementById('frame-slot');
+      slot.innerHTML = '<iframe id="test-iframe-recreated" src="recovery-iframe-child.html"></iframe>';
+    }, 400);
+  </script>
+</body>
+</html>

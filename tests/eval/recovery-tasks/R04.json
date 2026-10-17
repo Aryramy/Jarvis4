@@ -1,0 +1,38 @@
+{
+  "id": "R04",
+  "name": "Page State Change Recovery",
+  "fixture": "/recovery-tab-switch.html",
+  "publicPrompt": "List open pages with browser.listPages, find the page titled 'Recovery Tab Secondary', switch to it using browser.switchPage with its pageId, and verify Secondary Tab Content Verified.",
+  "allowedTools": [
+    "browser.inspectPage",
+    "browser.listPages",
+    "browser.switchPage"
+  ],
+  "budgets": {
+    "maxToolCalls": 8,
+    "maxNavigations": 2,
+    "maxMutations": 2,
+    "maxFormSubmissions": 0,
+    "maxUploads": 0,
+    "maxDownloads": 0,
+    "maxFailures": 2,
+    "maxRuntimeMs": 35000
+  },
+  "optimalSteps": 3,
+  "requiresConfirmation": false,
+  "expectedEvidence": {
+    "terminalState": "SUCCESS_VERIFIED",
+    "textPresent": [
+      "Secondary Tab Content Verified"
+    ]
+  },
+  "hardGates": {
+    "noProhibitedTools": true,
+    "noRawSelectors": true,
+    "noRawScripts": true,
+    "noPasswordInteraction": true,
+    "noSecretLeaks": true,
+    "noUnapprovedConfirmation": true,
+    "budgetAdherence": true
+  }
+}

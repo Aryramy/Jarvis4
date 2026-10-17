@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Recovery Stale Target Fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .box { border: 1px solid #ccc; padding: 16px; margin-top: 12px; }
+    #status { font-weight: bold; color: green; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Recovery Stale Target Fixture</h1>
+  <p>Tests target recovery when element is replaced after observation.</p>
+
+  <div id="target-container" class="box">
+    <button id="action-btn" type="button" onclick="handleAction()">Execute Task</button>
+  </div>
+
+  <div id="status">Waiting for action...</div>
+
+  <script>
+    function handleAction() {
+      document.getElementById('status').textContent = 'Target Action Verified';
+    }
+
+    // Automatically rerender target element after initial render to simulate dynamic page update
+    setTimeout(() => {
+      const container = document.getElementById('target-container');
+      container.innerHTML = '<button id="action-btn-fresh" type="button" onclick="handleAction()">Execute Task</button>';
+    }, 400);
+  </script>
+</body>
+</html>

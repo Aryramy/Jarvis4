@@ -24,7 +24,13 @@ const DISALLOWED_ARGUMENT_KEYS = new Set([
   'confirmed',
   'bypass',
   'isSafe',
-  'budgetOverride'
+  'budgetOverride',
+  'recoveryBudget',
+  'maxRecoveryCycles',
+  'maxRetries',
+  'retryCount',
+  'resetBudget',
+  'extendTimeout'
 ]);
 
 /**

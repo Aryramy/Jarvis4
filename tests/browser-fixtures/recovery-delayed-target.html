@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Recovery Delayed Target Fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    #status { font-weight: bold; color: green; margin-top: 10px; }
+    .spinner { color: #888; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h1>Recovery Delayed Target Fixture</h1>
+  <p>Tests bounded wait recovery when an element appears dynamically.</p>
+
+  <div id="dynamic-slot">
+    <div id="loading" class="spinner">Loading dynamic components...</div>
+  </div>
+
+  <div id="status">Waiting for target...</div>
+
+  <script>
+    let ticks = 0;
+    const interval = setInterval(() => {
+      ticks++;
+      const loading = document.getElementById('loading');
+      if (loading) loading.textContent = 'Loading dynamic components... (' + ticks + ')';
+      if (ticks >= 3) {
+        clearInterval(interval);
+        const slot = document.getElementById('dynamic-slot');
+        slot.innerHTML = '<button id="delayed-btn" type="button" onclick="handleDelayed()">Proceed to Next Step</button>';
+      }
+    }, 100);
+
+    function handleDelayed() {
+      document.getElementById('status').textContent = 'Delayed Action Verified';
+    }
+  </script>
+</body>
+</html>

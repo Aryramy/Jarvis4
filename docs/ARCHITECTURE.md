@@ -228,3 +228,33 @@ Architectural Principles:
 4. **Strict Schema Validation & Sanitization**: LLM output is strictly validated against JSON schema. Unredacted secrets and raw selectors/code are blocked.
 5. **Bounded Routing & Timeouts**: Routing defaults to `FAST` profile (`deepseek-v4-flash-0731`) with `reasoning: { effort: 'none' }` to eliminate reasoning token blowup and clamp latency to ~800ms per turn. Each model call is bounded by `Math.min(10000, remainingBudgetMs)` with zero infinite retry.
 6. **Evaluator Isolation**: The agent interacts solely with public task data via `AutonomousAgentAdapter`. Hidden criteria and expected evidence are completely isolated.
+
+---
+
+## 9. Bounded Recovery & Self-Healing Browser Agent Architecture (BRICK-041)
+
+```text
+FAILURE
+   ↓
+DETERMINISTIC CLASSIFICATION
+   ↓
+FRESH NON-MUTATING OBSERVATION
+   ↓
+UPDATED PAGE / CONTEXT / SNAPSHOT
+   ↓
+BOUNDED REPLAN
+   ↓
+NEW TOOL PROPOSAL
+```
+
+Architectural Principles:
+1. **Deterministic Recovery Policy vs. Model Decisiveness**: Runtime/controller policy exclusively determines failure taxonomy, recoverability, and permitted recovery operations (`recoveryPolicy.js`). The model NEVER decides whether a failure is recoverable or allowed to retry.
+2. **Strict Prohibition of Automatic Mutation Replay**: Runtime code NEVER automatically replays mutating actions (`click`, `fill`, `check`, `uncheck`, `select`, `fillForm`, `uploadFile`, `downloadFile`, `submitForm`) after failure. Mutation recovery requires fresh non-mutating observation followed by an entirely new model proposal.
+3. **Explicit Mutation Outcome Classification**:
+   - `EFFECT_VERIFIED`: Evidence confirms the action succeeded. Do not repeat.
+   - `NO_EFFECT_VERIFIED`: Evidence confirms the action did not occur. A fresh proposal may be permitted after observation.
+   - `OUTCOME_UNCERTAIN`: Outcome cannot be verified safely. Halts in `MUTATION_OUTCOME_UNCERTAIN` without auto-retry.
+4. **Consequential Retry & Confirmation Replay Hard Protection**: R3 consequential actions with uncertain execution halt safely in `CONSEQUENTIAL_OUTCOME_UNCERTAIN`. Zero confirmation replay, zero token reuse, and zero model self-approval.
+5. **Separate Deterministic Recovery Budgets**: Clamped limits (`maxRecoveryCycles = 2`, `maxReplans = 2`, `maxSameFailureOccurrences = 2`, `maxContextRediscoveries = 2`, `maxRecoveryWaits = 2`). All recovery operations consume standard execution budgets (tool calls, model turns, runtime ms); no hidden recovery channels. Model cannot override or expand budgets.
+6. **Privacy-Preserving Same-Failure Loop Detection**: Safe fingerprinting hashes `failureClass`, `tool`, `pageId`, `contextId`, `semanticTarget`, and `milestone` (redacting all page text, secrets, and raw attributes). If identical failure patterns exceed threshold, execution halts in `RECOVERY_EXHAUSTED`.
+7. **Semantic Re-Grounding & Context Renewal**: Target rediscovery uses semantic role and accessible identifiers. Detached iframes require explicit context rediscovery (`listContexts`) to obtain a fresh `contextId`. Stale snapshots require fresh `inspectPage` to obtain a fresh `snapshotToken`. Arbitrary CSS/XPath/JS guessing is prohibited.

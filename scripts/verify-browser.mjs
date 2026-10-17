@@ -3300,8 +3300,347 @@ async function main() {
       assert.equal(controller.stateMachine.state, AGENT_RUN_STATES.CANCELLED);
     });
 
-    // 155. Real browser cleanup succeeds
-    await runTest(155, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
+    // ==================================================
+    // 33. BOUNDED RECOVERY & SELF-HEALING AGENT (BRICK-041)
+    // ==================================================
+
+    // 155. Stale target rerender triggers fresh observation and recovery on real Edge
+    await runTest(155, 'Stale Target Rerender Triggers Fresh Observation & Recovery on Real Edge', 'Bounded Recovery & Self-Healing Agent (Brick 41)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/recovery-stale-target.html`, { allowLoopbackTest: true });
+
+      // First inspect page to get initial snapshot
+      const initialInsp = await bm.inspectPage();
+      const initialSnapshot = initialInsp.snapshotToken;
+
+      // Wait 500ms for fixture to rerender target into #action-btn-fresh
+      await new Promise(r => setTimeout(r, 500));
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Click Execute Task',
+          milestones: [{ id: 'm1', description: 'click action button', status: 'pending' }]
+        },
+        // Turn 1: Propose click using stale snapshot token from before rerender
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.click',
+            expectedSnapshotToken: initialSnapshot,
+            arguments: {
+              target: { kind: 'button', text: 'Execute Task' },
+              expectedSnapshotToken: initialSnapshot
+            }
+          }
+        },
+        // Turn 2: After recovery provides fresh observation, click using fresh element
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.click',
+            arguments: {
+              target: { kind: 'button', text: 'Execute Task' }
+            }
+          }
+        },
+        // Turn 3: Complete
+        {
+          decision: 'COMPLETE',
+          completionClaim: 'Target action executed and verified'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: { publicPrompt: 'Click Execute Task button', allowedTools: ['browser.inspectPage', 'browser.click'] },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.SUCCESS_VERIFIED);
+      assert.ok(controller.recoveryManager.recoveryCycles >= 1);
+      assert.ok(controller.planVersion >= 2);
+    });
+
+    // 156. Detached iframe subcontext triggers context rediscovery on real Edge
+    await runTest(156, 'Detached Iframe Subcontext Triggers Context Rediscovery on Real Edge', 'Bounded Recovery & Self-Healing Agent (Brick 41)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/recovery-detached-iframe.html`, { allowLoopbackTest: true });
+
+      // Wait 500ms for fixture to detach and recreate iframe
+      await new Promise(r => setTimeout(r, 500));
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Inspect subcontext',
+          milestones: [{ id: 'm1', description: 'inspect subframe', status: 'pending' }]
+        },
+        // Turn 1: Propose tool with detached/invalid contextId
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.inspectPage',
+            contextId: 'ctx_detached_stale',
+            arguments: {}
+          }
+        },
+        // Turn 2: Fresh inspection primitive after rediscovery
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.inspectContexts',
+            arguments: {}
+          }
+        },
+        // Turn 3: Complete
+        {
+          decision: 'COMPLETE',
+          completionClaim: 'Subframe context recovered'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: { publicPrompt: 'Inspect subcontext', allowedTools: ['browser.inspectPage', 'browser.inspectContexts'] },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.SUCCESS_VERIFIED);
+      assert.ok(controller.recoveryManager.recoveryCycles >= 1);
+    });
+
+    // 157. Delayed dynamic target triggers bounded wait & recovery on real Edge
+    await runTest(157, 'Delayed Dynamic Target Triggers Bounded Wait & Recovery on Real Edge', 'Bounded Recovery & Self-Healing Agent (Brick 41)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/recovery-delayed-target.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Click Delayed Button',
+          milestones: [{ id: 'm1', description: 'click Proceed to Next Step', status: 'pending' }]
+        },
+        // Turn 1: Wait for stability
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.waitForStable',
+            arguments: { timeoutMs: 1500 }
+          }
+        },
+        // Turn 2: Click delayed button once available
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.click',
+            arguments: { target: { kind: 'button', text: 'Proceed to Next Step' } }
+          }
+        },
+        // Turn 3: Complete
+        {
+          decision: 'COMPLETE',
+          completionClaim: 'Delayed action verified'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: { publicPrompt: 'Wait and click Proceed to Next Step', allowedTools: ['browser.inspectPage', 'browser.waitForStable', 'browser.click'] },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.SUCCESS_VERIFIED);
+      const statusText = await bm.page.textContent('#status');
+      assert.equal(statusText.trim(), 'Delayed Action Verified');
+    });
+
+    // 158. Managed page state change triggers explicit verified tab switch on real Edge
+    await runTest(158, 'Managed Page State Change Triggers Explicit Tab Switch on Real Edge', 'Bounded Recovery & Self-Healing Agent (Brick 41)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/recovery-tab-switch.html`, { allowLoopbackTest: true });
+      const p1Id = bm.activePageId;
+
+      // Open secondary tab
+      const page2 = await bm.openPage(`${fixtureServer.baseUrl}/recovery-tab-secondary.html`, { allowLoopbackTest: true });
+      await bm.switchPage(p1Id);
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Switch to secondary tab',
+          milestones: [{ id: 'm1', description: 'inspect pages and switch', status: 'pending' }]
+        },
+        // Turn 1: List open pages
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.listPages',
+            arguments: {}
+          }
+        },
+        // Turn 2: Switch to secondary page
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.switchPage',
+            arguments: { pageId: page2.pageId }
+          }
+        },
+        // Turn 3: Complete
+        {
+          decision: 'COMPLETE',
+          completionClaim: 'Secondary tab verified'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: { publicPrompt: 'Switch tab and verify', allowedTools: ['browser.inspectPage', 'browser.listPages', 'browser.switchPage'] },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.SUCCESS_VERIFIED);
+
+      // Clean up extra page
+      try { await bm.closePage(page2.pageId); } catch {}
+    });
+
+    // 159. Verified no-effect mutation prompts new proposal on real Edge
+    await runTest(159, 'Verified No-Effect Mutation Prompts New Proposal on Real Edge', 'Bounded Recovery & Self-Healing Agent (Brick 41)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/recovery-no-effect.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Activate toggle',
+          milestones: [{ id: 'm1', description: 'activate toggle', status: 'pending' }]
+        },
+        // Turn 1: Propose clicking active verified toggle
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.click',
+            arguments: { target: { kind: 'button', text: 'Active Verified Toggle' } }
+          }
+        },
+        // Turn 2: Complete
+        {
+          decision: 'COMPLETE',
+          completionClaim: 'Active toggle verified'
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: { publicPrompt: 'Activate toggle', allowedTools: ['browser.inspectPage', 'browser.click'] },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.SUCCESS_VERIFIED);
+      const statusText = await bm.page.textContent('#status');
+      assert.equal(statusText.trim(), 'Active Toggle Verified');
+    });
+
+    // 160. Uncertain mutation safely halts without autonomous retry on real Edge
+    await runTest(160, 'Uncertain Mutation Safely Halts Without Autonomous Retry on Real Edge', 'Bounded Recovery & Self-Healing Agent (Brick 41)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/recovery-uncertain-mutation.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Trigger mutation',
+          milestones: [{ id: 'm1', description: 'attempt mutation', status: 'pending' }]
+        },
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.click',
+            arguments: { target: { kind: 'button', text: 'Trigger Indeterminate Mutation' } }
+          }
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      // Inject simulated uncertain mutation outcome on next tool execution
+      const origExec = harness.executeToolProposal.bind(harness);
+      harness.executeToolProposal = async (runId, proposal) => {
+        if (proposal.tool === 'browser.click') {
+          const err = new Error('Socket reset by peer during DOM mutation');
+          err.code = 'MUTATION_OUTCOME_UNCERTAIN';
+          throw err;
+        }
+        return origExec(runId, proposal);
+      };
+
+      const controller = new AgentController({
+        task: { publicPrompt: 'Uncertain test', allowedTools: ['browser.inspectPage', 'browser.click'] },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.MUTATION_OUTCOME_UNCERTAIN);
+    });
+
+    // 161. Repeated identical failure halts agent in RECOVERY_EXHAUSTED on real Edge
+    await runTest(161, 'Repeated Identical Failure Halts Agent in RECOVERY_EXHAUSTED on Real Edge', 'Bounded Recovery & Self-Healing Agent (Brick 41)', async () => {
+      await bm.navigate(`${fixtureServer.baseUrl}/static.html`, { allowLoopbackTest: true });
+
+      const mockRouter = new DeterministicMockRouter([
+        {
+          goal: 'Repeated failing proposal',
+          milestones: [{ id: 'm1', description: 'fail repeatedly', status: 'pending' }]
+        },
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.click',
+            arguments: { target: { kind: 'button', text: 'Nonexistent Element' } }
+          }
+        },
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.click',
+            arguments: { target: { kind: 'button', text: 'Nonexistent Element' } }
+          }
+        },
+        {
+          decision: 'TOOL',
+          toolProposal: {
+            tool: 'browser.click',
+            arguments: { target: { kind: 'button', text: 'Nonexistent Element' } }
+          }
+        }
+      ]);
+
+      const harness = new RuntimeAgentHarness({ browserManager: bm });
+      const controller = new AgentController({
+        task: {
+          publicPrompt: 'Loop exhaustion test',
+          allowedTools: ['browser.inspectPage', 'browser.click'],
+          budgets: { maxConsecutiveFailures: 5, maxFailures: 5 }
+        },
+        browserManager: bm,
+        runtimeHarness: harness,
+        routingGate: mockRouter,
+        recoveryBudget: { maxSameFailureOccurrences: 2, maxRecoveryCycles: 3 }
+      });
+
+      const res = await controller.run();
+      assert.equal(res.terminalState, AGENT_RUN_STATES.RECOVERY_EXHAUSTED);
+      assert.equal(controller.recoveryManager.loopExhausted, true);
+    });
+
+    // 162. Real browser cleanup succeeds
+    await runTest(162, 'Real Browser Cleanup Succeeds', 'Cleanup', async () => {
       await bm.close();
       assert.equal(bm.isBrowserConnected(), false);
       assert.equal(bm.pageCount, 0);
@@ -3374,6 +3713,7 @@ async function main() {
     'Complex UI Contexts (Brick 39)',
     'Runtime Agent Harness Governance (PRE-040A)',
     'Autonomous Browser Agent v1 (Brick 40)',
+    'Bounded Recovery & Self-Healing Agent (Brick 41)',
     'Cleanup'
   ];
 
@@ -3391,10 +3731,10 @@ async function main() {
 
   console.log('--------------------------------------------------');
   console.log(`Tests:\n${passed}/${total} PASS\n`);
-  console.log(`Exit Code:\n${passed === total && total >= 135 ? 0 : 1}`);
+  console.log(`Exit Code:\n${passed === total && total >= 160 ? 0 : 1}`);
   console.log('==================================================');
 
-  if (passed !== total || total < 135) {
+  if (passed !== total || total < 160) {
     process.exit(1);
   }
 }

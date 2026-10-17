@@ -146,6 +146,17 @@ export class EvalRunner {
               browserManager.cancelHandoff(browserManager.activePageId);
             }
           } catch {}
+          try {
+            while (browserManager.pageCount > 1) {
+              const pages = await browserManager.listPages();
+              const toClose = pages.find(p => !p.active) || pages[pages.length - 1];
+              if (toClose && browserManager.pageCount > 1) {
+                await browserManager.closePage(toClose.pageId);
+              } else {
+                break;
+              }
+            }
+          } catch {}
 
           // 2. Navigate to task fixture
           const targetUrl = `${fixtureServer.baseUrl}${task.fixture}`;

@@ -42,6 +42,10 @@ export function loadTaskById(taskId, options = {}) {
   }
 
   const cleanId = taskId.trim();
+  if (!/^[A-Za-z0-9_-]{2,32}$/.test(cleanId)) {
+    throw new EvalTaskError(`Invalid taskId "${cleanId}". Must be alphanumeric identifier (2-32 chars).`, EVAL_ERROR_CODES.EVAL_TASK_INVALID, { taskId: cleanId });
+  }
+
   const tasksDir = getTasksDirectory(options.tasksDir);
   const cacheKey = `${tasksDir}:${cleanId}`;
 
@@ -49,9 +53,14 @@ export function loadTaskById(taskId, options = {}) {
     return taskCache.get(cacheKey);
   }
 
-  const filePath = path.join(tasksDir, `${cleanId}.json`);
+  let filePath = path.join(tasksDir, `${cleanId}.json`);
   if (!fs.existsSync(filePath)) {
-    throw new EvalTaskError(`Eval task file "${cleanId}.json" not found in "${tasksDir}".`, EVAL_ERROR_CODES.EVAL_TASK_INVALID, { taskId: cleanId, filePath });
+    const recoveryPath = path.resolve(__dirname, '../../../tests/eval/recovery-tasks', `${cleanId}.json`);
+    if (fs.existsSync(recoveryPath)) {
+      filePath = recoveryPath;
+    } else {
+      throw new EvalTaskError(`Eval task file "${cleanId}.json" not found in "${tasksDir}".`, EVAL_ERROR_CODES.EVAL_TASK_INVALID, { taskId: cleanId, filePath });
+    }
   }
 
   let rawJson;
@@ -94,6 +103,17 @@ export function loadAllTasks(options = {}) {
   }
 
   return tasks;
+}
+
+/**
+ * Loads all recovery benchmark tasks (R01-R08).
+ *
+ * @param {Object} [options={}]
+ * @returns {Array<Object>} Sorted list of validated recovery tasks
+ */
+export function loadRecoveryTasks(options = {}) {
+  const recoveryDir = path.resolve(__dirname, '../../../tests/eval/recovery-tasks');
+  return loadAllTasks({ ...options, tasksDir: recoveryDir });
 }
 
 /**

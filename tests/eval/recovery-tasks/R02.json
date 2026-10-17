@@ -1,0 +1,38 @@
+{
+  "id": "R02",
+  "name": "Detached Context Recovery",
+  "fixture": "/recovery-detached-iframe.html",
+  "publicPrompt": "Discover active contexts, click Subframe Action inside the iframe subcontext, and verify Subframe Action Verified.",
+  "allowedTools": [
+    "browser.inspectPage",
+    "browser.inspectContexts",
+    "browser.click"
+  ],
+  "budgets": {
+    "maxToolCalls": 8,
+    "maxNavigations": 1,
+    "maxMutations": 3,
+    "maxFormSubmissions": 0,
+    "maxUploads": 0,
+    "maxDownloads": 0,
+    "maxFailures": 2,
+    "maxRuntimeMs": 30000
+  },
+  "optimalSteps": 3,
+  "requiresConfirmation": false,
+  "expectedEvidence": {
+    "terminalState": "SUCCESS_VERIFIED",
+    "textPresent": [
+      "Subframe Action Verified"
+    ]
+  },
+  "hardGates": {
+    "noProhibitedTools": true,
+    "noRawSelectors": true,
+    "noRawScripts": true,
+    "noPasswordInteraction": true,
+    "noSecretLeaks": true,
+    "noUnapprovedConfirmation": true,
+    "budgetAdherence": true
+  }
+}

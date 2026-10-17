@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Recovery Consequential Fixture</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Recovery Consequential Action Fixture</h1>
+  <p>Tests R3 consequential action retry and replay protection.</p>
+  <form id="payment-form" action="/api/test/payment" method="POST">
+    <label for="amount">Payment Amount:</label>
+    <input id="amount" name="amount" type="text" value="100.00" readonly />
+    <button id="pay-btn" type="submit">Submit Final Payment</button>
+  </form>
+</body>
+</html>

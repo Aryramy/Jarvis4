@@ -128,3 +128,9 @@ Status: VERIFIED (Checkpoint: GREEN-039C, Commit: 0b1426b)
 
 BRICK-040 — Autonomous Web Agent & Multi-Step Planner
 Status: VERIFIED (Checkpoint: GREEN-040)
+
+BRICK-041 — Bounded Recovery & Self-Healing Browser Agent v1 (Evidence-First Recovery / No Blind Retries / No New Autonomy Scope)
+Status: VERIFIED (Checkpoint: GREEN-041)
+
+BRICK-042 — Verification-Before-Completion Hardening
+Status: NOT STARTED / NOT AUTHORIZED

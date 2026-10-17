@@ -20,6 +20,7 @@ export {
 export {
   loadTaskById,
   loadAllTasks,
+  loadRecoveryTasks,
   getPublicTask,
   clearTaskCache,
   getTasksDirectory
